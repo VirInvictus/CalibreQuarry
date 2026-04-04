@@ -13,10 +13,12 @@ Modes:
   --series        List all series with book counts and gap detection
   --export        Export full library to JSON or CSV for external tools
   --wings         List all defined virtual library wings
+  --version       Show version and exit
 
 Usage examples:
   python getBooks.py --catalog --db ~/Calibre/metadata.db
   python getBooks.py --wing "The Tabletop" --db ~/Calibre/metadata.db --primary-only
+  python getBooks.py --catalog --db ~/Calibre/metadata.db --show-tags
   python getBooks.py --all-wings --db ~/Calibre/metadata.db --outdir ~/docs/catalogs
   python getBooks.py --stats --db ~/Calibre/metadata.db
   python getBooks.py --audit --db ~/Calibre/metadata.db --output audit.csv
@@ -41,14 +43,15 @@ import os
 import re
 import sqlite3
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # =====================================
 # Constants
 # =====================================
+
+VERSION = "1.0.3"
 
 DEFAULT_DB_PATHS = [
     "metadata.db",
@@ -73,6 +76,8 @@ class CalibreDB:
         self.conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         self.conn.row_factory = sqlite3.Row
         self._vl_cache: Optional[Dict[str, str]] = None
+        self._books_cache: Optional[List[Dict[str, Any]]] = None
+        self._all_ids_cache: Optional[Set[int]] = None
 
     def close(self):
         self.conn.close()
@@ -86,7 +91,9 @@ class CalibreDB:
     # --- Core queries ---
 
     def get_all_books(self) -> List[Dict[str, Any]]:
-        """Fetch all books with full metadata via joins."""
+        """Fetch all books with full metadata via joins. Results are cached."""
+        if self._books_cache is not None:
+            return self._books_cache
         cur = self.conn.cursor()
         cur.execute("""
             SELECT
@@ -117,7 +124,8 @@ class CalibreDB:
             GROUP BY b.id
             ORDER BY b.author_sort, b.sort
         """)
-        return [dict(row) for row in cur.fetchall()]
+        self._books_cache = [dict(row) for row in cur.fetchall()]
+        return self._books_cache
 
     def get_identifiers(self, book_id: int) -> Dict[str, str]:
         cur = self.conn.cursor()
@@ -159,6 +167,10 @@ class CalibreDB:
         return self._vl_cache
 
     def count_books(self) -> int:
+        if self._all_ids_cache is not None:
+            return len(self._all_ids_cache)
+        if self._books_cache is not None:
+            return len(self._books_cache)
         cur = self.conn.cursor()
         cur.execute("SELECT COUNT(*) as c FROM books")
         return cur.fetchone()['c']
@@ -214,7 +226,7 @@ class CalibreDB:
                 name, i = self._read_value(expr, i)
                 tokens.append(f"vl:{name}")
             elif expr[i:i + 2].lower() == 'or':
-                if i + 2 >= len(expr) or not expr[i + 2].isalnum():
+                if i + 2 >= len(expr) or not (expr[i + 2].isalnum() or expr[i + 2] == '_'):
                     tokens.append('OR')
                     i += 2
                 else:
@@ -222,14 +234,14 @@ class CalibreDB:
                     word, i = self._read_word(expr, i)
                     tokens.append(word)
             elif expr[i:i + 3].lower() == 'and':
-                if i + 3 >= len(expr) or not expr[i + 3].isalnum():
+                if i + 3 >= len(expr) or not (expr[i + 3].isalnum() or expr[i + 3] == '_'):
                     tokens.append('AND')
                     i += 3
                 else:
                     word, i = self._read_word(expr, i)
                     tokens.append(word)
             elif expr[i:i + 3].lower() == 'not':
-                if i + 3 >= len(expr) or not expr[i + 3].isalnum():
+                if i + 3 >= len(expr) or not (expr[i + 3].isalnum() or expr[i + 3] == '_'):
                     tokens.append('NOT')
                     i += 3
                 else:
@@ -245,8 +257,11 @@ class CalibreDB:
     def _read_value(expr: str, i: int) -> Tuple[str, int]:
         """Read a quoted or unquoted value from position i."""
         if i < len(expr) and expr[i] == '"':
-            # Quoted
-            end = expr.index('"', i + 1)
+            # Quoted — find closing quote, or treat rest of string as value
+            try:
+                end = expr.index('"', i + 1)
+            except ValueError:
+                return expr[i + 1:], len(expr)
             return expr[i + 1:end], end + 1
         # Unquoted — read until space or paren
         start = i
@@ -277,13 +292,18 @@ class CalibreDB:
             result = result & right
         return result
 
+    def _get_all_book_ids(self) -> Set[int]:
+        """Return all book IDs, cached."""
+        if self._all_ids_cache is None:
+            self._all_ids_cache = {row['id'] for row in
+                                   self.conn.execute("SELECT id FROM books").fetchall()}
+        return self._all_ids_cache
+
     def _parse_not(self, tokens: List[str], seen: Set[str]) -> Set[int]:
         if tokens and tokens[0] == 'NOT':
             tokens.pop(0)
             operand = self._parse_atom(tokens, seen)
-            all_ids = {row['id'] for row in
-                       self.conn.execute("SELECT id FROM books").fetchall()}
-            return all_ids - operand
+            return self._get_all_book_ids() - operand
         return self._parse_atom(tokens, seen)
 
     def _parse_atom(self, tokens: List[str], seen: Set[str]) -> Set[int]:
@@ -319,9 +339,11 @@ class CalibreDB:
         """Match books whose tags match a pattern.
 
         Supports:
-          tags:Foo         — books with any tag containing 'Foo'
-          tags:\"Foo.Bar\"   — books with any tag containing 'Foo.Bar'
+          tags:Foo         — books with tag 'Foo' or any tag prefixed by 'Foo.'
+          tags:\"Foo.Bar\"   — books with tag 'Foo.Bar' or prefixed by 'Foo.Bar.'
           tags:\"=Foo\"      — books with exactly the tag 'Foo'
+
+        Note: regex patterns (tags:~regex) are not supported and will match nothing.
         """
         exact = False
         if pattern.startswith('='):
@@ -364,6 +386,7 @@ def calibre_rating_to_stars(rating: Optional[int]) -> Optional[float]:
 def format_stars(rating: Optional[float]) -> str:
     if rating is None:
         return ""
+    rating = max(0.0, min(5.0, rating))
     full = int(rating)
     half = rating - full >= 0.5
     empty = 5 - full - (1 if half else 0)
@@ -388,9 +411,9 @@ def author_sort_key(author_sort: Optional[str]) -> str:
     return (author_sort or "").lower()
 
 
-def detect_series_gaps(indices_str: str, max_index: float) -> List[int]:
+def detect_series_gaps(indices_str: str, max_index: Optional[float]) -> List[int]:
     """Detect missing entries in a series based on index numbers."""
-    if not indices_str:
+    if not indices_str or max_index is None:
         return []
     indices = set()
     for s in indices_str.split(','):
@@ -429,6 +452,7 @@ def find_db(explicit: Optional[str]) -> str:
 
 def write_catalog(db: CalibreDB, output: str, *,
                   wing: Optional[str] = None, primary_only: bool = False,
+                  show_tags: bool = False, show_id: bool = False,
                   quiet: bool = False) -> None:
     """Write a formatted text catalog, optionally filtered to a virtual library."""
     books = db.get_all_books()
@@ -470,15 +494,21 @@ def write_catalog(db: CalibreDB, output: str, *,
                 current_author_key = key
 
             title = book['title'] or 'Unknown Title'
-            rating = calibre_rating_to_stars(book['rating'])
-            rating_str = format_stars(rating)
+
+            if show_tags:
+                # Show tags instead of rating
+                tag_list = [t.strip() for t in (book['tags'] or '').split(',') if t.strip()]
+                meta_str = f" [{', '.join(tag_list)}]" if tag_list else ""
+            else:
+                rating = calibre_rating_to_stars(book['rating'])
+                meta_str = format_stars(rating)
 
             series_str = ""
             if book['series']:
                 idx = book['series_index']
-                if idx and idx == int(idx):
+                if idx is not None and idx == int(idx):
                     series_str = f" ({book['series']} #{int(idx)})"
-                elif idx:
+                elif idx is not None:
                     series_str = f" ({book['series']} #{idx})"
                 else:
                     series_str = f" ({book['series']})"
@@ -486,7 +516,8 @@ def write_catalog(db: CalibreDB, output: str, *,
             formats = book['formats'] or ''
             fmt_str = f" [{formats}]" if formats else ""
 
-            f.write(f"  * {title}{series_str}{fmt_str}{rating_str}\n")
+            id_str = f"[{book['id']}] " if show_id else ""
+            f.write(f"  * {id_str}{title}{series_str}{fmt_str}{meta_str}\n")
             book_count += 1
 
         f.write(f"\n{'=' * 40}\n")
@@ -497,6 +528,7 @@ def write_catalog(db: CalibreDB, output: str, *,
 
 
 def write_all_wings(db: CalibreDB, outdir: str, *, primary_only: bool = False,
+                    show_tags: bool = False, show_id: bool = False,
                     quiet: bool = False) -> None:
     """Generate a catalog file for each virtual library wing."""
     vls = db.get_virtual_libraries()
@@ -511,7 +543,8 @@ def write_all_wings(db: CalibreDB, outdir: str, *, primary_only: bool = False,
         output = os.path.join(outdir, f"{safe_name}_Library.txt")
         if not quiet:
             print(f"→ {name}")
-        write_catalog(db, output, wing=name, primary_only=primary_only, quiet=True)
+        write_catalog(db, output, wing=name, primary_only=primary_only,
+                      show_tags=show_tags, show_id=show_id, quiet=True)
 
     if not quiet:
         print(f"\nAll wings written to: {outdir}")
@@ -526,7 +559,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     books = db.get_all_books()
     total = len(books)
 
-    print(f"=== Library Statistics ({total} books) ===\n")
+    if not quiet:
+        print(f"=== Library Statistics ({total} books) ===\n")
 
     # Format breakdown
     format_counts: Counter = Counter()
@@ -536,7 +570,7 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
                 format_counts[fmt.strip()] += 1
     print("Formats:")
     for fmt, count in format_counts.most_common():
-        bar = "█" * (count * 40 // total)
+        bar = "█" * (count * 40 // total) if total else ""
         print(f"  {fmt:6s} {count:5d}  {bar}")
 
     # Rating distribution
@@ -550,10 +584,12 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
             rated += 1
     for stars in sorted(rating_counts.keys()):
         count = rating_counts[stars]
-        bar = "█" * (count * 40 // max(rating_counts.values()))
+        max_count = max(rating_counts.values())
+        bar = "█" * (count * 40 // max_count) if max_count else ""
         print(f"  {'★' * int(stars):5s} ({stars:.1f})  {count:5d}  {bar}")
     unrated = total - rated
-    print(f"  Unrated:       {unrated:5d}  ({unrated * 100 / total:.1f}%)")
+    pct = f"{unrated * 100 / total:.1f}%" if total else "N/A"
+    print(f"  Unrated:       {unrated:5d}  ({pct})")
 
     # Tag taxonomy
     tags = db.get_all_tags()
@@ -589,7 +625,7 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
             for lang in b['languages'].split(','):
                 lang_counts[lang.strip()] += 1
     if len(lang_counts) > 1:
-        print(f"\nLanguages:")
+        print("\nLanguages:")
         for lang, count in lang_counts.most_common():
             print(f"  {lang}: {count}")
 
@@ -599,12 +635,13 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
         print(f"\nMissing covers: {no_cover}")
 
     # Recently added
-    print("\nMost recently added:")
-    by_date = sorted(books, key=lambda b: b['timestamp'] or '', reverse=True)
-    for b in by_date[:5]:
-        date = (b['timestamp'] or '')[:10]
-        author = normalize_author_display(b['authors'], primary_only=True)
-        print(f"  [{date}] {author} — {b['title']}")
+    if not quiet:
+        print("\nMost recently added:")
+        by_date = sorted(books, key=lambda b: b['timestamp'] or '', reverse=True)
+        for b in by_date[:5]:
+            date = (b['timestamp'] or '')[:10]
+            author = normalize_author_display(b['authors'], primary_only=True)
+            print(f"  [{date}] {author} — {b['title']}")
 
 
 # =====================================
@@ -698,7 +735,8 @@ def show_recent(db: CalibreDB, count: int = 20, *, quiet: bool = False) -> None:
     books = db.get_all_books()
     by_date = sorted(books, key=lambda b: b['timestamp'] or '', reverse=True)
 
-    print(f"=== {count} Most Recently Added ===\n")
+    if not quiet:
+        print(f"=== {count} Most Recently Added ===\n")
     for b in by_date[:count]:
         date = (b['timestamp'] or '')[:10]
         author = normalize_author_display(b['authors'], primary_only=True)
@@ -709,7 +747,7 @@ def show_recent(db: CalibreDB, count: int = 20, *, quiet: bool = False) -> None:
         series_str = ""
         if b['series']:
             idx = b['series_index']
-            if idx and idx == int(idx):
+            if idx is not None and idx == int(idx):
                 series_str = f" [{b['series']} #{int(idx)}]"
             else:
                 series_str = f" [{b['series']}]"
@@ -725,18 +763,23 @@ def show_series(db: CalibreDB, *, quiet: bool = False) -> None:
     """List all series with gap detection."""
     all_series = db.get_all_series()
 
-    print(f"=== Series ({len(all_series)} total) ===\n")
+    if not quiet:
+        print(f"=== Series ({len(all_series)} total) ===\n")
 
     for s in sorted(all_series, key=lambda x: x['name'].lower()):
         gaps = detect_series_gaps(s['indices'], s['max_index'])
         gap_str = f"  ⚠ missing: {', '.join(str(g) for g in gaps)}" if gaps else ""
         count = s['book_count']
-        max_idx = int(s['max_index']) if s['max_index'] == int(s['max_index']) else s['max_index']
+        raw_max = s['max_index']
+        if raw_max is not None and raw_max == int(raw_max):
+            max_idx = int(raw_max)
+        else:
+            max_idx = raw_max
 
         # Show completeness
         if gaps:
             status = "incomplete"
-        elif count == int(s['max_index']):
+        elif raw_max is not None and count == int(raw_max):
             status = "complete"
         else:
             status = ""
@@ -763,15 +806,15 @@ def run_export(db: CalibreDB, output: str, fmt: str = "json", *,
             export_data.append({
                 "id": b['id'],
                 "title": b['title'],
-                "authors": b['authors'].split(',') if b['authors'] else [],
+                "authors": [a.strip() for a in b['authors'].split(',')] if b['authors'] else [],
                 "author_sort": b['author_sort'],
-                "tags": b['tags'].split(',') if b['tags'] else [],
+                "tags": [t.strip() for t in b['tags'].split(',')] if b['tags'] else [],
                 "series": b['series'],
                 "series_index": b['series_index'],
-                "formats": b['formats'].split(',') if b['formats'] else [],
+                "formats": [f.strip() for f in b['formats'].split(',')] if b['formats'] else [],
                 "rating": stars,
                 "publisher": b['publisher'],
-                "languages": b['languages'].split(',') if b['languages'] else [],
+                "languages": [l.strip() for l in b['languages'].split(',')] if b['languages'] else [],
                 "added": (b['timestamp'] or '')[:10],
                 "has_cover": bool(b['has_cover']),
             })
@@ -796,9 +839,9 @@ def run_export(db: CalibreDB, output: str, fmt: str = "json", *,
                     "author_sort": b['author_sort'] or '',
                     "tags": b['tags'] or '',
                     "series": b['series'] or '',
-                    "series_index": b['series_index'] or '',
+                    "series_index": b['series_index'] if b['series_index'] is not None else '',
                     "formats": b['formats'] or '',
-                    "rating": stars or '',
+                    "rating": stars if stars is not None else '',
                     "publisher": b['publisher'] or '',
                     "languages": b['languages'] or '',
                     "added": (b['timestamp'] or '')[:10],
@@ -828,7 +871,7 @@ def show_wings(db: CalibreDB) -> None:
         try:
             ids = db.resolve_vl(name)
             print(f"  {name}: {len(ids)} books")
-        except Exception as e:
+        except ValueError as e:
             print(f"  {name}: (error resolving: {e})")
 
     print(f"\n  Total library: {db.count_books()} books")
@@ -840,8 +883,10 @@ def show_wings(db: CalibreDB) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
+        prog="getBooks.py",
         description="Calibre library toolkit: catalog, stats, audit, export"
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     group = p.add_mutually_exclusive_group()
     group.add_argument("--catalog", action="store_true",
@@ -872,14 +917,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Export format (default: json)")
     p.add_argument("--primary-only", dest="primary_only", action="store_true",
                    help="Use only the first author (useful for TTRPG collections)")
+    p.add_argument("--show-tags", dest="show_tags", action="store_true",
+                   help="Show tags instead of ratings in catalog output")
+    p.add_argument("--show-id", dest="show_id", action="store_true",
+                   help="Prefix each book with its Calibre ID for scripting")
     p.add_argument("--quiet", action="store_true", help="Minimize output")
 
     return p
 
 
 def _prompt_str(label: str, default: Optional[str]) -> str:
+    display = default if default else ""
     try:
-        raw = input(f"{label} [{default}]: ").strip()
+        raw = input(f"{label} [{display}]: ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(130)
     return raw or (default or "")
@@ -904,7 +954,7 @@ def interactive_menu() -> int:
 
     with CalibreDB(db_path) as db:
         while True:
-            print("\n=== getBooks.py — Menu ===")
+            print(f"\n=== getBooks.py v{VERSION} — Menu ===")
             print("1) Build catalog (full or by wing)")
             print("2) Generate all wing catalogs")
             print("3) Library statistics")
@@ -923,13 +973,19 @@ def interactive_menu() -> int:
                 wing = _prompt_str("Wing name (blank for all)", "")
                 wing = wing if wing else None
                 primary = _prompt_str("Primary author only? (y/N)", "N").lower().startswith('y')
+                tags = _prompt_str("Show tags instead of ratings? (y/N)", "N").lower().startswith('y')
+                ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith('y')
                 output = _prompt_str("Output file", "catalog.txt")
-                write_catalog(db, output, wing=wing, primary_only=primary)
+                write_catalog(db, output, wing=wing, primary_only=primary,
+                              show_tags=tags, show_id=ids)
 
             elif choice in ("2", "all"):
                 outdir = _prompt_str("Output directory", "catalogs")
                 primary = _prompt_str("Primary author only? (y/N)", "N").lower().startswith('y')
-                write_all_wings(db, outdir, primary_only=primary)
+                tags = _prompt_str("Show tags instead of ratings? (y/N)", "N").lower().startswith('y')
+                ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith('y')
+                write_all_wings(db, outdir, primary_only=primary,
+                                show_tags=tags, show_id=ids)
 
             elif choice in ("3", "stats"):
                 show_stats(db)
@@ -968,19 +1024,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         return interactive_menu()
 
     try:
-        args = build_parser().parse_args(argv)
+        parser = build_parser()
+        args = parser.parse_args(argv)
         db_path = find_db(args.db)
 
         with CalibreDB(db_path) as db:
             if args.catalog:
                 output = args.output or "catalog.txt"
                 write_catalog(db, output, wing=args.wing,
-                              primary_only=args.primary_only, quiet=args.quiet)
+                              primary_only=args.primary_only,
+                              show_tags=args.show_tags, show_id=args.show_id,
+                              quiet=args.quiet)
                 return 0
 
             if args.all_wings:
                 outdir = args.outdir or "catalogs"
                 write_all_wings(db, outdir, primary_only=args.primary_only,
+                                show_tags=args.show_tags, show_id=args.show_id,
                                 quiet=args.quiet)
                 return 0
 
@@ -1015,13 +1075,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             if args.wing:
                 output = args.output or "catalog.txt"
                 write_catalog(db, output, wing=args.wing,
-                              primary_only=args.primary_only, quiet=args.quiet)
+                              primary_only=args.primary_only,
+                              show_tags=args.show_tags, show_id=args.show_id,
+                              quiet=args.quiet)
                 return 0
 
-            build_parser().print_help()
+            parser.print_help()
             return 2
 
-    except FileNotFoundError as e:
+    except (FileNotFoundError, PermissionError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
