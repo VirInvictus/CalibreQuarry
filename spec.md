@@ -72,6 +72,7 @@ directory and at `~/Calibre Library/metadata.db`.
 | Series | `--series` | All series with completeness and gap detection |
 | Export | `--export` | Full library to JSON or CSV |
 | Wings | `--wings` | List virtual libraries with book counts |
+| Interactive | (no args) | Launch the Curses TUI with scrollable output pager |
 
 ### 3.1 Modifiers
 

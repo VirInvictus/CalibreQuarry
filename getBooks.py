@@ -38,20 +38,29 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import os
 import re
 import sqlite3
 import sys
+import subprocess
 from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+try:
+    import curses
+    HAVE_CURSES = True
+except ImportError:
+    HAVE_CURSES = False
+
 
 # =====================================
 # Constants
 # =====================================
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 DEFAULT_DB_PATHS = [
     "metadata.db",
@@ -100,28 +109,20 @@ class CalibreDB:
                 b.id, b.title, b.sort as title_sort, b.author_sort,
                 b.timestamp, b.pubdate, b.has_cover, b.last_modified,
                 b.series_index,
-                GROUP_CONCAT(DISTINCT a.name) as authors,
-                GROUP_CONCAT(DISTINCT d.format) as formats,
-                GROUP_CONCAT(DISTINCT t.name) as tags,
+                (SELECT GROUP_CONCAT(name, ', ') FROM (SELECT a_inner.name as name FROM books_authors_link bal JOIN authors a_inner ON a_inner.id = bal.author WHERE bal.book = b.id ORDER BY bal.id)) as authors,
+                (SELECT GROUP_CONCAT(format, ', ') FROM data d WHERE d.book = b.id) as formats,
+                (SELECT GROUP_CONCAT(name, ', ') FROM (SELECT t_inner.name as name FROM books_tags_link btl JOIN tags t_inner ON t_inner.id = btl.tag WHERE btl.book = b.id ORDER BY t_inner.name)) as tags,
                 s.name as series,
                 r.rating,
                 p.name as publisher,
-                GROUP_CONCAT(DISTINCT l.lang_code) as languages
+                (SELECT GROUP_CONCAT(l.lang_code, ', ') FROM books_languages_link bll JOIN languages l ON l.id = bll.lang_code WHERE bll.book = b.id) as languages
             FROM books b
-            LEFT JOIN books_authors_link bal ON bal.book = b.id
-            LEFT JOIN authors a ON a.id = bal.author
-            LEFT JOIN data d ON d.book = b.id
-            LEFT JOIN books_tags_link btl ON btl.book = b.id
-            LEFT JOIN tags t ON t.id = btl.tag
             LEFT JOIN books_series_link bsl ON bsl.book = b.id
             LEFT JOIN series s ON s.id = bsl.series
             LEFT JOIN books_ratings_link brl ON brl.book = b.id
             LEFT JOIN ratings r ON r.id = brl.rating
             LEFT JOIN books_publishers_link bpl ON bpl.book = b.id
             LEFT JOIN publishers p ON p.id = bpl.publisher
-            LEFT JOIN books_languages_link bll ON bll.book = b.id
-            LEFT JOIN languages l ON l.id = bll.lang_code
-            GROUP BY b.id
             ORDER BY b.author_sort, b.sort
         """)
         self._books_cache = [dict(row) for row in cur.fetchall()]
@@ -286,8 +287,9 @@ class CalibreDB:
 
     def _parse_and(self, tokens: List[str], seen: Set[str]) -> Set[int]:
         result = self._parse_not(tokens, seen)
-        while tokens and tokens[0] == 'AND':
-            tokens.pop(0)
+        while tokens and tokens[0] not in ('OR', ')'):
+            if tokens[0] == 'AND':
+                tokens.pop(0)
             right = self._parse_not(tokens, seen)
             result = result & right
         return result
@@ -302,7 +304,7 @@ class CalibreDB:
     def _parse_not(self, tokens: List[str], seen: Set[str]) -> Set[int]:
         if tokens and tokens[0] == 'NOT':
             tokens.pop(0)
-            operand = self._parse_atom(tokens, seen)
+            operand = self._parse_not(tokens, seen)
             return self._get_all_book_ids() - operand
         return self._parse_atom(tokens, seen)
 
@@ -358,7 +360,7 @@ class CalibreDB:
             cur.execute("""
                 SELECT DISTINCT btl.book FROM books_tags_link btl
                 JOIN tags t ON t.id = btl.tag
-                WHERE t.name = ?
+                WHERE t.name = ? COLLATE NOCASE
             """, (pattern,))
         else:
             # Calibre's default: prefix match on hierarchical tags
@@ -366,7 +368,7 @@ class CalibreDB:
             cur.execute("""
                 SELECT DISTINCT btl.book FROM books_tags_link btl
                 JOIN tags t ON t.id = btl.tag
-                WHERE t.name = ? OR t.name LIKE ?
+                WHERE t.name = ? COLLATE NOCASE OR t.name LIKE ?
             """, (pattern, f"{pattern}.%"))
 
         return {row['book'] for row in cur.fetchall()}
@@ -407,8 +409,11 @@ def normalize_author_display(authors: Optional[str], primary_only: bool = False)
     return " & ".join(parts)
 
 
-def author_sort_key(author_sort: Optional[str]) -> str:
-    return (author_sort or "").lower()
+def author_sort_key(author_sort: Optional[str], primary_only: bool = False) -> str:
+    key = (author_sort or "").lower()
+    if primary_only:
+        key = key.split('&')[0].strip()
+    return key
 
 
 def detect_series_gaps(indices_str: str, max_index: Optional[float]) -> List[int]:
@@ -472,6 +477,9 @@ def write_catalog(db: CalibreDB, output: str, *,
             print("No books found.")
         return
 
+    # Sort books by the derived author_sort_key to ensure contiguous groups
+    books.sort(key=lambda b: (author_sort_key(b['author_sort'], primary_only), b['title_sort'] or ''))
+
     with open(output, 'w', encoding='utf-8') as f:
         header = f"Calibre Library Export — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         if wing:
@@ -484,7 +492,7 @@ def write_catalog(db: CalibreDB, output: str, *,
 
         for book in books:
             author_display = normalize_author_display(book['authors'], primary_only)
-            key = author_sort_key(book['author_sort'])
+            key = author_sort_key(book['author_sort'], primary_only)
 
             if key != current_author_key:
                 if current_author_key is not None:
@@ -749,6 +757,8 @@ def show_recent(db: CalibreDB, count: int = 20, *, quiet: bool = False) -> None:
             idx = b['series_index']
             if idx is not None and idx == int(idx):
                 series_str = f" [{b['series']} #{int(idx)}]"
+            elif idx is not None:
+                series_str = f" [{b['series']} #{idx}]"
             else:
                 series_str = f" [{b['series']}]"
 
@@ -926,13 +936,308 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+
+def _reset_terminal() -> None:
+    if not sys.stdin.isatty():
+        return
+    try:
+        subprocess.run(["stty", "sane"], stdin=sys.stdin, check=False)
+    except Exception:
+        pass
+
+# =====================================
+# Curses TUI
+# =====================================
+
+_CP_FRAME = 1
+_CP_TITLE = 2
+_CP_HEADER = 3
+_CP_ITEM = 4
+_CP_SELECTED = 5
+_CP_HINT = 6
+
+def _init_tui_colors() -> None:
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(_CP_FRAME, curses.COLOR_CYAN, -1)
+    curses.init_pair(_CP_TITLE, curses.COLOR_WHITE, -1)
+    curses.init_pair(_CP_HEADER, curses.COLOR_YELLOW, -1)
+    curses.init_pair(_CP_ITEM, curses.COLOR_WHITE, -1)
+    curses.init_pair(_CP_SELECTED, curses.COLOR_BLACK, curses.COLOR_CYAN)
+    curses.init_pair(_CP_HINT, curses.COLOR_WHITE, -1)
+
+_TUI_BOX_W = 46
+_TUI_INNER = _TUI_BOX_W - 2
+
+def _safe_addstr(stdscr, y: int, x: int, text: str, attr: int) -> None:
+    try:
+        stdscr.addstr(y, x, text, attr)
+    except curses.error:
+        pass
+
+def _tui_select(title: str, sections: list,
+                hints: str = "\u2191\u2193 Navigate  \u23ce Select  q Quit") -> Optional[tuple]:
+    BOX_W = _TUI_BOX_W
+    INNER = _TUI_INNER
+
+    flat: list[tuple[int, int]] = []
+    for si, (_, items) in enumerate(sections):
+        for ii in range(len(items)):
+            flat.append((si, ii))
+
+    def _draw(stdscr, cur: int) -> None:
+        stdscr.erase()
+        h, w = stdscr.getmaxyx()
+        bx = max(0, (w - BOX_W) // 2)
+        fa = curses.color_pair(_CP_FRAME)
+
+        box_h = 3
+        for si, (hdr, items) in enumerate(sections):
+            if si > 0: box_h += 1
+            if hdr: box_h += 1
+            box_h += len(items)
+        box_h += 1
+
+        y = max(0, (h - box_h - 2) // 2)
+
+        _safe_addstr(stdscr, y, bx, "\u2554" + "\u2550" * INNER + "\u2557", fa)
+        y += 1
+        _safe_addstr(stdscr, y, bx, "\u2551", fa)
+        _safe_addstr(stdscr, y, bx + 1, f" {title:^{INNER - 2}} ", curses.color_pair(_CP_TITLE) | curses.A_BOLD)
+        _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
+        y += 1
+        _safe_addstr(stdscr, y, bx, "\u2560" + "\u2550" * INNER + "\u2563", fa)
+        y += 1
+
+        idx = 0
+        for si, (hdr, items) in enumerate(sections):
+            if si > 0:
+                _safe_addstr(stdscr, y, bx, "\u255f" + "\u2500" * INNER + "\u2562", fa)
+                y += 1
+            if hdr:
+                content = f"  {hdr}" + " " * (INNER - len(hdr) - 2)
+                _safe_addstr(stdscr, y, bx, "\u2551", fa)
+                _safe_addstr(stdscr, y, bx + 1, content, curses.color_pair(_CP_HEADER) | curses.A_BOLD)
+                _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
+                y += 1
+            for ii, label in enumerate(items):
+                is_sel = idx == cur
+                if is_sel:
+                    text = f" \u25ba {label}"
+                    attr = curses.color_pair(_CP_SELECTED) | curses.A_BOLD
+                else:
+                    text = f"   {label}"
+                    attr = curses.color_pair(_CP_ITEM)
+                padded = text + " " * max(0, INNER - len(text))
+                _safe_addstr(stdscr, y, bx, "\u2551", fa)
+                _safe_addstr(stdscr, y, bx + 1, padded[:INNER], attr)
+                _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
+                y += 1
+                idx += 1
+
+        _safe_addstr(stdscr, y, bx, "\u255a" + "\u2550" * INNER + "\u255d", fa)
+        y += 2
+        hx = max(0, (w - len(hints)) // 2)
+        _safe_addstr(stdscr, y, hx, hints, curses.color_pair(_CP_HINT) | curses.A_DIM)
+        stdscr.refresh()
+
+    def _run(stdscr) -> Optional[tuple]:
+        _init_tui_colors()
+        curses.curs_set(0)
+        cur = 0
+        while True:
+            _draw(stdscr, cur)
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord('k')): cur = (cur - 1) % len(flat)
+            elif key in (curses.KEY_DOWN, ord('j')): cur = (cur + 1) % len(flat)
+            elif key in (curses.KEY_ENTER, 10, 13): return flat[cur]
+            elif key in (ord('q'), ord('Q'), 27): return None
+            elif key == curses.KEY_RESIZE: pass
+
+    try:
+        return curses.wrapper(_run)
+    except curses.error:
+        return None
+
+def _tui_prompt_str(label: str, default: Optional[str]) -> str:
+    BOX_W = _TUI_BOX_W
+    INNER = _TUI_INNER
+
+    def _run(stdscr) -> str:
+        _init_tui_colors()
+        curses.curs_set(1)
+        buf = list(default or "")
+        while True:
+            stdscr.erase()
+            h, w = stdscr.getmaxyx()
+            bx = max(0, (w - BOX_W) // 2)
+            fa = curses.color_pair(_CP_FRAME)
+            y = max(0, (h - 8) // 2)
+
+            _safe_addstr(stdscr, y, bx, "\u2554" + "\u2550" * INNER + "\u2557", fa)
+            y += 1
+            lbl = f"  {label}"
+            padded_lbl = lbl + " " * max(0, INNER - len(lbl))
+            _safe_addstr(stdscr, y, bx, "\u2551", fa)
+            _safe_addstr(stdscr, y, bx + 1, padded_lbl[:INNER], curses.color_pair(_CP_HEADER) | curses.A_BOLD)
+            _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
+            y += 1
+            _safe_addstr(stdscr, y, bx, "\u255f" + "\u2500" * INNER + "\u2562", fa)
+            y += 1
+            display = "".join(buf)
+            max_input = INNER - 4
+            visible = "\u2026" + display[-(max_input - 1):] if len(display) > max_input else display
+            input_text = f" > {visible}" + " " * max(0, INNER - len(visible) - 3)
+            _safe_addstr(stdscr, y, bx, "\u2551", fa)
+            _safe_addstr(stdscr, y, bx + 1, input_text[:INNER], curses.color_pair(_CP_ITEM))
+            _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
+            input_y = y
+            y += 1
+            _safe_addstr(stdscr, y, bx, "\u255a" + "\u2550" * INNER + "\u255d", fa)
+            y += 2
+            hints = "\u23ce Confirm  Esc Default"
+            hx = max(0, (w - len(hints)) // 2)
+            _safe_addstr(stdscr, y, hx, hints, curses.color_pair(_CP_HINT) | curses.A_DIM)
+
+            cursor_x = bx + 4 + min(len(display), max_input)
+            try:
+                stdscr.move(input_y, min(cursor_x, bx + BOX_W - 2))
+            except curses.error:
+                pass
+            stdscr.refresh()
+
+            key = stdscr.getch()
+            if key in (curses.KEY_ENTER, 10, 13):
+                result = "".join(buf).strip()
+                return result if result else (default or "")
+            elif key == 27:
+                return default or ""
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if buf: buf.pop()
+            elif key == curses.KEY_RESIZE: pass
+            elif 32 <= key <= 126: buf.append(chr(key))
+
+    try:
+        return curses.wrapper(_run)
+    except curses.error:
+        try:
+            raw = input(f"  {label} [{default}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(130)
+        return raw or (default or "")
+
+def _box_menu(title: str, sections: list, width: int = 44) -> None:
+    iw = width - 4
+    print(f"\n  \u2554{'\\u2550' * (width - 2)}\u2557")
+    print(f"  \u2551 {title:^{iw}} \u2551")
+    print(f"  \u2560{'\\u2550' * (width - 2)}\u2563")
+    first = True
+    for header, items in sections:
+        if not first:
+            print(f"  \u255f{'\\u2500' * (width - 2)}\u2562")
+        first = False
+        if header:
+            print(f"  \u2551  {header:<{iw - 1}} \u2551")
+        for item in items:
+            print(f"  \u2551    {item:<{iw - 3}} \u2551")
+    print(f"  \u255a{'\\u2550' * (width - 2)}\u255d")
+
+def _pause() -> None:
+    try:
+        input("\n  Press Enter to continue...")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+def _fallback_input(prompt: str, mapping: dict) -> Any:
+    try:
+        ch = input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    return mapping.get(ch, "invalid")
+
+_USE_CURSES = HAVE_CURSES and sys.stdin.isatty()
+
+
+def _tui_scroll_text(title: str, text: str) -> None:
+    lines = text.expandtabs(4).splitlines()
+    def _run(stdscr):
+        _init_tui_colors()
+        curses.curs_set(0)
+        top = 0
+        while True:
+            stdscr.erase()
+            h, w = stdscr.getmaxyx()
+            
+            # Content width logic
+            max_line_len = max((len(l) for l in lines), default=0)
+            content_w = min(w, max(_TUI_BOX_W, max_line_len + 4))
+            bx = max(0, (w - content_w) // 2)
+            
+            fa = curses.color_pair(_CP_FRAME)
+            
+            _safe_addstr(stdscr, 0, bx, "\u2554" + "\u2550" * (content_w - 2) + "\u2557", fa)
+            _safe_addstr(stdscr, 0, bx + 2, f" {title} ", curses.color_pair(_CP_TITLE) | curses.A_BOLD)
+            _safe_addstr(stdscr, h - 2, bx, "\u255a" + "\u2550" * (content_w - 2) + "\u255d", fa)
+            
+            hints = "\u2191\u2193 Scroll  PgUp/Dn  q/Esc Close"
+            _safe_addstr(stdscr, h - 1, max(0, (w - len(hints)) // 2), hints, curses.color_pair(_CP_HINT) | curses.A_DIM)
+            
+            max_lines = max(1, h - 3)
+            for i in range(max_lines):
+                if top + i < len(lines):
+                    line = lines[top + i][:content_w - 4]
+                    _safe_addstr(stdscr, i + 1, bx, "\u2551", fa)
+                    _safe_addstr(stdscr, i + 1, bx + 2, line, curses.color_pair(_CP_ITEM))
+                    _safe_addstr(stdscr, i + 1, bx + content_w - 1, "\u2551", fa)
+                else:
+                    _safe_addstr(stdscr, i + 1, bx, "\u2551", fa)
+                    _safe_addstr(stdscr, i + 1, bx + content_w - 1, "\u2551", fa)
+            stdscr.refresh()
+            
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord('k')): top = max(0, top - 1)
+            elif key in (curses.KEY_DOWN, ord('j')): top = min(max(0, len(lines) - max_lines), top + 1)
+            elif key in (curses.KEY_PPAGE,): top = max(0, top - max_lines)
+            elif key in (curses.KEY_NPAGE,): top = min(max(0, len(lines) - max_lines), top + max_lines)
+            elif key in (curses.KEY_HOME, ord('g')): top = 0
+            elif key in (curses.KEY_END, ord('G')): top = max(0, len(lines) - max_lines)
+            elif key in (ord('q'), ord('Q'), 27, curses.KEY_ENTER, 10, 13): return
+            elif key == curses.KEY_RESIZE: pass
+
+    try:
+        curses.wrapper(_run)
+    except curses.error:
+        pass
+
+def _show_in_pager(title: str, func) -> None:
+    old_stdout = sys.stdout
+    buf = io.StringIO()
+    sys.stdout = buf
+    try:
+        func()
+    finally:
+        sys.stdout = old_stdout
+    
+    text = buf.getvalue().rstrip()
+    if not text:
+        return
+        
+    if _USE_CURSES:
+        _tui_scroll_text(title, text)
+    else:
+        print(text)
+        _pause()
+
 def _prompt_str(label: str, default: Optional[str]) -> str:
+    if _USE_CURSES:
+        return _tui_prompt_str(label, default)
     display = default if default else ""
     try:
-        raw = input(f"{label} [{display}]: ").strip()
+        raw = input(f"  {label} [{display}]: ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit(130)
     return raw or (default or "")
+
 
 
 def _prompt_int(label: str, default: int) -> int:
@@ -943,8 +1248,49 @@ def _prompt_int(label: str, default: int) -> int:
         return default
 
 
+
+_MAIN_SECTIONS = [
+    ("OUTPUT", [
+        "Build catalog (full or by wing)",
+        "Generate all wing catalogs",
+        "Library statistics",
+        "Audit (issues report)",
+    ]),
+    ("LISTS", [
+        "Recently added",
+        "Series list (with gap detection)",
+        "List wings",
+    ]),
+    ("EXPORT", [
+        "Export (JSON/CSV)",
+    ]),
+    ("", ["Quit"]),
+]
+
+_MAIN_FALLBACK_MAP = {
+    "1": (0, 0), "catalog": (0, 0),
+    "2": (0, 1), "all": (0, 1),
+    "3": (0, 2), "stats": (0, 2),
+    "4": (0, 3), "audit": (0, 3),
+    "5": (1, 0), "recent": (1, 0),
+    "6": (1, 1), "series": (1, 1),
+    "7": (1, 2), "wings": (1, 2),
+    "8": (2, 0), "export": (2, 0),
+    "q": None, "quit": None, "exit": None,
+}
+
+def _select_main() -> Optional[tuple]:
+    if _USE_CURSES:
+        return _tui_select(f"getBooks v{VERSION}", _MAIN_SECTIONS)
+    _box_menu(f"getBooks v{VERSION}", [
+        ("OUTPUT", ["1) Build catalog", "2) Generate all wings", "3) Statistics", "4) Audit"]),
+        ("LISTS", ["5) Recently added", "6) Series list", "7) List wings"]),
+        ("EXPORT", ["8) Export (JSON/CSV)"]),
+        ("", ["q) Quit"]),
+    ])
+    return _fallback_input("  Select [1-8/q]: ", _MAIN_FALLBACK_MAP)
+
 def interactive_menu() -> int:
-    # Find DB first
     db_path = _prompt_str("Path to metadata.db", DEFAULT_DB_PATHS[0])
     try:
         db_path = find_db(db_path)
@@ -954,65 +1300,64 @@ def interactive_menu() -> int:
 
     with CalibreDB(db_path) as db:
         while True:
-            print(f"\n=== getBooks.py v{VERSION} — Menu ===")
-            print("1) Build catalog (full or by wing)")
-            print("2) Generate all wing catalogs")
-            print("3) Library statistics")
-            print("4) Audit (issues report)")
-            print("5) Recently added")
-            print("6) Series list (with gap detection)")
-            print("7) Export (JSON/CSV)")
-            print("8) List wings")
-            print("q) Quit")
-            try:
-                choice = input("Select [1-8/q]: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return 130
+            _reset_terminal()
+            result = _select_main()
 
-            if choice in ("1", "catalog"):
+            if result == "invalid":
+                if not _USE_CURSES:
+                    print("  Invalid selection.")
+                continue
+
+            if result is None or result == (3, 0):  # Quit
+                return 0
+
+            if result == (0, 0):
                 wing = _prompt_str("Wing name (blank for all)", "")
                 wing = wing if wing else None
                 primary = _prompt_str("Primary author only? (y/N)", "N").lower().startswith('y')
                 tags = _prompt_str("Show tags instead of ratings? (y/N)", "N").lower().startswith('y')
                 ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith('y')
                 output = _prompt_str("Output file", "catalog.txt")
-                write_catalog(db, output, wing=wing, primary_only=primary,
-                              show_tags=tags, show_id=ids)
+                _reset_terminal()
+                _show_in_pager("Catalog", lambda: write_catalog(db, output, wing=wing, primary_only=primary,
+                              show_tags=tags, show_id=ids))
 
-            elif choice in ("2", "all"):
+            elif result == (0, 1):
                 outdir = _prompt_str("Output directory", "catalogs")
                 primary = _prompt_str("Primary author only? (y/N)", "N").lower().startswith('y')
                 tags = _prompt_str("Show tags instead of ratings? (y/N)", "N").lower().startswith('y')
                 ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith('y')
-                write_all_wings(db, outdir, primary_only=primary,
-                                show_tags=tags, show_id=ids)
+                _reset_terminal()
+                _show_in_pager("Generate Wings", lambda: write_all_wings(db, outdir, primary_only=primary,
+                                show_tags=tags, show_id=ids))
 
-            elif choice in ("3", "stats"):
-                show_stats(db)
+            elif result == (0, 2):
+                _reset_terminal()
+                _show_in_pager("Statistics", lambda: show_stats(db))
 
-            elif choice in ("4", "audit"):
+            elif result == (0, 3):
                 output = _prompt_str("Output CSV", "audit.csv")
-                run_audit(db, output)
+                _reset_terminal()
+                _show_in_pager("Audit", lambda: run_audit(db, output))
 
-            elif choice in ("5", "recent"):
+            elif result == (1, 0):
                 count = _prompt_int("How many", 20)
-                show_recent(db, count)
+                _reset_terminal()
+                _show_in_pager("Recently Added", lambda: show_recent(db, count))
 
-            elif choice in ("6", "series"):
-                show_series(db)
+            elif result == (1, 1):
+                _reset_terminal()
+                _show_in_pager("Series List", lambda: show_series(db))
 
-            elif choice in ("7", "export"):
+            elif result == (1, 2):
+                _reset_terminal()
+                _show_in_pager("Virtual Libraries", lambda: show_wings(db))
+
+            elif result == (2, 0):
                 fmt = _prompt_str("Format (json/csv)", "json")
                 output = _prompt_str("Output file", f"library.{fmt}")
-                run_export(db, output, fmt)
-
-            elif choice in ("8", "wings"):
-                show_wings(db)
-
-            elif choice in ("q", "quit", "exit"):
-                return 0
-            else:
-                print("Invalid selection.")
+                _reset_terminal()
+                _show_in_pager("Export", lambda: run_export(db, output, fmt))
 
     return 0
 
@@ -1092,4 +1437,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        try:
+            _reset_terminal()
+        except NameError:
+            pass
+

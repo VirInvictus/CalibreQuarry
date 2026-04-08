@@ -30,7 +30,6 @@ What's done, what's next. Updated as of v1.0.3.
 
 ## Future
 
-- [ ] **Curses TUI** — arrow-key navigation menu matching getMusic's interface
 - [ ] **AI-readable export** — token-efficient flat format for LLM recommendation prompts
 - [ ] **Tag tree visualization** — display the full hierarchical tag taxonomy as a tree
 - [ ] **Reading pace stats** — books added per month/year trend from `timestamp` column
@@ -40,4 +39,6 @@ What's done, what's next. Updated as of v1.0.3.
 - [ ] **Author statistics** — per-author breakdowns (book count, ratings, formats, series)
 - [ ] **Wing overlap analysis** — show which books appear in multiple virtual libraries
 - [ ] **Format migration report** — identify books only available in deprecated formats (MOBI, LIT)
+- [ ] **Color CLI output** — ANSI color for terminal output in non-interactive mode
+t** — identify books only available in deprecated formats (MOBI, LIT)
 - [ ] **Color CLI output** — ANSI color for terminal output in non-interactive mode

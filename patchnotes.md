@@ -1,5 +1,29 @@
 # getBooks.py — Patch Notes
 
+## v1.0.4 (2026-04-08)
+
+---
+
+### New Features
+
+**Curses TUI.** Running the script with no arguments now launches a full-screen, arrow-key navigable terminal UI utilizing the `curses` library (matching the interface of `getMusic`). Non-TTY environments or systems without `curses` will gracefully fall back to a styled text-based box menu. The TUI features a custom scrollable pager that intercepts standard output, allowing you to comfortably read and navigate command outputs directly within the interface.
+
+### Bug Fixes
+
+**Implicit AND in VL expressions ignored subsequent tags.** Calibre's parser evaluates adjacent tags like `tags:Fic.Fantasy tags:Magic` as an implicit `AND`. The `_parse_and` method previously discarded tags after the first one unless the `AND` keyword was explicitly written out. It now correctly intersects all implicit constraints.
+
+**Exact tag matching (`=`) was case-sensitive.** Calibre's tag matches are always case-insensitive. The exact match SQL query (`WHERE t.name = ?`) was missing `COLLATE NOCASE`, causing `tags:"=Fic.Fantasy"` to fail if capitalization varied.
+
+**Duplicate author headers in `--primary-only` mode.** Generating a catalog with `--primary-only` caused highly fragmented author groups. The script relied solely on the SQL `ORDER BY b.author_sort` (which sorts by the *full* multi-author string). Books are now presorted in Python natively by their derived primary-only display key.
+
+**Non-deterministic `GROUP_CONCAT` output.** The metadata fields built via `GROUP_CONCAT(DISTINCT ...)` (like `authors` and `tags`) returned unpredictably ordered results depending on SQLite's internal row execution. This occasionally resulted in the wrong primary author being selected. The SQL query has been rewritten to use correlated subqueries with explicit `ORDER BY` clauses for deterministic structure.
+
+**Double `NOT` cascading crashes.** Expressions combining consecutive exclusions (e.g., `NOT NOT vl:Name`) failed because `_parse_not` routed directly to `_parse_atom` for the inner operand. This has been updated to recursively call `_parse_not` to handle complex nested negations gracefully.
+
+**Fractional series indices ignored in recent display.** `show_recent` dropped series identifiers completely if the index contained a decimal (e.g., `1.5`) due to a missing fallback formatting block.
+
+---
+
 ## v1.0.3 (2026-04-04)
 
 ---

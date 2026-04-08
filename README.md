@@ -32,7 +32,7 @@ This tool reads the SQLite database directly in read-only mode. It resolves Cali
 
 Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--primary-only` collapses multi-author entries to the first author, `--quiet` suppresses decorative output.
 
-Running with no arguments launches an interactive menu.
+Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager, or a text-based menu if `curses` is unavailable.
 
 ## Requirements
 
