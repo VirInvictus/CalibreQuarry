@@ -1,4 +1,4 @@
-# getBooks.py — Patch Notes
+# Quarry.py — Patch Notes
 
 ## v1.0.4 (2026-04-08)
 
@@ -114,5 +114,5 @@ permissions previously produced an unhandled traceback.
 but the SQL does prefix match, not substring. Added a note that regex patterns
 (`tags:~regex`) are unsupported.
 
-**`prog="getBooks.py"` added to `ArgumentParser`.** Version and help output now
+**`prog="Quarry.py"` added to `ArgumentParser`.** Version and help output now
 show the script name consistently regardless of invocation path.
