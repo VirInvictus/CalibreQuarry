@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="getBooks.py" width="680">
+  <img src="logo.svg" alt="Quarry.py" width="680">
 </p>
 
 <p align="center">
@@ -42,37 +42,37 @@ None beyond Python 3.9+. The script uses only stdlib modules (`sqlite3`, `json`,
 
 ```bash
 # Build a catalog for a specific wing
-python getBooks.py --catalog --wing "The Tabletop" --primary-only --db ~/Calibre/metadata.db
+python Quarry.py --catalog --wing "The Tabletop" --primary-only --db ~/Calibre/metadata.db
 
 # Same catalog, but showing tags instead of star ratings
-python getBooks.py --catalog --wing "The Tabletop" --show-tags --db ~/Calibre/metadata.db
+python Quarry.py --catalog --wing "The Tabletop" --show-tags --db ~/Calibre/metadata.db
 
 # Catalog with Calibre IDs (for piping into calibredb set_metadata scripts)
-python getBooks.py --catalog --show-id --db ~/Calibre/metadata.db
+python Quarry.py --catalog --show-id --db ~/Calibre/metadata.db
 
 # Generate catalogs for all virtual libraries at once
-python getBooks.py --all-wings --db ~/Calibre/metadata.db --outdir ~/docs/catalogs
+python Quarry.py --all-wings --db ~/Calibre/metadata.db --outdir ~/docs/catalogs
 
 # Library statistics
-python getBooks.py --stats --db ~/Calibre/metadata.db
+python Quarry.py --stats --db ~/Calibre/metadata.db
 
 # Audit: find unrated books, missing tags, series gaps
-python getBooks.py --audit --db ~/Calibre/metadata.db --output audit.csv
+python Quarry.py --audit --db ~/Calibre/metadata.db --output audit.csv
 
 # Recently added books
-python getBooks.py --recent 10 --db ~/Calibre/metadata.db
+python Quarry.py --recent 10 --db ~/Calibre/metadata.db
 
 # Series completeness and gap detection
-python getBooks.py --series --db ~/Calibre/metadata.db
+python Quarry.py --series --db ~/Calibre/metadata.db
 
 # Export full library to JSON
-python getBooks.py --export --db ~/Calibre/metadata.db --format json --output library.json
+python Quarry.py --export --db ~/Calibre/metadata.db --format json --output library.json
 
 # List all virtual library wings with counts
-python getBooks.py --wings --db ~/Calibre/metadata.db
+python Quarry.py --wings --db ~/Calibre/metadata.db
 
 # Check version
-python getBooks.py --version
+python Quarry.py --version
 ```
 
 If `metadata.db` is in the current directory or at `~/Calibre Library/metadata.db`, the `--db` flag can be omitted.
@@ -160,7 +160,7 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 ## Full help output
 
 ```
-usage: getBooks.py [-h] [--version]
+usage: Quarry.py [-h] [--version]
                    [--catalog | --all-wings | --stats | --audit | --recent [RECENT]
                    | --series | --export | --wings] [--db DB] [--wing WING]
                    [--output OUTPUT] [--outdir OUTDIR] [--format {json,csv}]
