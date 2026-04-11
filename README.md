@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svgd" alt="Quarry.py" width="680">
+  <img src="logo.svg" alt="Quarry.py" width="680">
 </p>
 
 <p align="center">
