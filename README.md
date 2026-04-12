@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="cquarry.py" width="680">
+  <img src="logo.svg" alt="CalibreQuarry" width="680">
 </p>
 
 <p align="center">
@@ -8,7 +8,7 @@
   <a href="https://ko-fi.com/vrnvctss"><img src="https://img.shields.io/badge/support-Ko--fi-ff5f5f?logo=kofi" alt="Ko-fi"></a>
 </p>
 
-A CLI toolkit for Calibre users who treat their libraries as curated collections. Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries, no external libraries. Pure Python stdlib.
+A CLI toolkit for Calibre users who treat their libraries as curated collections. Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries, no external libraries. Pure Python stdlib. Installable as a package or runnable as a script.
 
 ## Why this exists
 
@@ -32,50 +32,72 @@ This tool reads the SQLite database directly in read-only mode. It resolves Cali
 
 Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--primary-only` collapses multi-author entries to the first author, `--quiet` suppresses decorative output.
 
-Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager, or a text-based menu if `curses` is unavailable.
+Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager, or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions.
+
+## Installation
+
+```bash
+pip install .
+# or
+pipx install .
+```
+
+This gives you the `cquarry` command:
+
+```bash
+cquarry --catalog --db ~/Calibre/metadata.db
+cquarry --stats
+cquarry   # launches interactive TUI
+```
+
+Or run without installing:
+
+```bash
+PYTHONPATH=src python -m cquarry --stats
+```
 
 ## Requirements
 
-None beyond Python 3.9+. The script uses only stdlib modules (`sqlite3`, `json`, `csv`, `argparse`). No pip install required.
+Python 3.9+. Zero external dependencies — uses only stdlib modules (`sqlite3`, `json`, `csv`, `argparse`, `curses`).
 
 ## Usage
 
 ```bash
 # Build a catalog for a specific wing
-python cquarry.py --catalog --wing "The Tabletop" --primary-only --db ~/Calibre/metadata.db
+cquarry --catalog --wing "The Tabletop" --primary-only --db ~/Calibre/metadata.db
 
 # Same catalog, but showing tags instead of star ratings
-python cquarry.py --catalog --wing "The Tabletop" --show-tags --db ~/Calibre/metadata.db
+cquarry --catalog --wing "The Tabletop" --show-tags --db ~/Calibre/metadata.db
 
 # Catalog with Calibre IDs (for piping into calibredb set_metadata scripts)
-python cquarry.py --catalog --show-id --db ~/Calibre/metadata.db
+cquarry --catalog --show-id --db ~/Calibre/metadata.db
 
 # Generate catalogs for all virtual libraries at once
-python cquarry.py --all-wings --db ~/Calibre/metadata.db --outdir ~/docs/catalogs
+cquarry --all-wings --db ~/Calibre/metadata.db --outdir ~/docs/catalogs
 
 # Library statistics
-python cquarry.py --stats --db ~/Calibre/metadata.db
+cquarry --stats --db ~/Calibre/metadata.db
 
 # Audit: find unrated books, missing tags, series gaps
-python cquarry.py --audit --db ~/Calibre/metadata.db --output audit.csv
+cquarry --audit --db ~/Calibre/metadata.db --output audit.csv
 
 # Recently added books
-python cquarry.py --recent 10 --db ~/Calibre/metadata.db
+cquarry --recent 10 --db ~/Calibre/metadata.db
 
 # Series completeness and gap detection
-python cquarry.py --series --db ~/Calibre/metadata.db
+cquarry --series --db ~/Calibre/metadata.db
 
 # Export full library to JSON
-python cquarry.py --export --db ~/Calibre/metadata.db --format json --output library.json
+cquarry --export --db ~/Calibre/metadata.db --format json --output library.json
 
 # List all virtual library wings with counts
-python cquarry.py --wings --db ~/Calibre/metadata.db
+cquarry --wings --db ~/Calibre/metadata.db
 
 # Check version
-python cquarry.py --version
+cquarry --version
 ```
 
-If `metadata.db` is in the current directory or at `~/Calibre Library/metadata.db`, the `--db` flag can be omitted.
+If `metadata.db` is in the current directory or at `~/Calibre Library/metadata.db`, the `--db` flag can be omitted. On first run you'll be prompted for the path, which is saved to `~/.config/cquarry/config.json` for future sessions. If Calibre is running and has the database locked, CalibreQuarry will automatically read from a temporary snapshot.
 
 ## Sample output
 
@@ -147,9 +169,11 @@ Supported operators: `tags:Pattern`, `tags:"=Exact"`, `vl:Name`, `or`, `and`, `n
 
 ## How it reads the database
 
-The script opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, and `preferences`. No custom columns are required.
+CalibreQuarry opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, and `preferences`. No custom columns are required.
 
-Calibre stores ratings on a 0–10 scale internally (where 10 = 5 stars). The script converts to the standard 0–5 star display automatically.
+If Calibre is running and holds a lock on the database, CalibreQuarry copies it (along with any WAL/SHM journal files) to a temporary snapshot and reads from that. A notice is printed to stderr; the temp files are cleaned up on exit.
+
+Calibre stores ratings on a 0–10 scale internally (where 10 = 5 stars). CalibreQuarry converts to the standard 0-5 star display automatically.
 
 ## Replacing shell-based catalog pipelines
 
@@ -160,11 +184,11 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 ## Full help output
 
 ```
-usage: cquarry.py [-h] [--version]
-                   [--catalog | --all-wings | --stats | --audit | --recent [RECENT]
-                   | --series | --export | --wings] [--db DB] [--wing WING]
-                   [--output OUTPUT] [--outdir OUTDIR] [--format {json,csv}]
-                   [--primary-only] [--show-tags] [--show-id] [--quiet]
+usage: cquarry [-h] [--version]
+               [--catalog | --all-wings | --stats | --audit | --recent [RECENT]
+               | --series | --export | --wings] [--db DB] [--wing WING]
+               [--output OUTPUT] [--outdir OUTDIR] [--format {json,csv}]
+               [--primary-only] [--show-tags] [--show-id] [--quiet]
 
 Calibre library toolkit: catalog, stats, audit, export
 

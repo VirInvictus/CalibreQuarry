@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Language:** Python 3.9+  
 **Dependencies:** None (stdlib only: sqlite3, json, csv, argparse)  
 **License:** MIT
@@ -23,12 +23,33 @@ re-encoding.
 
 ## 2. Architecture
 
-### 2.1 Single-File Design
+### 2.1 Package Design
 
-The entire toolkit lives in `cquarry.py`. Zero external dependencies.
-Reads Calibre's standard SQLite tables (`books`, `authors`, `tags`,
-`series`, `ratings`, `data`, `publishers`, `languages`, `preferences`)
-in read-only mode (`?mode=ro`).
+The toolkit is structured as a Python package in `src/cquarry/`:
+
+```
+src/cquarry/
+├── __init__.py      # Version export
+├── __main__.py      # python -m cquarry entry point
+├── config.py        # Constants, persistent config (~/.config/cquarry/config.json)
+├── db.py            # CalibreDB read-only database interface
+├── helpers.py       # Rating conversion, author formatting, series gap detection
+├── cli.py           # Argument parsing, CLI dispatch
+├── tui.py           # Curses TUI, output capture, interactive menu
+└── modes/
+    ├── catalog.py   # Text catalog generation (single + all-wings)
+    ├── stats.py     # Library statistics
+    ├── audit.py     # Issue detection and CSV reporting
+    ├── display.py   # Recent, series, wings display modes
+    └── export.py    # JSON/CSV full library export
+```
+
+Zero external dependencies. Reads Calibre's standard SQLite tables
+(`books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`,
+`languages`, `preferences`) in read-only mode (`?mode=ro`).
+
+Install via `pip install .` for the `cquarry` console script, or run
+directly with `python -m cquarry`.
 
 ### 2.2 Virtual Library Resolution
 
@@ -53,10 +74,18 @@ Read-only. Never writes. Opens with `?mode=ro` URI. All data comes from
 standard Calibre tables — no custom columns required. Ratings are stored
 0–10 internally (10 = 5 stars); converted to 0–5 for display.
 
-### 2.4 Auto-Detection
+If the database is locked by a running Calibre instance, CalibreQuarry
+copies it (plus WAL/SHM journals) to a temporary snapshot and reads
+from there. The temp files are cleaned up on exit.
 
-If `--db` is omitted, the script searches for `metadata.db` in the current
-directory and at `~/Calibre Library/metadata.db`.
+### 2.4 Database Resolution
+
+If `--db` is omitted, the database is resolved in order:
+1. Saved config (`~/.config/cquarry/config.json`)
+2. Default paths (`./metadata.db`, `~/Calibre Library/metadata.db`)
+3. Interactive prompt (if running in a TTY)
+
+The path is saved to config on first successful resolution.
 
 ---
 

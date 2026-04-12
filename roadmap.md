@@ -1,6 +1,6 @@
 # CalibreQuarry — Roadmap
 
-What's done, what's next. Updated as of v1.0.4.
+What's done, what's next. Updated as of v2.0.0.
 
 ---
 
@@ -33,8 +33,8 @@ What's done, what's next. Updated as of v1.0.4.
 - [x] `--show-id` modifier for Calibre ID output (scripting)
 - [x] `--primary-only` modifier for single-author display
 - [x] `--quiet` modifier for minimal output
-- [ ] **TUI upgrades similar to /home/bdkl/.gitrepos/Lattice:** Check the patchnotes.md and look through the code in that repo to figure out how to improve the current TUI.
-- [ ] **Move from script to full Python Project:** Split the script into sensible modules, set up a build and install setup, and make the repo layout more professional. Update the README to use the application over the script.
+- [x] **TUI upgrades (Lattice-style):** Persistent DB config, immersive output capture, styled curses pause, settings menu
+- [x] **Full Python package:** `src/cquarry/` with hatchling build, `pip install .`, `cquarry` console script
 
 ## Phase 4: Extended Capabilities (Future)
 *Expanding on the analytics without altering the database.*

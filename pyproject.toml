@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cquarry"
+version = "2.0.0"
+description = "Calibre library toolkit: catalog, stats, audit, export"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+  {name = "vrnvctss"}
+]
+dependencies = []
+
+[project.scripts]
+cquarry = "cquarry.cli:main"

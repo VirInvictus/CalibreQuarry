@@ -1,4 +1,28 @@
-# cquarry.py — Patch Notes
+# CalibreQuarry — Patch Notes
+
+## v2.0.0 (2026-04-12)
+
+---
+
+### Major Overhaul: Package Restructure & TUI Upgrades
+
+CalibreQuarry has been refactored from a single ~1450-line monolithic script (`cquarry.py`) into a proper Python package architecture, with TUI improvements modeled after the Lattice project.
+
+**Layer-Based Package Design.** The codebase now lives in `src/cquarry/` and is split by logical functionality: `config.py`, `db.py`, `helpers.py`, `cli.py`, `tui.py`, and a `modes/` directory for individual feature operations (`catalog.py`, `stats.py`, `audit.py`, `display.py`, `export.py`). The monolithic script is gone.
+
+**Modern Build System (Hatch).** CalibreQuarry now uses `pyproject.toml` managed by Hatch. Install via `pip install .` or `pipx install .` and the `cquarry` command is available globally. Also runnable via `python -m cquarry`.
+
+**Persistent Database Configuration.** Both CLI and TUI now share a unified database resolution chain: explicit `--db` flag, saved config (`~/.config/cquarry/config.json`), default search paths, then an interactive prompt if running in a TTY. The path is saved on first successful resolution, eliminating the need to pass `--db` in future sessions. A "Change database path" option under the SETTINGS section in the TUI main menu allows updating the stored path.
+
+**Calibre Lock Handling.** When `metadata.db` is locked by a running Calibre instance, CalibreQuarry now automatically copies the database (including WAL/SHM journal files) to a temporary snapshot and reads from that instead. A notice is printed to stderr, and the temp files are cleaned up on exit. Previously, a locked database would produce an unhandled `sqlite3.OperationalError`.
+
+**Fully Immersive TUI.** All operations now run through a `_run_with_capture()` wrapper that intercepts stdout and stderr via `io.StringIO` buffers. Output is displayed within the scrollable curses pager rather than dropping the user back to raw terminal output. This matches the immersive TUI pattern established in Lattice v4.1.2.
+
+**Styled Curses Pause.** The post-operation "Press Enter to continue" prompt now renders inside a styled Unicode box within the curses session (`_tui_pause`), instead of falling through to a raw `input()` call. Accepts Enter, q, or Esc to dismiss.
+
+**Null Byte Sanitization.** The scrollable pager now strips null bytes from captured output before rendering, preventing `ValueError: embedded null character` crashes on corrupted data.
+
+---
 
 ## v1.0.4 (2026-04-08)
 
