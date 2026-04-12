@@ -28,7 +28,7 @@
 <circle cx="78" cy="56" r="5" fill="none" stroke="var(--t)" stroke-width="0.5"/>
 <circle cx="96" cy="56" r="5" fill="none" stroke="var(--t)" stroke-width="0.5"/>
 
-<text x="340" y="59" text-anchor="middle" font-family="var(--font)" font-size="11" fill="var(--s)" font-weight="400">~/Calibre $ python Quarry.py</text>
+<text x="340" y="59" text-anchor="middle" font-family="var(--font)" font-size="11" fill="var(--s)" font-weight="400">~/Calibre $ python cquarry.py</text>
 
 <g opacity="0.08">
   <rect x="80" y="100" width="18" height="24" fill="var(--p)" rx="1"/>
@@ -50,7 +50,7 @@
   <rect x="598" y="96" width="18" height="28" fill="var(--p)" rx="1"/>
 </g>
 
-<text x="340" y="155" text-anchor="middle" font-family="var(--font)" font-size="48" fill="var(--p)" font-weight="500" letter-spacing="-2">Quarry</text>
+<text x="340" y="155" text-anchor="middle" font-family="var(--font)" font-size="48" fill="var(--p)" font-weight="500" letter-spacing="-2">CalibreQuarry</text>
 <text x="340" y="180" text-anchor="middle" font-family="var(--font)" font-size="16" fill="var(--s)" font-weight="400" letter-spacing="8">.py</text>
 
 <line x1="140" y1="210" x2="540" y2="210" stroke="var(--b)" stroke-width="0.5"/>
@@ -63,3 +63,4 @@
 <text x="56" y="270" font-family="var(--font)" font-size="10" fill="var(--t)" font-weight="400">$ --catalog  --all-wings  --stats  --audit  --recent  --series  --export  --wings</text>
 
 </svg>
+/svg>

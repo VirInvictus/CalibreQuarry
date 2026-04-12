@@ -1,10 +1,20 @@
-# Quarry — Roadmap
+# CalibreQuarry — Roadmap
 
-What's done, what's next. Updated as of v1.0.3.
+What's done, what's next. Updated as of v1.0.4.
 
 ---
 
-## Done
+## Phase 1: Core Engine & Single-File Design
+*Pure Python stdlib, zero external dependencies. Reading `metadata.db` natively.*
+
+- [x] Read-only database access (`?mode=ro`)
+- [x] Auto-detection of `metadata.db` location
+- [x] Hierarchical tag matching (Calibre convention)
+- [x] Virtual library search expression parser (tags, vl, boolean, parens)
+- [x] Cached `get_all_books()` for performance in batch modes
+
+## Phase 2: Display & Export Modes
+*Replacing complex shell pipelines with native outputs.*
 
 - [x] Text catalog grouped by author with ratings and series info
 - [x] All-wings batch catalog generation (one file per virtual library)
@@ -14,22 +24,20 @@ What's done, what's next. Updated as of v1.0.3.
 - [x] Series listing with completeness status and gap detection
 - [x] Full library export to JSON or CSV
 - [x] Virtual library listing with book counts
-- [x] Virtual library search expression parser (tags, vl, boolean, parens)
-- [x] Hierarchical tag matching (Calibre convention)
+
+## Phase 3: Interactive TUI & Modifiers
+*Navigating the data efficiently.*
+
+- [x] Interactive menu (curses TUI with scrollable pager)
 - [x] `--show-tags` modifier for tag display in catalogs
 - [x] `--show-id` modifier for Calibre ID output (scripting)
 - [x] `--primary-only` modifier for single-author display
 - [x] `--quiet` modifier for minimal output
-- [x] Auto-detection of `metadata.db` location
-- [x] Read-only database access (`?mode=ro`)
-- [x] Interactive menu (no-argument launch)
-- [x] `--version` flag
-- [x] Cached `get_all_books()` for performance in batch modes
 
----
+## Phase 4: Extended Capabilities (Future)
+*Expanding on the analytics without altering the database.*
 
-## Future
-
+- [ ] **Search Query Export** — Run Calibre-style search expressions directly from the CLI to generate a text file of matching results. The tool will notify the user and avoid creating an empty file if the query yields no results.
 - [ ] **AI-readable export** — token-efficient flat format for LLM recommendation prompts
 - [ ] **Tag tree visualization** — display the full hierarchical tag taxonomy as a tree
 - [ ] **Reading pace stats** — books added per month/year trend from `timestamp` column

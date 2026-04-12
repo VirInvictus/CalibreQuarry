@@ -1,4 +1,4 @@
-# getBooks — Application Specification
+# CalibreQuarry — Application Specification
 
 **Version:** 1.0  
 **Language:** Python 3.9+  
@@ -9,7 +9,7 @@
 
 ## 1. Mission Statement
 
-getBooks is a CLI toolkit for Calibre users who treat their libraries as
+CalibreQuarry is a CLI toolkit for Calibre users who treat their libraries as
 curated collections. It reads `metadata.db` directly in read-only mode —
 no `calibredb` dependency, no JSON intermediaries, no external libraries.
 Pure Python stdlib.
@@ -25,7 +25,7 @@ re-encoding.
 
 ### 2.1 Single-File Design
 
-The entire toolkit lives in `getBooks.py`. Zero external dependencies.
+The entire toolkit lives in `cquarry.py`. Zero external dependencies.
 Reads Calibre's standard SQLite tables (`books`, `authors`, `tags`,
 `series`, `ratings`, `data`, `publishers`, `languages`, `preferences`)
 in read-only mode (`?mode=ro`).
@@ -85,7 +85,7 @@ directory and at `~/Calibre Library/metadata.db`.
 
 ---
 
-## 4. What getBooks Is Not
+## 4. What CalibreQuarry Is Not
 
 - **Not a Calibre replacement.** It reads the database — it does not manage it.
 - **Not an editor.** It never writes to `metadata.db`.

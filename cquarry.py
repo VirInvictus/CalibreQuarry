@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# filepath: Quarry.py
+# filepath: cquarry.py
 """
 Calibre library toolkit. Reads metadata.db directly — no calibredb dependency.
 
@@ -16,16 +16,16 @@ Modes:
   --version       Show version and exit
 
 Usage examples:
-  python Quarry.py --catalog --db ~/Calibre/metadata.db
-  python Quarry.py --wing "The Tabletop" --db ~/Calibre/metadata.db --primary-only
-  python Quarry.py --catalog --db ~/Calibre/metadata.db --show-tags
-  python Quarry.py --all-wings --db ~/Calibre/metadata.db --outdir ~/docs/catalogs
-  python Quarry.py --stats --db ~/Calibre/metadata.db
-  python Quarry.py --audit --db ~/Calibre/metadata.db --output audit.csv
-  python Quarry.py --recent 10 --db ~/Calibre/metadata.db
-  python Quarry.py --series --db ~/Calibre/metadata.db
-  python Quarry.py --export --db ~/Calibre/metadata.db --format json --output library.json
-  python Quarry.py --wings --db ~/Calibre/metadata.db
+  python cquarry.py --catalog --db ~/Calibre/metadata.db
+  python cquarry.py --wing "The Tabletop" --db ~/Calibre/metadata.db --primary-only
+  python cquarry.py --catalog --db ~/Calibre/metadata.db --show-tags
+  python cquarry.py --all-wings --db ~/Calibre/metadata.db --outdir ~/docs/catalogs
+  python cquarry.py --stats --db ~/Calibre/metadata.db
+  python cquarry.py --audit --db ~/Calibre/metadata.db --output audit.csv
+  python cquarry.py --recent 10 --db ~/Calibre/metadata.db
+  python cquarry.py --series --db ~/Calibre/metadata.db
+  python cquarry.py --export --db ~/Calibre/metadata.db --format json --output library.json
+  python cquarry.py --wings --db ~/Calibre/metadata.db
 
 Notes:
   - Reads Calibre's metadata.db directly via sqlite3 (no calibredb needed)
@@ -893,7 +893,7 @@ def show_wings(db: CalibreDB) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="Quarry.py",
+        prog="cquarry.py",
         description="Calibre library toolkit: catalog, stats, audit, export"
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
@@ -1281,8 +1281,8 @@ _MAIN_FALLBACK_MAP = {
 
 def _select_main() -> Optional[tuple]:
     if _USE_CURSES:
-        return _tui_select(f"Quarry v{VERSION}", _MAIN_SECTIONS)
-    _box_menu(f"Quarry v{VERSION}", [
+        return _tui_select(f"CalibreQuarry v{VERSION}", _MAIN_SECTIONS)
+    _box_menu(f"CalibreQuarry v{VERSION}", [
         ("OUTPUT", ["1) Build catalog", "2) Generate all wings", "3) Statistics", "4) Audit"]),
         ("LISTS", ["5) Recently added", "6) Series list", "7) List wings"]),
         ("EXPORT", ["8) Export (JSON/CSV)"]),
