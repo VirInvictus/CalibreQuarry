@@ -28,7 +28,7 @@
 <circle cx="78" cy="56" r="5" fill="none" stroke="var(--t)" stroke-width="0.5"/>
 <circle cx="96" cy="56" r="5" fill="none" stroke="var(--t)" stroke-width="0.5"/>
 
-<text x="340" y="59" text-anchor="middle" font-family="var(--font)" font-size="11" fill="var(--s)" font-weight="400">~/Calibre $ python cquarry.py</text>
+<text x="340" y="59" text-anchor="middle" font-family="var(--font)" font-size="11" fill="var(--s)" font-weight="400">~/Calibre $ cquarry</text>
 
 <g opacity="0.08">
   <rect x="80" y="100" width="18" height="24" fill="var(--p)" rx="1"/>
