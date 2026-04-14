@@ -9,64 +9,26 @@
 
 ## 1. Mission Statement
 
-CalibreQuarry is a CLI toolkit for Calibre users who treat their libraries as
-curated collections. It reads `metadata.db` directly in read-only mode —
-no `calibredb` dependency, no JSON intermediaries, no external libraries.
-Pure Python stdlib.
+CalibreQuarry is a CLI toolkit for Calibre users who treat their libraries as curated collections. It reads `metadata.db` directly in read-only mode — bypassing the overhead of `calibredb`, JSON intermediaries, or external library dependencies.
 
-Design philosophy: **replace every `calibredb list | jq | awk` pipeline
-with a single command.** The script resolves Calibre's virtual library
-search expressions natively, so existing wing definitions work without
-re-encoding.
+Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a single command.** The script resolves Calibre's **Virtual Library** (Wing) search expressions natively, ensuring existing library definitions work without re-encoding.
 
 ---
 
 ## 2. Architecture
 
-### 2.1 Package Design
+### 2.1 Modular Package Design
+The toolkit is structured as a Python package in `src/cquarry/`, ensuring separation of concerns:
 
-The toolkit is structured as a Python package in `src/cquarry/`:
+| Module | Responsibility |
+|--------|----------------|
+| `db.py` | Read-only SQLite interface to Calibre's internal schema. |
+| `tui.py` | Curses-based terminal interface and interactive pager. |
+| `modes/` | Discrete logic for catalogs, stats, audits, and exports. |
+| `config.py` | Path resolution and persistent settings management. |
 
-```
-src/cquarry/
-├── __init__.py      # Version export
-├── __main__.py      # python -m cquarry entry point
-├── config.py        # Constants, persistent config (~/.config/cquarry/config.json)
-├── db.py            # CalibreDB read-only database interface
-├── helpers.py       # Rating conversion, author formatting, series gap detection
-├── cli.py           # Argument parsing, CLI dispatch
-├── tui.py           # Curses TUI, output capture, interactive menu
-└── modes/
-    ├── catalog.py   # Text catalog generation (single + all-wings)
-    ├── stats.py     # Library statistics
-    ├── audit.py     # Issue detection and CSV reporting
-    ├── display.py   # Recent, series, wings display modes
-    └── export.py    # JSON/CSV full library export
-```
-
-Zero external dependencies. Reads Calibre's standard SQLite tables
-(`books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`,
-`languages`, `preferences`) in read-only mode (`?mode=ro`).
-
-Install via `pip install .` for the `cquarry` console script, or run
-directly with `python -m cquarry`.
-
-### 2.2 Virtual Library Resolution
-
-The script parses Calibre's virtual library definitions from the
-`preferences` table. These are the same search expressions Calibre uses
-internally:
-
-```
-Fantasy Wing:    tags:"Fic.Fantasy" or tags:"Fic.Speculative.Fantasy"
-The Tabletop:    tags:"Gaming.TTRPG"
-Unsorted:        not (vl:"The Tabletop" or vl:"Fantasy Wing" or ...)
-```
-
-Supported operators: `tags:Pattern`, `tags:"=Exact"`, `vl:Name` (cross-
-reference), `or`, `and`, `not`, parentheses. Tag matching follows
-Calibre's hierarchical convention — `tags:Fic.Fantasy` matches
-`Fic.Fantasy`, `Fic.Fantasy.Epic`, `Fic.Fantasy.Grimdark`, etc.
+### 2.2 Virtual Library (Wing) Resolution
+CalibreQuarry parses search expressions directly from the `preferences` table. It supports hierarchical tag matching (`tags:Fic.Fantasy`), boolean operators, and `vl:` cross-references.
 
 ### 2.3 Database Access
 
