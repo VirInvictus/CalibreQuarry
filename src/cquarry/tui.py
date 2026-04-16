@@ -474,6 +474,12 @@ _MAIN_SECTIONS = [
         "Audit (issues report)",
         "Search query export",
     ]),
+    ("ANALYTICS", [
+        "Author statistics",
+        "Reading pace stats",
+        "Tag tree visualization",
+        "Wing overlap analysis",
+    ]),
     ("LISTS", [
         "Recently added",
         "Series list (with gap detection)",
@@ -494,11 +500,15 @@ _MAIN_FALLBACK_MAP = {
     "3": (0, 2), "stats": (0, 2),
     "4": (0, 3), "audit": (0, 3),
     "5": (0, 4), "search": (0, 4),
-    "6": (1, 0), "recent": (1, 0),
-    "7": (1, 1), "series": (1, 1),
-    "8": (1, 2), "wings": (1, 2),
-    "9": (2, 0), "export": (2, 0),
-    "s": (3, 0), "settings": (3, 0), "config": (3, 0),
+    "6": (1, 0), "author": (1, 0),
+    "7": (1, 1), "pace": (1, 1),
+    "8": (1, 2), "tags": (1, 2),
+    "9": (1, 3), "overlap": (1, 3),
+    "10": (2, 0), "recent": (2, 0),
+    "11": (2, 1), "series": (2, 1),
+    "12": (2, 2), "wings": (2, 2),
+    "13": (3, 0), "export": (3, 0),
+    "s": (4, 0), "settings": (4, 0), "config": (4, 0),
     "q": None, "quit": None, "exit": None,
 }
 
@@ -508,12 +518,13 @@ def _select_main() -> Optional[tuple]:
         return _tui_select(f"CalibreQuarry v{VERSION}", _MAIN_SECTIONS)
     _box_menu(f"CalibreQuarry v{VERSION}", [
         ("OUTPUT", ["1) Build catalog", "2) Generate all wings", "3) Statistics", "4) Audit", "5) Search query export"]),
-        ("LISTS", ["6) Recently added", "7) Series list", "8) List wings"]),
-        ("EXPORT", ["9) Export (JSON/CSV/AI)"]),
+        ("ANALYTICS", ["6) Author statistics", "7) Reading pace", "8) Tag tree", "9) Wing overlap"]),
+        ("LISTS", ["10) Recently added", "11) Series list", "12) List wings"]),
+        ("EXPORT", ["13) Export (JSON/CSV/AI)"]),
         ("SETTINGS", ["s) Change database path"]),
         ("", ["q) Quit"]),
     ])
-    return _fallback_input("  Select [1-9/s/q]: ", _MAIN_FALLBACK_MAP)
+    return _fallback_input("  Select [1-13/s/q]: ", _MAIN_FALLBACK_MAP)
 
 
 # =====================================
@@ -573,10 +584,10 @@ def interactive_menu() -> int:
                 print("  Invalid selection.")
             continue
 
-        if result is None or result == (4, 0):  # Quit
+        if result is None or result == (5, 0):  # Quit
             return 0
 
-        if result == (3, 0):  # Change database path
+        if result == (4, 0):  # Change database path
             new_path = _prompt_path(f"Change database (current: {db_path})")
             resolved = os.path.expanduser(new_path)
             if os.path.isdir(resolved):
@@ -631,19 +642,35 @@ def interactive_menu() -> int:
                     _run_with_capture("Search Results", lambda: run_search_export(db, query, output))
 
             elif result == (1, 0):
+                _reset_terminal()
+                _run_with_capture("Author Stats", lambda: show_author_stats(db))
+
+            elif result == (1, 1):
+                _reset_terminal()
+                _run_with_capture("Reading Pace", lambda: show_pace_stats(db))
+
+            elif result == (1, 2):
+                _reset_terminal()
+                _run_with_capture("Tag Tree", lambda: show_tag_tree(db))
+
+            elif result == (1, 3):
+                _reset_terminal()
+                _run_with_capture("Wing Overlap", lambda: show_wing_overlap(db))
+
+            elif result == (2, 0):
                 count = _prompt_int("How many", 20)
                 _reset_terminal()
                 _run_with_capture("Recently Added", lambda: show_recent(db, count))
 
-            elif result == (1, 1):
+            elif result == (2, 1):
                 _reset_terminal()
                 _run_with_capture("Series List", lambda: show_series(db))
 
-            elif result == (1, 2):
+            elif result == (2, 2):
                 _reset_terminal()
                 _run_with_capture("Virtual Libraries", lambda: show_wings(db))
 
-            elif result == (2, 0):
+            elif result == (3, 0):
                 fmt = _prompt_str("Format (json/csv/ai)", "json")
                 output = _prompt_str("Output file", f"library.{fmt}")
                 _reset_terminal()

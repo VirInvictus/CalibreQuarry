@@ -9,6 +9,7 @@ from cquarry.db import CalibreDB
 from cquarry.helpers import find_db
 from cquarry.modes.catalog import write_catalog, write_all_wings
 from cquarry.modes.stats import show_stats
+from cquarry.modes.analytics import show_author_stats, show_pace_stats, show_tag_tree, show_wing_overlap
 from cquarry.modes.audit import run_audit
 from cquarry.modes.display import show_recent, show_series, show_wings
 from cquarry.modes.export import run_export, run_search_export
@@ -29,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Generate catalogs for all virtual libraries")
     group.add_argument("--stats", action="store_true",
                        help="Show library statistics")
+    group.add_argument("--analytics", choices=["author", "pace", "tags", "overlap"], default=None,
+                       help="Extended analytics and visualizations")
     group.add_argument("--audit", action="store_true",
                        help="Report issues (untagged, unrated, series gaps)")
     group.add_argument("--recent", type=int, nargs='?', const=20, default=None,
@@ -91,6 +94,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             if args.stats:
                 show_stats(db, quiet=args.quiet)
+                return 0
+
+            if args.analytics == "author":
+                show_author_stats(db, quiet=args.quiet)
+                return 0
+            elif args.analytics == "pace":
+                show_pace_stats(db, quiet=args.quiet)
+                return 0
+            elif args.analytics == "tags":
+                show_tag_tree(db, quiet=args.quiet)
+                return 0
+            elif args.analytics == "overlap":
+                show_wing_overlap(db, quiet=args.quiet)
                 return 0
 
             if args.audit:

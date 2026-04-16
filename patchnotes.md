@@ -1,5 +1,15 @@
 # CalibreQuarry — Patch Notes
 
+## v2.2.0 (2026-04-16)
+
+---
+
+### New Features
+
+**Extended Analytics.** Added a new `--analytics` argument with four detailed reporting modes: `author` (per-author breakdowns of formats, ratings, and series), `pace` (books added per month/year trend), `tags` (hierarchical taxonomy tree visualization), and `overlap` (virtual library wing overlap analysis). These are also accessible via a new `ANALYTICS` section in the interactive TUI.
+
+---
+
 ## v2.1.0 (2026-04-16)
 
 ---

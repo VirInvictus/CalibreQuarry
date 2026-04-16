@@ -41,12 +41,12 @@ What's done, what's next. Updated as of v2.0.0.
 
 - [x] **Search Query Export** — Run Calibre-style search expressions directly from the CLI to generate a text file of matching results. The tool will notify the user and avoid creating an empty file if the query yields no results.
 - [x] **AI-readable export** — token-efficient flat format for LLM recommendation prompts
-- [ ] **Tag tree visualization** — display the full hierarchical tag taxonomy as a tree
-- [ ] **Reading pace stats** — books added per month/year trend from `timestamp` column
+- [x] **Tag tree visualization** — display the full hierarchical tag taxonomy as a tree
+- [x] **Reading pace stats** — books added per month/year trend from `timestamp` column
 - [ ] **Duplicate detection** — same title+author appearing in multiple formats or editions
 - [ ] **Custom column support** — read user-defined Calibre columns for display and filtering
 - [ ] **Cover quality audit** — flag books with covers below a resolution threshold
-- [ ] **Author statistics** — per-author breakdowns (book count, ratings, formats, series)
-- [ ] **Wing overlap analysis** — show which books appear in multiple virtual libraries
+- [x] **Author statistics** — per-author breakdowns (book count, ratings, formats, series)
+- [x] **Wing overlap analysis** — show which books appear in multiple virtual libraries
 - [ ] **Format migration report** — identify books only available in deprecated formats (MOBI, LIT)
 - [ ] **Color CLI output** — ANSI color for terminal output in non-interactive mode
