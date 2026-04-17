@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from typing import Dict, List
 
 from cquarry.db import CalibreDB
-from cquarry.helpers import detect_series_gaps, get_jpeg_size, normalize_author_display
+from cquarry.helpers import C_ERR, C_HEADER, C_TITLE, C_WARN, color, detect_series_gaps, get_jpeg_size, normalize_author_display
 
 
 def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
