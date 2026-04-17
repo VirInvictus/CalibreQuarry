@@ -3,11 +3,11 @@ from __future__ import annotations
 import csv
 import os
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Dict, List
 
 from cquarry.db import CalibreDB
-from cquarry.helpers import detect_series_gaps
+from cquarry.helpers import detect_series_gaps, get_jpeg_size, normalize_author_display
 
 
 def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
@@ -15,6 +15,11 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
     books = db.get_all_books()
     all_series = db.get_all_series()
     issues: List[Dict[str, str]] = []
+    
+    DEPRECATED_FORMATS = {"MOBI", "LIT", "LRF", "DJVU", "PDB", "AZW"}
+    db_dir = os.path.dirname(db.db_path)
+    
+    title_author_groups = defaultdict(list)
 
     for b in books:
         problems: List[str] = []
@@ -27,8 +32,21 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
             problems.append("no_author")
         if not b['formats']:
             problems.append("no_file")
+        else:
+            formats = set(f.strip().upper() for f in b['formats'].split(','))
+            if formats and formats.issubset(DEPRECATED_FORMATS):
+                problems.append("deprecated_format_only")
+                
         if not b['has_cover']:
             problems.append("no_cover")
+        elif b['path']:
+            cover_path = os.path.join(db_dir, b['path'], 'cover.jpg')
+            if os.path.exists(cover_path):
+                size = get_jpeg_size(cover_path)
+                if size:
+                    w, h = size
+                    if max(w, h) < 500:
+                        problems.append(f"low_res_cover({w}x{h})")
 
         if problems:
             issues.append({
@@ -37,6 +55,23 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 "author": b['author_sort'] or '',
                 "issue_type": "book",
                 "issues": ", ".join(problems),
+            })
+            
+        # Group for duplicate detection
+        if b['title'] and b['authors']:
+            primary_author = normalize_author_display(b['authors'], primary_only=True)
+            key = (b['title'].strip().lower(), primary_author.strip().lower())
+            title_author_groups[key].append(str(b['id']))
+
+    for key, ids in title_author_groups.items():
+        if len(ids) > 1:
+            title, author = key
+            issues.append({
+                "id": ", ".join(ids),
+                "title": title.title(),
+                "author": author.title(),
+                "issue_type": "duplicate",
+                "issues": "duplicate_books",
             })
 
     for s in all_series:
@@ -62,6 +97,7 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
     if not quiet:
         book_issues = [i for i in issues if i['issue_type'] == 'book']
         series_issues = [i for i in issues if i['issue_type'] == 'series_gap']
+        duplicate_issues = [i for i in issues if i['issue_type'] == 'duplicate']
 
         issue_counts: Counter = Counter()
         for i in book_issues:
@@ -75,6 +111,11 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
             print("Book issues:")
             for problem, count in issue_counts.most_common():
                 print(f"  {problem}: {count}")
+
+        if duplicate_issues:
+            print(f"\nDuplicates found: {len(duplicate_issues)}")
+            for i in duplicate_issues[:10]:
+                print(f"  {i['title']} by {i['author']} (IDs: {i['id']})")
 
         if series_issues:
             print(f"\nSeries with gaps: {len(series_issues)}")

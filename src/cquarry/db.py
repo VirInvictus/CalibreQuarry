@@ -80,7 +80,7 @@ class CalibreDB:
             SELECT
                 b.id, b.title, b.sort as title_sort, b.author_sort,
                 b.timestamp, b.pubdate, b.has_cover, b.last_modified,
-                b.series_index,
+                b.series_index, b.path,
                 (SELECT GROUP_CONCAT(name, ', ') FROM (SELECT a_inner.name as name FROM books_authors_link bal JOIN authors a_inner ON a_inner.id = bal.author WHERE bal.book = b.id ORDER BY bal.id)) as authors,
                 (SELECT GROUP_CONCAT(format, ', ') FROM data d WHERE d.book = b.id) as formats,
                 (SELECT GROUP_CONCAT(name, ', ') FROM (SELECT t_inner.name as name FROM books_tags_link btl JOIN tags t_inner ON t_inner.id = btl.tag WHERE btl.book = b.id ORDER BY t_inner.name)) as tags,

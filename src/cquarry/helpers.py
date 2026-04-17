@@ -1,10 +1,47 @@
 from __future__ import annotations
 
 import os
+import struct
 import sys
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from cquarry.config import CALIBRE_RATING_SCALE, DEFAULT_DB_PATHS, get_db_path, set_db_path
+
+
+def get_jpeg_size(filepath: str) -> Optional[Tuple[int, int]]:
+    """Parse JPEG header to extract (width, height) without external dependencies."""
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read(1024) # only need the header
+            if not data or data[0:2] != b'\xff\xd8':
+                return None
+            
+            i = 2
+            while i < len(data):
+                # Ensure we are at a marker
+                while i < len(data) and data[i] != 0xff:
+                    i += 1
+                while i < len(data) and data[i] == 0xff:
+                    i += 1
+                
+                if i >= len(data):
+                    return None
+                
+                marker = data[i]
+                i += 1
+                
+                if marker in (0xc0, 0xc2): # SOF0 or SOF2
+                    if i + 7 <= len(data):
+                        height, width = struct.unpack(">HH", data[i+3:i+7])
+                        return width, height
+                
+                if i + 1 >= len(data):
+                    return None
+                length = struct.unpack(">H", data[i:i+2])[0]
+                i += length
+    except Exception:
+        pass
+    return None
 
 
 def calibre_rating_to_stars(rating: Optional[int]) -> Optional[float]:

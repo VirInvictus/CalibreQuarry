@@ -1,5 +1,18 @@
 # CalibreQuarry — Patch Notes
 
+## v2.3.0 (2026-04-16)
+
+---
+
+### New Features
+
+**Extended Audit Checks.** The `--audit` mode has been significantly expanded to include three new checks:
+- **Duplicate Detection**: Identifies books with identical titles and primary authors across the library.
+- **Cover Quality Audit**: Scans the actual JPEG cover files on disk (without external library dependencies) and flags covers with low resolution (below 500px on their longest edge).
+- **Format Migration Report**: Flags books that are only available in deprecated legacy formats (MOBI, LIT, LRF, DJVU, PDB, AZW).
+
+---
+
 ## v2.2.0 (2026-04-16)
 
 ---
