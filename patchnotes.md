@@ -1,5 +1,18 @@
 # CalibreQuarry — Patch Notes
 
+## v2.4.1 (2026-04-16)
+
+---
+
+### Completed Software & Bug Fixes
+
+**Completed Software Status.** Phase 4 has been concluded, and CalibreQuarry is now considered feature-complete and stable. It has undergone rigorous end-to-end testing against real-world Calibre databases.
+
+**Bug Fixes:**
+- Fixed a `NameError` crash in `--audit` mode where the newly introduced `color` helper was not imported, preventing the final summary from printing when issues were found.
+
+---
+
 ## v2.4.0 (2026-04-16)
 
 ---
