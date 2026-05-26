@@ -62,6 +62,7 @@ _TUI_INNER = _TUI_BOX_W - 2
 
 
 def _init_tui_colors() -> None:
+    """Set up the curses color pairs used by the TUI menus and pager."""
     curses.start_color()
     curses.use_default_colors()
     curses.init_pair(_CP_FRAME, curses.COLOR_CYAN, -1)
@@ -73,6 +74,7 @@ def _init_tui_colors() -> None:
 
 
 def _safe_addstr(stdscr, y: int, x: int, text: str, attr: int) -> None:
+    """addstr that silently ignores curses out-of-bounds errors."""
     try:
         stdscr.addstr(y, x, text, attr)
     except curses.error:
@@ -89,6 +91,7 @@ def _tui_select(
     sections: list,
     hints: str = "\u2191\u2193 Navigate  \u23ce Select  q Quit",
 ) -> Optional[tuple]:
+    """Full-screen arrow-key menu. Returns the chosen (section, item) or None."""
     BOX_W = _TUI_BOX_W
     INNER = _TUI_INNER
 
@@ -197,6 +200,7 @@ def _tui_select(
 
 
 def _tui_prompt_str(label: str, default: Optional[str]) -> str:
+    """Single-line text input box; Enter confirms, Esc returns the default."""
     BOX_W = _TUI_BOX_W
     INNER = _TUI_INNER
 
@@ -464,6 +468,7 @@ def _run_with_capture(title: str, func, *args, **kwargs) -> None:
 
 
 def _box_menu(title: str, sections: list, width: int = 44) -> None:
+    """Plain-text boxed menu, used when curses is unavailable."""
     iw = width - 4
     hbar = "\u2550" * (width - 2)
     lbar = "\u2500" * (width - 2)
@@ -483,6 +488,7 @@ def _box_menu(title: str, sections: list, width: int = 44) -> None:
 
 
 def _pause() -> None:
+    """Wait for the user to acknowledge before the menu redraws."""
     if _USE_CURSES:
         _tui_pause()
         return
