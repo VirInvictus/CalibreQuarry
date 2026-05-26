@@ -172,10 +172,20 @@ def scan(path: Path) -> dict:
             parts.append(clean_text(z, docs[-1]))
 
     text = " ".join(parts)
-    letters = [ord(c) for c in text if c.isalpha()]
-    scripts = Counter(s for cp in letters[:250_000] if (s := script_of(cp)))
+    # Count scripts over the first 250k letters in a single pass, instead of
+    # materializing a list of every letter's codepoint in a book-length string.
+    scripts: Counter = Counter()
+    total_letters = 0
+    for c in text:
+        if c.isalpha():
+            total_letters += 1
+            s = script_of(ord(c))
+            if s:
+                scripts[s] += 1
+            if total_letters >= 250_000:
+                break
     nonlatin = sum(scripts.values())
-    total_letters = min(len(letters), 250_000) or 1
+    total_letters = total_letters or 1
     words = WORD_RE.findall(text.lower())[:5000]
     ratios = {
         code: (sum(w in stops for w in words) / len(words) if words else 0.0)
@@ -230,17 +240,20 @@ def audit_library() -> int:
 
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     cur = con.cursor()
-    booktag = dict(
-        cur.execute(
-            "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"
-        )
-    )
-    declared = dict(
-        cur.execute(
-            "SELECT bl.book, l.lang_code FROM books_languages_link bl "
-            "JOIN languages l ON l.id = bl.lang_code"
-        )
-    )
+    # Aggregate ALL tags / languages per book. A plain dict() would keep only the
+    # last row, so a multi-tagged book (e.g. NonFic.Language.* plus a genre tag)
+    # could be misclassified as unexpected-foreign.
+    booktags: dict[int, list[str]] = {}
+    for bid, tname in cur.execute(
+        "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"
+    ):
+        booktags.setdefault(bid, []).append(tname)
+    declared: dict[int, set[str]] = {}
+    for bid, lang in cur.execute(
+        "SELECT bl.book, l.lang_code FROM books_languages_link bl "
+        "JOIN languages l ON l.id = bl.lang_code"
+    ):
+        declared.setdefault(bid, set()).add(lang)
     rows = cur.execute(
         "SELECT b.id, b.title, b.path, d.name FROM data d "
         "JOIN books b ON b.id = d.book WHERE d.format = 'EPUB'"
@@ -256,9 +269,13 @@ def audit_library() -> int:
 
     for book_id, title, path, name in rows:
         full = LIBRARY_ROOT / path / f"{name}.epub"
-        tag = booktag.get(book_id, "?")
-        decl = declared.get(book_id, "?")
-        expected = decl not in ("eng", "?") or tag.startswith("NonFic.Language.")
+        tags = booktags.get(book_id, [])
+        tag = tags[0] if tags else "?"
+        langs = declared.get(book_id, set())
+        decl = ",".join(sorted(langs)) if langs else "?"
+        expected = any(lang != "eng" for lang in langs) or any(
+            t.startswith("NonFic.Language.") for t in tags
+        )
         try:
             r = scan(full)
         except Exception as e:

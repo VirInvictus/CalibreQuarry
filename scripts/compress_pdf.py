@@ -74,7 +74,9 @@ def page_count(path: Path) -> int | None:
     if not pdfinfo:
         return None
     try:
-        out = subprocess.check_output([pdfinfo, str(path)], stderr=subprocess.DEVNULL, text=True)
+        out = subprocess.check_output(
+            [pdfinfo, str(path)], stderr=subprocess.DEVNULL, text=True
+        )
     except subprocess.CalledProcessError:
         return None
     for line in out.splitlines():
@@ -91,7 +93,7 @@ def pdf_features(path: Path) -> dict:
         "size": path.stat().st_size,
         "pages": None,
         "optimized": None,
-        "form": None,        # 'AcroForm', 'XFA', or 'none'
+        "form": None,  # 'AcroForm', 'XFA', or 'none'
         "javascript": None,  # True / False
         "attachments": 0,
         "avg_dpi": None,
@@ -111,13 +113,13 @@ def pdf_features(path: Path) -> dict:
                 if k == "Pages":
                     f["pages"] = int(v)
                 elif k == "Optimized":
-                    f["optimized"] = (v.lower() == "yes")
+                    f["optimized"] = v.lower() == "yes"
                 elif k == "Form":
                     f["form"] = v
                 elif k == "JavaScript":
-                    f["javascript"] = (v.lower() == "yes")
+                    f["javascript"] = v.lower() == "yes"
                 elif k == "Tagged":
-                    f["tagged"] = (v.lower() == "yes")
+                    f["tagged"] = v.lower() == "yes"
         except subprocess.CalledProcessError:
             pass
 
@@ -154,7 +156,7 @@ def pdf_features(path: Path) -> dict:
                     x_ppi = int(cols[12])
                     if x_ppi > 0:
                         dpis.append(x_ppi)
-                except (ValueError, IndexError):
+                except ValueError, IndexError:
                     continue
             f["image_count"] = len(dpis)
             if dpis:
@@ -189,13 +191,19 @@ def recommend(features: dict) -> tuple[str, str]:
         risks.append(f"{features['attachments']} embedded file(s) may drop")
 
     if dpi is None:
-        return "manual", "no raster images detected; inspect manually before compressing"
+        return (
+            "manual",
+            "no raster images detected; inspect manually before compressing",
+        )
 
     if optimized is True and size_mb < 200 and dpi <= 200:
         return "skip-optimized", "already optimized at moderate DPI; little to gain"
 
     if dpi < 150:
-        return "skip-already-low-dpi", f"avg image DPI is {dpi}; already at /ebook level"
+        return (
+            "skip-already-low-dpi",
+            f"avg image DPI is {dpi}; already at /ebook level",
+        )
 
     if risks:
         # Form/JS/attachments make /printer safer (still big savings, less aggressive)
@@ -221,7 +229,11 @@ def inspect_one(path: Path, brief: bool = False) -> dict:
         print(f"  form:           {f['form']}")
         print(f"  javascript:     {f['javascript']}")
         print(f"  attachments:    {f['attachments']}")
-        print(f"  images:         {f['image_count']}  (avg {f['avg_dpi']} DPI)" if f['avg_dpi'] else f"  images:         {f['image_count']}")
+        print(
+            f"  images:         {f['image_count']}  (avg {f['avg_dpi']} DPI)"
+            if f["avg_dpi"]
+            else f"  images:         {f['image_count']}"
+        )
         print(f"  verdict:        {verdict}")
         print(f"  rationale:      {why}")
         print()
@@ -244,7 +256,9 @@ def inspect_path(target: Path, min_size_mb: int) -> None:
             pdfs.append((sz, p))
     pdfs.sort(reverse=True)
 
-    print(f"{BOLD}Inspecting {len(pdfs)} PDF(s) over {min_size_mb} MB under {target}{RESET}\n")
+    print(
+        f"{BOLD}Inspecting {len(pdfs)} PDF(s) over {min_size_mb} MB under {target}{RESET}\n"
+    )
     summary: dict[str, list[tuple[Path, dict]]] = {}
     for _, p in pdfs:
         f = inspect_one(p, brief=False)
@@ -253,7 +267,14 @@ def inspect_path(target: Path, min_size_mb: int) -> None:
     print(f"{BOLD}=== Summary by verdict ==={RESET}")
     total_save_ebook = 0
     total_save_printer = 0
-    for v in ("ebook", "printer", "skip-already-low-dpi", "skip-optimized", "skip-small", "manual"):
+    for v in (
+        "ebook",
+        "printer",
+        "skip-already-low-dpi",
+        "skip-optimized",
+        "skip-small",
+        "manual",
+    ):
         if v not in summary:
             continue
         print(f"\n[{v}] ({len(summary[v])} file(s))")
@@ -275,9 +296,13 @@ def inspect_path(target: Path, min_size_mb: int) -> None:
     if total_save_ebook or total_save_printer:
         print()
         if total_save_ebook:
-            print(f"Estimated savings if /ebook on the 'ebook' bucket: ~{fmt_size(total_save_ebook)}")
+            print(
+                f"Estimated savings if /ebook on the 'ebook' bucket: ~{fmt_size(total_save_ebook)}"
+            )
         if total_save_printer:
-            print(f"Estimated savings if /printer on the 'printer' bucket: ~{fmt_size(total_save_printer)}")
+            print(
+                f"Estimated savings if /printer on the 'printer' bucket: ~{fmt_size(total_save_printer)}"
+            )
 
 
 def find_calibre_library(start: Path) -> Path | None:
@@ -288,32 +313,53 @@ def find_calibre_library(start: Path) -> Path | None:
     return None
 
 
-def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> bool:
-    """Update books_pages_link.format_size for the given file path.
-    Returns True if we found and updated the row."""
+def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> None:
+    """Sync books_pages_link.format_size for the given file, printing the outcome.
+
+    Best-effort: the PDF has already been replaced by the time this runs, so a
+    busy/locked database (Calibre open) or a missing row must never raise.
+    """
     rel = file_path.relative_to(library_root)
     parts = rel.parts
     if len(parts) < 3:
-        return False
+        return
     book_path = "/".join(parts[:2])
     fmt = file_path.suffix.lstrip(".").upper()
-
     db = library_root / "metadata.db"
-    con = sqlite3.connect(db)
+
+    try:
+        con = sqlite3.connect(db, timeout=5)
+    except sqlite3.Error as e:
+        print(f"{YELLOW}WARN{RESET}: could not open {db} to sync size: {e}")
+        return
     try:
         cur = con.cursor()
         cur.execute("SELECT id FROM books WHERE path = ?", (book_path,))
         row = cur.fetchone()
         if not row:
-            return False
+            print(
+                f"(Inside a Calibre library, but no book row for {book_path!r}; size not synced.)"
+            )
+            return
         book_id = row[0]
         cur.execute(
             "UPDATE books_pages_link SET format_size = ?, needs_scan = 1 WHERE book = ? AND format = ?",
             (new_size, book_id, fmt),
         )
-        n = cur.rowcount
         con.commit()
-        return n > 0
+        if cur.rowcount > 0:
+            print(f"Updated books_pages_link.format_size in {db}")
+        else:
+            print(
+                f"(No books_pages_link row for book {book_id}/{fmt}; size not synced.)"
+            )
+    except sqlite3.OperationalError as e:
+        print(
+            f"{YELLOW}WARN{RESET}: metadata.db is busy or locked ({e}). The PDF was "
+            "replaced; close Calibre and re-run to sync the page-size cache."
+        )
+    except sqlite3.Error as e:
+        print(f"{YELLOW}WARN{RESET}: could not sync size to metadata.db: {e}")
     finally:
         con.close()
 
@@ -332,7 +378,9 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
 
     print(f"{BOLD}Input{RESET}: {src}")
     print(f"  size:  {fmt_size(orig_size)}  ({orig_size:,} bytes)")
-    print(f"  pages: {orig_pages if orig_pages is not None else '(pdfinfo unavailable; skipping)'}")
+    print(
+        f"  pages: {orig_pages if orig_pages is not None else '(pdfinfo unavailable; skipping)'}"
+    )
     print(f"  preset: /{preset}")
 
     if out_dir is not None:
@@ -349,11 +397,13 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
         "-sDEVICE=pdfwrite",
         "-dCompatibilityLevel=1.5",
         f"-dPDFSETTINGS=/{preset}",
-        "-dNOPAUSE", "-dQUIET", "-dBATCH",
+        "-dNOPAUSE",
+        "-dQUIET",
+        "-dBATCH",
         f"-sOutputFile={out_tmp}",
         str(src),
     ]
-    print(f"\nRunning ghostscript...")
+    print("\nRunning ghostscript...")
     try:
         subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError as e:
@@ -373,16 +423,22 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
     print(f"  pages:  {new_pages} (was {orig_pages})")
 
     if orig_pages is not None and new_pages is not None and orig_pages != new_pages:
-        print(f"\n{RED}ABORT{RESET}: page count changed ({orig_pages} -> {new_pages}). Original untouched; temp dropped.")
+        print(
+            f"\n{RED}ABORT{RESET}: page count changed ({orig_pages} -> {new_pages}). Original untouched; temp dropped."
+        )
         out_tmp.unlink(missing_ok=True)
         return 1
     if new_size >= orig_size:
-        print(f"\n{YELLOW}No size win{RESET}: output is not smaller. Original untouched; temp dropped.")
+        print(
+            f"\n{YELLOW}No size win{RESET}: output is not smaller. Original untouched; temp dropped."
+        )
         out_tmp.unlink(missing_ok=True)
         return 1
 
     if dry_run:
-        print(f"\n{YELLOW}DRY-RUN{RESET}: leaving {out_tmp.name} in place; nothing replaced.")
+        print(
+            f"\n{YELLOW}DRY-RUN{RESET}: leaving {out_tmp.name} in place; nothing replaced."
+        )
         return 0
 
     if out_dir is not None:
@@ -400,30 +456,47 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
     # If the file sits inside a Calibre library, sync books_pages_link.format_size
     library = find_calibre_library(src.parent)
     if library:
-        updated = update_calibre_size(library, src, new_size)
-        if updated:
-            print(f"Updated books_pages_link.format_size in {library}/metadata.db")
-        else:
-            print(f"(File is inside a Calibre library but books_pages_link row was not found.)")
+        update_calibre_size(library, src, new_size)
 
     return 0
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Shrink a PDF via ghostscript, with verify-or-rollback.")
-    p.add_argument("path", type=Path,
-                   help="PDF (or directory with --inspect) to operate on")
-    p.add_argument("--preset", choices=PRESETS, default="ebook",
-                   help="ghostscript pdfwrite quality preset (default: ebook = 150 dpi)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="run compression to a temp file but do not replace the original")
-    p.add_argument("--inspect", action="store_true",
-                   help="report features and a per-file recommendation; do not compress")
-    p.add_argument("--min-size-mb", type=int, default=50,
-                   help="when --inspect is on a directory, skip PDFs smaller than this (default 50)")
-    p.add_argument("--out-dir", type=Path, default=None,
-                   help="write compressed copy to this directory instead of replacing in place "
-                        "(original PDF is left untouched; Calibre DB is not modified)")
+    p = argparse.ArgumentParser(
+        description="Shrink a PDF via ghostscript, with verify-or-rollback."
+    )
+    p.add_argument(
+        "path", type=Path, help="PDF (or directory with --inspect) to operate on"
+    )
+    p.add_argument(
+        "--preset",
+        choices=PRESETS,
+        default="ebook",
+        help="ghostscript pdfwrite quality preset (default: ebook = 150 dpi)",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="run compression to a temp file but do not replace the original",
+    )
+    p.add_argument(
+        "--inspect",
+        action="store_true",
+        help="report features and a per-file recommendation; do not compress",
+    )
+    p.add_argument(
+        "--min-size-mb",
+        type=int,
+        default=50,
+        help="when --inspect is on a directory, skip PDFs smaller than this (default 50)",
+    )
+    p.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="write compressed copy to this directory instead of replacing in place "
+        "(original PDF is left untouched; Calibre DB is not modified)",
+    )
     args = p.parse_args()
     if args.inspect:
         inspect_path(args.path.resolve(), args.min_size_mb)
