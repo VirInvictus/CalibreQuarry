@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cquarry"
-version = "2.6.0"
+version = "3.0.0"
 description = "Calibre library toolkit: catalog, stats, audit, export"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.14"
 license = {text = "MIT"}
 authors = [
   {name = "vrnvctss"}

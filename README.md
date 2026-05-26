@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.14%2B-blue" alt="Python 3.14+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
@@ -24,15 +24,17 @@ This tool reads the SQLite database directly in read-only mode. It resolves Cali
 | **Catalog** | `--catalog` | Formatted text catalog grouped by author, with ratings and series info |
 | **All wings** | `--all-wings` | Generate a separate catalog file for every virtual library |
 | **Statistics** | `--stats` | Format breakdown, rating distribution, tag taxonomy, publisher counts |
-| **Audit** | `--audit` | Report untagged, unrated, and coverless books; detect series gaps |
+| **Audit** | `--audit` | Report untagged, unrated, coverless, and low-resolution-cover books; deprecated-format-only and duplicate books; detect series gaps |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
-| **Export** | `--export` | Full library export to JSON or CSV for external tools |
+| **Analytics** | `--analytics {author,pace,tags,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, Wing-overlap analysis |
+| **Export** | `--export` | Full library export to JSON, CSV, or an AI-readable flat format |
+| **Search** | `--search QUERY` | Books matching a Calibre search expression; prints to stdout, or to a file with `--output` |
 | **Wings** | `--wings` | List all virtual libraries with book counts |
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
 | **Version** | `--version` | Show version and exit |
 
-Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--primary-only` collapses multi-author entries to the first author, `--quiet` suppresses decorative output.
+Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column, `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search`, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
 
 Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager, or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions.
 
@@ -60,7 +62,9 @@ PYTHONPATH=src python -m cquarry --stats
 
 ## Requirements
 
-Python 3.9+. Zero external dependencies — uses only stdlib modules (`sqlite3`, `json`, `csv`, `argparse`, `curses`).
+Python 3.14+. Zero external dependencies — uses only stdlib modules (`sqlite3`, `json`, `csv`, `argparse`, `curses`, `re`, `unicodedata`, `datetime`).
+
+(3.14 is the tested floor, matching the development environment. The code does not lean on bleeding-edge language features, so it is likely fine on somewhat older interpreters, but only 3.14+ is supported.)
 
 ## Usage
 
@@ -89,8 +93,21 @@ cquarry --recent 10 --db ~/Calibre/metadata.db
 # Series completeness and gap detection
 cquarry --series --db ~/Calibre/metadata.db
 
-# Export full library to JSON
+# Extended analytics: per-author stats, reading pace, tag tree, wing overlap
+cquarry --analytics author --db ~/Calibre/metadata.db
+cquarry --analytics pace --db ~/Calibre/metadata.db
+
+# Export full library to JSON (or CSV, or an AI-readable flat format)
 cquarry --export --db ~/Calibre/metadata.db --format json --output library.json
+
+# Search with a Calibre expression — prints to the terminal by default
+cquarry --search 'series:Mistborn and rating:>=4' --db ~/Calibre/metadata.db
+
+# Same search as JSON, written to a file
+cquarry --search 'tags:Fic.SciFi and pubdate:>2015' --format json --output recent_scifi.json
+
+# Display a custom column alongside catalog/export output
+cquarry --catalog --show-custom "Status" --db ~/Calibre/metadata.db
 
 # List all virtual library wings with counts
 cquarry --wings --db ~/Calibre/metadata.db
@@ -162,7 +179,7 @@ Tag taxonomy (392 tags):
 
 ## Search Syntax & Virtual Library Resolution
 
-CalibreQuarry features a pure-Python search expression parser that perfectly replicates Calibre's internal search rules. This engine is used both to resolve Virtual Libraries (Wings) directly from the `preferences` table, and for the `--search` CLI mode.
+CalibreQuarry ships a pure-Python search engine (`src/cquarry/search.py`) that ports Calibre's grammar and matching semantics as closely as the standard library allows. The same engine resolves Virtual Libraries (Wings) directly from the `preferences` table and powers the `--search` CLI mode, so your existing wing definitions work unchanged.
 
 ```
 # Virtual Library Definitions
@@ -177,13 +194,23 @@ cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'
 
 ### Supported Search Features
 
-* **Full Parity with Calibre:** The search engine has 100% parity with Calibre's internal search expression parser. It natively processes all standard operators, boolean groupings, quotes, and prefixes exactly as Calibre does.
-* **General Text Search**: Just like Calibre, an un-prefixed term (e.g., `Rice`) acts as a wildcard search across book titles, authors, and tags.
-* **Author Matching**: Use the `author:` or `authors:` prefixes to target authors.
-* **Prefix & Exact Matching**: By default, Calibre searches are substring/hierarchical. Searching for `tags:Fic.Fantasy` will match `Fic.Fantasy`, `Fic.Fantasy.Epic`, `Fic.Fantasy.Grimdark`, and so on. To disable prefix matching and search for an exact string, prepend an equals sign: `tags:"=Fic.Fantasy"`.
-* **Virtual Library Referencing**: You can use `vl:"Wing Name"` to cross-reference and search inside your existing Virtual Libraries.
-* **Boolean Logic**: Fully supports `AND`, `OR`, and `NOT` operators. An implicit `AND` operation is performed when just separating terms with a space (e.g., `tags:Fic tags:SciFi` is the same as `tags:Fic AND tags:SciFi`).
-* **Grouping**: Use parentheses `()` to enforce precedence in complex queries, such as `NOT(tags:Fic.Romance OR tags:Fic.Contemporary)` or `(tags:Fic OR tags:NonFic) AND NOT tags:Gaming`.
+* **Field locations**: `title`, `authors`/`author`, `author_sort`, `series`, `publisher`, `tags`/`tag`, `rating`, `formats`/`format`, `languages`/`language`, `pubdate`, `timestamp`/`date`, `last_modified`, `identifiers`/`identifier`/`isbn`, `comments`/`comment`, `cover`, `id`, `uuid`, `#custom` columns, plus `all` and `vl:`.
+* **General Text Search**: An un-prefixed term (e.g., `Rice`) is matched across title, authors, series, publisher, tags, and comments.
+* **Hierarchical tags**: `tags:Fic.Fantasy` matches `Fic.Fantasy` and everything below it (`Fic.Fantasy.Epic`, `Fic.Fantasy.Grimdark`, ...). Prepend `=` for an exact match: `tags:"=Fic.Fantasy"`.
+* **Match kinds**: contains (default; case- and accent-insensitive), `=` exact, `~` regex, `^` accent.
+* **Numbers and dates**: relational operators on numeric fields (`rating:>=4`, `id:<100`) and dates (`pubdate:>2015`, `date:>=2024-01-01`, `timestamp:30daysago`); `field:true`/`field:false` test presence/absence.
+* **Boolean logic**: `AND`, `OR`, `NOT`, with implicit `AND` between space-separated terms (`tags:Fic tags:SciFi` == `tags:Fic AND tags:SciFi`), and parentheses for grouping (`(tags:Fic OR tags:NonFic) AND NOT tags:Gaming`).
+* **Virtual Library Referencing**: `vl:"Wing Name"` cross-references an existing Wing (recursion is detected and reported).
+* **Empty query**: an empty `--search ''` returns the whole library, matching Calibre.
+
+#### Parity scope (stdlib-only deviations)
+
+Matching is near-complete but not bit-for-bit identical to Calibre, by design: CalibreQuarry has zero dependencies, while a few of Calibre's behaviors are tied to third-party libraries.
+
+* `~` regex uses Python's stdlib `re`, not Calibre's `regex` module (`\X`, `VERSION1` semantics differ).
+* Accent/contains folding uses `unicodedata` (NFKD), not ICU, so it is accent- and case-insensitive but not punctuation-insensitive.
+* GPM templates (`@...:`) and saved-search references (`search:`) are not evaluated.
+* `tags:` is **anchored-hierarchical** (matches `Foo` and `Foo.*`), where Calibre's raw default is an unanchored substring. This is intentional and is what curated dotted taxonomies want; use `=` for strict exact.
 
 ### Quote Handling (`"` and `'`)
 
@@ -203,17 +230,20 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 * Unquoted spaces will break your shell command: `cquarry --search tags:Fic OR tags:SciFi` (Your shell thinks `OR` is a separate argument; instead use `--search 'tags:Fic OR tags:SciFi'`).
 * Mismatched quotes will cause parsing errors: `cquarry --search "tags:'Fic.SciFi'"` (Calibre expects double quotes `"` internally, not single quotes).
 
-### Automated Search Test Suite
+### Automated Test Suite
 
-CalibreQuarry includes an extensive automated test suite `tests/test_search.py` strictly designed to ensure zero drift from Calibre's native behavior. The suite verifies:
-- Un-prefixed general term matching
-- Implicit `AND` operations
-- Exact string matching via `=` prefix
-- Complex grouped boolean combinations and parenthetical negative lookaheads (`NOT(...)`)
+`tests/test_search.py` and `tests/test_helpers.py` run without a Calibre library (stdlib `unittest`):
+
+- **Grammar** (`tests/test_search.py`): parser AST cases adapted from Calibre's own `search_query_parser_test.py`, covering quotes, escapes, colon handling in values, implicit `AND`, `OR`/`NOT`, and grouping.
+- **Matching**: a battery against an in-memory provider, covering hierarchical tags, `=` exact, numeric/date relational, booleans, identifiers, `vl:` recursion, accent folding, and empty-query-is-all.
+- **Integration**: a temporary SQLite fixture shaped like a Calibre `metadata.db`, exercising the full `CalibreDB` stack (search, `resolve_vl`, the Python-side series rollup).
+- **Helpers** (`tests/test_helpers.py`): rating-to-stars and the half-star glyph, series-gap detection, and the JPEG/PNG cover sizers (including a JPEG whose SOF sits past the first 1 KB).
+
+Run them with `PYTHONPATH=src python -m unittest tests.test_search tests.test_helpers`. The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
 
 ## How it reads the database
 
-CalibreQuarry opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, and `preferences`. No custom columns are required.
+CalibreQuarry opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, `identifiers`, `comments`, and `preferences`. Custom columns are not required, but are read on demand for `--show-custom` and `#column` searches.
 
 If Calibre is running and holds a lock on the database, CalibreQuarry copies it (along with any WAL/SHM journal files) to a temporary snapshot and reads from that. A notice is printed to stderr; the temp files are cleaned up on exit.
 
@@ -228,37 +258,81 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 ## Full help output
 
 ```
-usage: cquarry [-h] [--version]
-               [--catalog | --all-wings | --stats | --audit | --recent [RECENT]
-               | --series | --export | --wings] [--db DB] [--wing WING]
-               [--output OUTPUT] [--outdir OUTDIR] [--format {json,csv}]
-               [--primary-only] [--show-tags] [--show-id] [--quiet]
+usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
+               --analytics {author,pace,tags,overlap} | --audit |
+               --recent [RECENT] | --series | --export | --search QUERY |
+               --wings | --tags] [--db DB] [--wing WING] [--output OUTPUT]
+               [--outdir OUTDIR] [--format {json,csv,ai}] [--primary-only]
+               [--show-tags] [--show-id] [--show-custom COL_NAME] [--quiet]
 
 Calibre library toolkit: catalog, stats, audit, export
 
 options:
-  -h, --help           show this help message and exit
-  --version            show program's version number and exit
-  --catalog            Build a text catalog
-  --all-wings          Generate catalogs for all virtual libraries
-  --stats              Show library statistics
-  --audit              Report issues (untagged, unrated, series gaps)
-  --recent [RECENT]    Show N most recently added books (default: 20)
-  --series             List all series with completeness and gap detection
-  --export             Export library to JSON or CSV
-  --wings              List all virtual library wings
-  --tags               Dump every tag with its book count
-  --db DB              Path to Calibre metadata.db (auto-detected if omitted)
-  --wing WING          Filter to a specific virtual library wing
-  --output OUTPUT      Output file path
-  --outdir OUTDIR      Output directory for --all-wings (default: current dir)
-  --format {json,csv}  Export format (default: json)
-  --primary-only       Use only the first author (useful for TTRPG
-                       collections)
-  --show-tags          Show tags instead of ratings in catalog output
-  --show-id            Prefix each book with its Calibre ID for scripting
-  --quiet              Minimize output
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
+  --catalog             Build a text catalog
+  --all-wings           Generate catalogs for all virtual libraries
+  --stats               Show library statistics
+  --analytics {author,pace,tags,overlap}
+                        Extended analytics and visualizations
+  --audit               Report issues (untagged, unrated, series gaps)
+  --recent [RECENT]     Show N most recently added books (default: 20)
+  --series              List all series with completeness and gap detection
+  --export              Export library to JSON, CSV, or AI format
+  --search QUERY        Show/export books matching a Calibre search expression
+                        (prints to stdout unless --output is given; empty
+                        query = whole library)
+  --wings               List all virtual library wings
+  --tags                Dump every tag with its book count
+  --db DB               Path to Calibre metadata.db (auto-detected if omitted)
+  --wing WING           Filter to a specific virtual library wing
+  --output OUTPUT       Output file path
+  --outdir OUTDIR       Output directory for --all-wings (default: current dir)
+  --format {json,csv,ai}
+                        Output format. --export defaults to json; --search
+                        defaults to a plain-text listing unless a format is
+                        given here
+  --primary-only        Use only the first author (useful for TTRPG
+                        collections)
+  --show-tags           Show tags instead of ratings in catalog output
+  --show-id             Prefix each book with its Calibre ID for scripting
+  --show-custom COL_NAME
+                        Load and display a specific custom column
+  --quiet               Minimize output
 ```
+
+## Companion scripts
+
+The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and one of them writes. They are stdlib-only Python, but shell out to external command-line tools. Both are designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
+
+### `compress_pdf.py` — shrink oversize PDFs (writes)
+
+Re-encodes a bloated PDF (think 1 GB TTRPG sourcebooks) through Ghostscript with a quality preset, but only after verifying the result: it aborts if the page count changes or the output isn't smaller, and it keeps the original as `<name>.pre-compress.pdf`. If the file lives in a Calibre library, it also updates `books_pages_link.format_size` so Calibre doesn't treat its cache as stale.
+
+> **This script modifies files and `metadata.db`.** It is the reason the companion scripts live outside the read-only `cquarry` package. Back up before a bulk run; close Calibre first.
+
+Requires `gs` (Ghostscript); optionally uses `pdfinfo` / `pdfimages` / `pdfdetach` (poppler) for page-count verification and the `--inspect` report.
+
+```bash
+python3 scripts/compress_pdf.py book.pdf                 # /ebook (150 dpi), in place + rollback copy
+python3 scripts/compress_pdf.py book.pdf --preset screen # smaller, lower quality
+python3 scripts/compress_pdf.py book.pdf --dry-run       # compress to a temp file, replace nothing
+python3 scripts/compress_pdf.py ./Library --inspect      # per-file recommendation, no changes
+python3 scripts/compress_pdf.py book.pdf --out-dir ~/out # write a copy elsewhere; original untouched
+```
+
+Exit codes: `0` compressed/verified (or clean inspect), `1` aborted (no shrink, page-count mismatch), `2` setup error (Ghostscript missing, unreadable file).
+
+### `audit_epub_content.py` — flag non-English / tampered EPUBs (read-only)
+
+Reads the actual text of EPUBs to catch problems metadata can't: editions whose body is in the wrong language (declared `eng` but actually Portuguese, Russian, etc.) and an injected foreign-language ad-notice signature. It votes a language across stopword sets and counts non-Latin script, and opens `metadata.db` strictly `mode=ro`.
+
+```bash
+python3 audit_epub_content.py              # audit the whole library (run from the library dir)
+python3 audit_epub_content.py ~/Downloads  # vet loose .epub files before importing them
+```
+
+Exit codes: `0` clean, `1` foreign-language content or injection signature found, `2` setup error.
 
 ## Support
 

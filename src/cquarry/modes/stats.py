@@ -17,8 +17,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     # Format breakdown
     format_counts: Counter = Counter()
     for b in books:
-        if b['formats']:
-            for fmt in b['formats'].split(','):
+        if b["formats"]:
+            for fmt in b["formats"].split(","):
                 format_counts[fmt.strip()] += 1
     print("Formats:")
     for fmt, count in format_counts.most_common():
@@ -30,13 +30,13 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     rated = 0
     rating_counts: Counter = Counter()
     for b in books:
-        stars = calibre_rating_to_stars(b['rating'])
+        stars = calibre_rating_to_stars(b["rating"])
         if stars is not None:
             rating_counts[stars] += 1
             rated += 1
+    max_count = max(rating_counts.values()) if rating_counts else 0
     for stars in sorted(rating_counts.keys()):
         count = rating_counts[stars]
-        max_count = max(rating_counts.values())
         bar = "\u2588" * (count * 40 // max_count) if max_count else ""
         star_str = "\u2605" * int(stars)
         print(f"  {star_str:5s} ({stars:.1f})  {count:5d}  {bar}")
@@ -47,8 +47,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     # Top authors
     author_counts: Counter = Counter()
     for b in books:
-        if b['authors']:
-            author = normalize_author_display(b['authors'], primary_only=True)
+        if b["authors"]:
+            author = normalize_author_display(b["authors"], primary_only=True)
             author_counts[author] += 1
     print(f"\nTop authors ({len(author_counts)} distinct):")
     for author, count in author_counts.most_common(10):
@@ -57,8 +57,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     # Top tags
     tag_counts: Counter = Counter()
     for b in books:
-        if b['tags']:
-            for t in b['tags'].split(','):
+        if b["tags"]:
+            for t in b["tags"].split(","):
                 tag_counts[t.strip()] += 1
     print(f"\nTop tags ({len(tag_counts)} distinct):")
     for tag, count in tag_counts.most_common(15):
@@ -68,7 +68,7 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     tags = db.get_all_tags()
     top_level: Counter = Counter()
     for t in tags:
-        prefix = t.split('.')[0] if '.' in t else t
+        prefix = t.split(".")[0] if "." in t else t
         top_level[prefix] += 1
     print(f"\nTag taxonomy ({len(tags)} tags):")
     for prefix, count in top_level.most_common():
@@ -78,14 +78,14 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     all_series = db.get_all_series()
     print(f"\nSeries: {len(all_series)} series tracked")
     print("Largest:")
-    for s in sorted(all_series, key=lambda x: x['book_count'], reverse=True)[:10]:
+    for s in sorted(all_series, key=lambda x: x["book_count"], reverse=True)[:10]:
         print(f"  {s['name']}: {s['book_count']} books")
 
     # Publisher
     pub_counts: Counter = Counter()
     for b in books:
-        if b['publisher']:
-            pub_counts[b['publisher']] += 1
+        if b["publisher"]:
+            pub_counts[b["publisher"]] += 1
     print(f"\nPublishers: {len(pub_counts)} distinct")
     print("Most represented:")
     for pub, count in pub_counts.most_common(10):
@@ -94,8 +94,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     # Language
     lang_counts: Counter = Counter()
     for b in books:
-        if b['languages']:
-            for lang in b['languages'].split(','):
+        if b["languages"]:
+            for lang in b["languages"].split(","):
                 lang_counts[lang.strip()] += 1
     if len(lang_counts) > 1:
         print("\nLanguages:")
@@ -103,15 +103,15 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
             print(f"  {lang}: {count}")
 
     # Cover status
-    no_cover = sum(1 for b in books if not b['has_cover'])
+    no_cover = sum(1 for b in books if not b["has_cover"])
     if no_cover:
         print(f"\nMissing covers: {no_cover}")
 
     # Recently added
     if not quiet:
         print("\nMost recently added:")
-        by_date = sorted(books, key=lambda b: b['timestamp'] or '', reverse=True)
+        by_date = sorted(books, key=lambda b: b["timestamp"] or "", reverse=True)
         for b in by_date[:5]:
-            date = (b['timestamp'] or '')[:10]
-            author = normalize_author_display(b['authors'], primary_only=True)
+            date = (b["timestamp"] or "")[:10]
+            author = normalize_author_display(b["authors"], primary_only=True)
             print(f"  [{date}] {author} \u2014 {b['title']}")

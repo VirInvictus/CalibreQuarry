@@ -2,6 +2,9 @@
 DB_PATH="/home/bdkl/docs/Calibre Library/metadata.db"
 export PYTHONPATH=src
 
+# Representative queries exercising the search engine. Each is streamed to
+# stdout and its own "Matches:" line is read back, so a query that legitimately
+# returns nothing can't show a previous query's stale count.
 queries=(
   "tags:Fic"
   "tags:\"=Fic.Fantasy\""
@@ -12,16 +15,25 @@ queries=(
   "(tags:Fic OR tags:NonFic) AND NOT tags:Gaming"
   "vl:\"The Tabletop\""
   "tags:Fic and (not tags:Horror) and tags:\"=Fic.SciFi.Cyberpunk\""
+  "author:Sanderson"
+  "series:Mistborn"
+  "rating:>=4"
+  "rating:5 and tags:Fic"
+  "pubdate:>2015"
+  "formats:EPUB and not formats:PDF"
+  "languages:eng"
+  "identifiers:isbn:true"
+  "cover:false"
 )
 
 for q in "${queries[@]}"; do
-  echo "Testing: $q"
-  python -m cquarry --search "$q" --db "$DB_PATH" --output /tmp/query_test.txt --quiet
-  if [ $? -ne 0 ]; then
-    echo "FAILED SYNTAX: $q"
+  out=$(python -m cquarry --search "$q" --db "$DB_PATH" --quiet 2>/dev/null)
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    echo "FAILED: $q (exit $rc)"
     exit 1
   fi
-  head -n 2 /tmp/query_test.txt | grep "Matches" || echo "No matches (but syntax OK)"
-  echo "---"
+  matches=$(printf '%s\n' "$out" | grep -m1 "^Matches:")
+  printf '%-58s %s\n' "$q" "${matches:-(no results)}"
 done
 echo "All syntax tests passed."

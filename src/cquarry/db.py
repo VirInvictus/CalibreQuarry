@@ -8,12 +8,26 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from cquarry.helpers import calibre_rating_to_stars
+from cquarry.search import (
+    DT_BOOL,
+    DT_DATE,
+    DT_FLOAT,
+    DT_INT,
+    DT_TEXT,
+    DT_TEXT_MULTI,
+    SearchEngine,
+)
+
 
 class CalibreDB:
     """Read-only interface to Calibre's metadata.db.
 
     If the database is locked by Calibre, automatically copies it to a
     temporary file and reads from the copy instead.
+
+    Also implements the search.MetadataProvider interface so the search
+    engine can resolve expressions against this library.
     """
 
     def __init__(self, db_path: str):
@@ -24,6 +38,13 @@ class CalibreDB:
         self._vl_cache: Optional[Dict[str, str]] = None
         self._books_cache: Optional[List[Dict[str, Any]]] = None
         self._all_ids_cache: Optional[Set[int]] = None
+
+        # Search-engine state (lazily built).
+        self._search_engine: Optional[SearchEngine] = None
+        self._search_view: Optional[Dict[int, Dict[str, Any]]] = None
+        self._custom_loc_cache: Optional[Dict[str, str]] = None
+        self._custom_label_cache: Optional[Dict[str, Dict[str, Any]]] = None
+        self._custom_val_cache: Dict[str, Dict[int, Any]] = {}
 
         self.conn = self._open(db_path)
         self.conn.row_factory = sqlite3.Row
@@ -39,8 +60,11 @@ class CalibreDB:
             if "locked" not in str(e).lower():
                 raise
         # Calibre has the DB locked — copy to a temp file and read from there
-        print("NOTE: Database is locked (Calibre is running). "
-              "Reading from a snapshot copy.", file=sys.stderr)
+        print(
+            "NOTE: Database is locked (Calibre is running). "
+            "Reading from a snapshot copy.",
+            file=sys.stderr,
+        )
         fd, tmp = tempfile.mkstemp(suffix=".db", prefix="cquarry_")
         os.close(fd)
         shutil.copy2(db_path, tmp)
@@ -103,12 +127,12 @@ class CalibreDB:
     def get_identifiers(self, book_id: int) -> Dict[str, str]:
         cur = self.conn.cursor()
         cur.execute("SELECT type, val FROM identifiers WHERE book = ?", (book_id,))
-        return {row['type']: row['val'] for row in cur.fetchall()}
+        return {row["type"]: row["val"] for row in cur.fetchall()}
 
     def get_all_tags(self) -> List[str]:
         cur = self.conn.cursor()
         cur.execute("SELECT DISTINCT name FROM tags ORDER BY name")
-        return [row['name'] for row in cur.fetchall()]
+        return [row["name"] for row in cur.fetchall()]
 
     def get_tag_counts(self) -> List[Tuple[str, int]]:
         """Return [(tag_name, book_count), ...] sorted by tag name."""
@@ -120,30 +144,53 @@ class CalibreDB:
             GROUP BY t.id, t.name
             ORDER BY t.name
         """)
-        return [(row['name'], row['count']) for row in cur.fetchall()]
+        return [(row["name"], row["count"]) for row in cur.fetchall()]
 
     def get_all_series(self) -> List[Dict[str, Any]]:
-        cur = self.conn.cursor()
-        cur.execute("""
-            SELECT s.name,
-                   COUNT(b.id) as book_count,
-                   GROUP_CONCAT(b.series_index ORDER BY b.series_index) as indices,
-                   MAX(b.series_index) as max_index,
-                   GROUP_CONCAT(b.title ORDER BY b.series_index) as titles
-            FROM books_series_link bsl
-            JOIN series s ON s.id = bsl.series
-            JOIN books b ON b.id = bsl.book
-            GROUP BY s.name
-            ORDER BY s.name
-        """)
-        return [dict(row) for row in cur.fetchall()]
+        """Return per-series rollups, computed in Python from get_all_books().
+
+        Computing this here (rather than via SQL GROUP_CONCAT(... ORDER BY ...))
+        keeps cquarry working on SQLite older than 3.44, where the in-aggregate
+        ORDER BY is a syntax error.
+        """
+        groups: Dict[str, Dict[str, Any]] = {}
+        for b in self.get_all_books():
+            name = b["series"]
+            if not name:
+                continue
+            g = groups.setdefault(name, {"indices": [], "titles": []})
+            g["indices"].append(b["series_index"])
+            g["titles"].append((b["series_index"], b["title"]))
+
+        out: List[Dict[str, Any]] = []
+        for name in sorted(groups):
+            g = groups[name]
+            present = [i for i in g["indices"] if i is not None]
+            present.sort()
+            titles_sorted = [
+                t
+                for _, t in sorted(g["titles"], key=lambda x: (x[0] is None, x[0] or 0))
+                if t
+            ]
+            out.append(
+                {
+                    "name": name,
+                    "book_count": len(g["indices"]),
+                    "indices": ",".join(str(i) for i in present),
+                    "max_index": max(present) if present else None,
+                    "titles": ",".join(titles_sorted),
+                }
+            )
+        return out
 
     def get_custom_columns(self) -> Dict[str, Dict[str, Any]]:
         """Return metadata for all custom columns, keyed by display name."""
         cur = self.conn.cursor()
         try:
-            cur.execute("SELECT id, label, name, datatype, is_multiple FROM custom_columns")
-            return {row['name']: dict(row) for row in cur.fetchall()}
+            cur.execute(
+                "SELECT id, label, name, datatype, is_multiple FROM custom_columns"
+            )
+            return {row["name"]: dict(row) for row in cur.fetchall()}
         except sqlite3.OperationalError:
             return {}
 
@@ -151,36 +198,41 @@ class CalibreDB:
         """Load values for a specific custom column (by display name). Returns {book_id: value(s)}."""
         cols = self.get_custom_columns()
         if col_name not in cols:
-            raise ValueError(f"Custom column '{col_name}' not found. Available: {', '.join(cols.keys())}")
-        
+            raise ValueError(
+                f"Custom column '{col_name}' not found. Available: {', '.join(cols.keys())}"
+            )
+
         col = cols[col_name]
-        cid = col['id']
+        cid = col["id"]
         cur = self.conn.cursor()
-        
+
         results = {}
         try:
-            if col['is_multiple']:
+            if col["is_multiple"]:
                 # For multiple values (e.g. tags-like), it's a many-to-many relationship
                 cur.execute(f"""
-                    SELECT l.book, c.value 
+                    SELECT l.book, c.value
                     FROM books_custom_column_{cid}_link l
                     JOIN custom_column_{cid} c ON c.id = l.value
                 """)
                 for row in cur.fetchall():
-                    book_id = row['book']
+                    book_id = row["book"]
                     if book_id not in results:
                         results[book_id] = []
-                    results[book_id].append(row['value'])
+                    results[book_id].append(row["value"])
                 # Convert lists to comma-separated strings for consistency with other fields
                 return {k: ", ".join(v) for k, v in results.items()}
             else:
                 # For single values (text, int, bool, date), it's one-to-one
                 cur.execute(f"SELECT book, value FROM custom_column_{cid}")
                 for row in cur.fetchall():
-                    results[row['book']] = row['value']
+                    results[row["book"]] = row["value"]
                 return results
         except sqlite3.OperationalError as e:
-            print(f"Warning: could not read custom column '{col_name}': {e}", file=sys.stderr)
+            print(
+                f"Warning: could not read custom column '{col_name}': {e}",
+                file=sys.stderr,
+            )
             return {}
 
     def get_virtual_libraries(self) -> Dict[str, str]:
@@ -191,7 +243,7 @@ class CalibreDB:
         cur.execute("SELECT val FROM preferences WHERE key = 'virtual_libraries'")
         row = cur.fetchone()
         if row:
-            self._vl_cache = json.loads(row['val'])
+            self._vl_cache = json.loads(row["val"])
         else:
             self._vl_cache = {}
         return self._vl_cache
@@ -203,264 +255,158 @@ class CalibreDB:
             return len(self._books_cache)
         cur = self.conn.cursor()
         cur.execute("SELECT COUNT(*) as c FROM books")
-        return cur.fetchone()['c']
+        return cur.fetchone()["c"]
 
-    # --- Virtual library resolution ---
+    # --- Search & virtual library resolution ---
+
+    def _engine(self) -> SearchEngine:
+        if self._search_engine is None:
+            self._search_engine = SearchEngine(self)
+        return self._search_engine
 
     def search(self, query: str) -> Set[int]:
-        """Resolve an arbitrary Calibre search expression."""
-        return self._eval_vl_expr(query, set())
+        """Resolve an arbitrary Calibre search expression to a set of book IDs."""
+        return self._engine().search(query)
 
     def resolve_vl(self, vl_name: str) -> Set[int]:
         """Resolve a virtual library name to a set of book IDs.
 
-        Parses Calibre's VL search expressions, which use:
-          tags:Pattern  -- match books with a tag matching Pattern
-          vl:Name       -- reference another virtual library
-          or / and / not -- boolean combinators
-          = prefix      -- exact match (e.g., tags:\"=Fic.Speculative\")
+        Parses Calibre's VL search expressions (tags, vl cross-references,
+        boolean operators, and all other field locations the engine supports).
         """
         vls = self.get_virtual_libraries()
         if vl_name not in vls:
-            raise ValueError(f"Unknown virtual library: '{vl_name}'. "
-                             f"Available: {', '.join(sorted(vls.keys()))}")
-        return self._eval_vl_expr(vls[vl_name], set())
+            raise ValueError(
+                f"Unknown virtual library: '{vl_name}'. "
+                f"Available: {', '.join(sorted(vls.keys()))}"
+            )
+        return self._engine().search(vls[vl_name])
 
-    def _eval_vl_expr(self, expr: str, seen: Set[str]) -> Set[int]:
-        """Evaluate a Calibre VL search expression."""
-        expr = expr.strip()
-        tokens = self._tokenize_vl(expr)
-        return self._parse_or(tokens, seen)
+    # --- search.MetadataProvider interface ---
 
-    def _tokenize_vl(self, expr: str) -> List[str]:
-        """Tokenize a VL expression into atoms and operators."""
-        tokens: List[str] = []
-        i = 0
-        while i < len(expr):
-            if expr[i].isspace():
-                i += 1
-                continue
-            if expr[i] == '(':
-                tokens.append('(')
-                i += 1
-            elif expr[i] == ')':
-                tokens.append(')')
-                i += 1
-            elif expr[i:i + 5].lower() == 'tags:':
-                i += 5
-                pattern, i = self._read_value(expr, i)
-                tokens.append(f"tags:{pattern}")
-            elif expr[i:i + 8].lower() == 'authors:':
-                i += 8
-                pattern, i = self._read_value(expr, i)
-                tokens.append(f"authors:{pattern}")
-            elif expr[i:i + 7].lower() == 'author:':
-                i += 7
-                pattern, i = self._read_value(expr, i)
-                tokens.append(f"authors:{pattern}")
-            elif expr[i:i + 3].lower() == 'vl:':
-                i += 3
-                name, i = self._read_value(expr, i)
-                tokens.append(f"vl:{name}")
-            elif expr[i:i + 2].lower() == 'or':
-                if i + 2 >= len(expr) or not (expr[i + 2].isalnum() or expr[i + 2] == '_'):
-                    tokens.append('OR')
-                    i += 2
-                else:
-                    word, i = self._read_word(expr, i)
-                    tokens.append(word)
-            elif expr[i:i + 3].lower() == 'and':
-                if i + 3 >= len(expr) or not (expr[i + 3].isalnum() or expr[i + 3] == '_'):
-                    tokens.append('AND')
-                    i += 3
-                else:
-                    word, i = self._read_word(expr, i)
-                    tokens.append(word)
-            elif expr[i:i + 3].lower() == 'not':
-                if i + 3 >= len(expr) or not (expr[i + 3].isalnum() or expr[i + 3] == '_'):
-                    tokens.append('NOT')
-                    i += 3
-                else:
-                    word, i = self._read_word(expr, i)
-                    tokens.append(word)
-            else:
-                word, i = self._read_word(expr, i)
-                if word:
-                    tokens.append(word)
-        return tokens
+    def all_ids(self) -> Set[int]:
+        return set(self._get_all_book_ids())
 
-    @staticmethod
-    def _read_value(expr: str, i: int) -> Tuple[str, int]:
-        """Read a quoted or unquoted value from position i."""
-        if i < len(expr) and expr[i] == '"':
-            try:
-                end = expr.index('"', i + 1)
-            except ValueError:
-                return expr[i + 1:], len(expr)
-            return expr[i + 1:end], end + 1
-        start = i
-        while i < len(expr) and expr[i] not in ' \t()':
-            i += 1
-        return expr[start:i], i
+    def vl_expression(self, name: str) -> Optional[str]:
+        return self.get_virtual_libraries().get(name)
 
-    @staticmethod
-    def _read_word(expr: str, i: int) -> Tuple[str, int]:
-        start = i
-        while i < len(expr) and expr[i] not in ' \t()':
-            i += 1
-        return expr[start:i], i
+    def custom_locations(self) -> Dict[str, str]:
+        cache = self._custom_loc_cache
+        if cache is None:
+            cache = self._custom_loc_cache = self._build_custom_locations()
+        return cache
 
-    def _parse_or(self, tokens: List[str], seen: Set[str]) -> Set[int]:
-        result = self._parse_and(tokens, seen)
-        while tokens and tokens[0] == 'OR':
-            tokens.pop(0)
-            right = self._parse_and(tokens, seen)
-            result = result | right
-        return result
+    def field(self, book_id: int, location: str) -> Any:
+        if location.startswith("#"):
+            return self._custom_value(book_id, location)
+        rec = self._build_search_view().get(book_id)
+        return rec.get(location) if rec else None
 
-    def _parse_and(self, tokens: List[str], seen: Set[str]) -> Set[int]:
-        result = self._parse_not(tokens, seen)
-        while tokens and tokens[0] not in ('OR', ')'):
-            if tokens[0] == 'AND':
-                tokens.pop(0)
-            right = self._parse_not(tokens, seen)
-            result = result & right
-        return result
+    # --- search-engine internals ---
 
     def _get_all_book_ids(self) -> Set[int]:
         """Return all book IDs, cached."""
         if self._all_ids_cache is None:
-            self._all_ids_cache = {row['id'] for row in
-                                   self.conn.execute("SELECT id FROM books").fetchall()}
+            self._all_ids_cache = {
+                row["id"]
+                for row in self.conn.execute("SELECT id FROM books").fetchall()
+            }
         return self._all_ids_cache
 
-    def _parse_not(self, tokens: List[str], seen: Set[str]) -> Set[int]:
-        if tokens and tokens[0] == 'NOT':
-            tokens.pop(0)
-            operand = self._parse_not(tokens, seen)
-            return self._get_all_book_ids() - operand
-        return self._parse_atom(tokens, seen)
+    def _build_search_view(self) -> Dict[int, Dict[str, Any]]:
+        """Build a per-book, normalized field view for the search engine."""
+        if self._search_view is not None:
+            return self._search_view
 
-    def _parse_atom(self, tokens: List[str], seen: Set[str]) -> Set[int]:
-        if not tokens:
-            return set()
+        def _split(s: Optional[str]) -> List[str]:
+            return [p.strip() for p in s.split(",")] if s else []
 
-        token = tokens[0]
-
-        if token == '(':
-            tokens.pop(0)
-            result = self._parse_or(tokens, seen)
-            if tokens and tokens[0] == ')':
-                tokens.pop(0)
-            return result
-
-        tokens.pop(0)
-
-        if token.startswith('tags:'):
-            pattern = token[5:]
-            return self._match_tags(pattern)
-        elif token.startswith('authors:'):
-            pattern = token[8:]
-            return self._match_authors(pattern)
-        elif token.startswith('vl:'):
-            vl_name = token[3:]
-            if vl_name in seen:
-                return set()
-            vls = self.get_virtual_libraries()
-            if vl_name in vls:
-                return self._eval_vl_expr(vls[vl_name], seen | {vl_name})
-            return set()
-
-        return self._match_anywhere(token)
-
-    def _match_tags(self, pattern: str) -> Set[int]:
-        """Match books whose tags match a pattern.
-
-        Supports:
-          tags:Foo         -- books with tag 'Foo' or any tag prefixed by 'Foo.'
-          tags:\"Foo.Bar\"   -- books with tag 'Foo.Bar' or prefixed by 'Foo.Bar.'
-          tags:\"=Foo\"      -- books with exactly the tag 'Foo'
-
-        Note: regex patterns (tags:~regex) are not supported and will match nothing.
-        """
-        exact = False
-        if pattern.startswith('='):
-            exact = True
-            pattern = pattern[1:]
-
-        pattern = pattern.strip('"')
+        view: Dict[int, Dict[str, Any]] = {}
+        for b in self.get_all_books():
+            view[b["id"]] = {
+                "title": b["title"] or "",
+                "authors": _split(b["authors"]),
+                "author_sort": b["author_sort"] or "",
+                "series": b["series"] or "",
+                "publisher": b["publisher"] or "",
+                "tags": _split(b["tags"]),
+                "formats": _split(b["formats"]),
+                "languages": _split(b["languages"]),
+                "rating": calibre_rating_to_stars(b["rating"]),
+                "series_index": b["series_index"],
+                "id": b["id"],
+                "pubdate": b["pubdate"],
+                "timestamp": b["timestamp"],
+                "last_modified": b["last_modified"],
+                "cover": bool(b["has_cover"]),
+                "identifiers": {},
+                "comments": "",
+                "uuid": "",
+            }
 
         cur = self.conn.cursor()
-        if exact:
-            cur.execute("""
-                SELECT DISTINCT btl.book FROM books_tags_link btl
-                JOIN tags t ON t.id = btl.tag
-                WHERE t.name = ? COLLATE NOCASE
-            """, (pattern,))
-        else:
-            cur.execute("""
-                SELECT DISTINCT btl.book FROM books_tags_link btl
-                JOIN tags t ON t.id = btl.tag
-                WHERE t.name = ? COLLATE NOCASE OR t.name LIKE ?
-            """, (pattern, f"{pattern}.%"))
+        for row in cur.execute("SELECT book, type, val FROM identifiers"):
+            rec = view.get(row["book"])
+            if rec is not None:
+                rec["identifiers"][row["type"]] = row["val"]
+        for row in cur.execute("SELECT book, text FROM comments"):
+            rec = view.get(row["book"])
+            if rec is not None:
+                rec["comments"] = row["text"] or ""
+        try:
+            for row in cur.execute("SELECT id, uuid FROM books"):
+                rec = view.get(row["id"])
+                if rec is not None:
+                    rec["uuid"] = row["uuid"] or ""
+        except sqlite3.OperationalError:
+            pass
 
-        return {row['book'] for row in cur.fetchall()}
+        self._search_view = view
+        return view
 
-    def _match_authors(self, pattern: str) -> Set[int]:
-        """Match books whose authors match a pattern.
+    # Calibre custom-column datatype -> search-engine datatype.
+    _CUSTOM_DT_MAP = {
+        "text": DT_TEXT,  # promoted to DT_TEXT_MULTI when is_multiple
+        "comments": DT_TEXT,
+        "enumeration": DT_TEXT,
+        "series": DT_TEXT,
+        "int": DT_INT,
+        "float": DT_FLOAT,
+        "rating": DT_FLOAT,
+        "bool": DT_BOOL,
+        "datetime": DT_DATE,
+    }
 
-        Supports:
-          author:Foo       -- books with author containing 'Foo'
-          author:"=Foo"    -- books with exactly the author 'Foo'
-        """
-        exact = False
-        if pattern.startswith('='):
-            exact = True
-            pattern = pattern[1:]
+    def _build_custom_locations(self) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for col in self.get_custom_columns().values():
+            engine_dt = self._CUSTOM_DT_MAP.get(col["datatype"])
+            if engine_dt is None:
+                continue  # composite columns are computed, not stored
+            if col["datatype"] == "text" and col["is_multiple"]:
+                engine_dt = DT_TEXT_MULTI
+            out["#" + col["label"]] = engine_dt
+        return out
 
-        pattern = pattern.strip('"')
+    def _custom_by_label(self) -> Dict[str, Dict[str, Any]]:
+        if self._custom_label_cache is None:
+            self._custom_label_cache = {
+                c["label"]: c for c in self.get_custom_columns().values()
+            }
+        return self._custom_label_cache
 
-        cur = self.conn.cursor()
-        if exact:
-            cur.execute("""
-                SELECT DISTINCT bal.book FROM books_authors_link bal
-                JOIN authors a ON a.id = bal.author
-                WHERE a.name = ? COLLATE NOCASE
-            """, (pattern,))
-        else:
-            cur.execute("""
-                SELECT DISTINCT bal.book FROM books_authors_link bal
-                JOIN authors a ON a.id = bal.author
-                WHERE a.name LIKE ? COLLATE NOCASE
-            """, (f"%{pattern}%",))
-
-        return {row['book'] for row in cur.fetchall()}
-
-    def _match_anywhere(self, term: str) -> Set[int]:
-        """Match books where the term appears in title, authors, or tags."""
-        term = term.strip('"')
-        cur = self.conn.cursor()
-        
-        books = set()
-        
-        # title
-        cur.execute("SELECT id FROM books WHERE title LIKE ? COLLATE NOCASE", (f"%{term}%",))
-        books.update(row['id'] for row in cur.fetchall())
-        
-        # authors
-        cur.execute("""
-            SELECT bal.book FROM books_authors_link bal
-            JOIN authors a ON a.id = bal.author
-            WHERE a.name LIKE ? COLLATE NOCASE
-        """, (f"%{term}%",))
-        books.update(row['book'] for row in cur.fetchall())
-        
-        # tags
-        cur.execute("""
-            SELECT btl.book FROM books_tags_link btl
-            JOIN tags t ON t.id = btl.tag
-            WHERE t.name LIKE ? COLLATE NOCASE
-        """, (f"%{term}%",))
-        books.update(row['book'] for row in cur.fetchall())
-        
-        return books
+    def _custom_value(self, book_id: int, location: str) -> Any:
+        col = self._custom_by_label().get(location[1:])
+        if not col:
+            return None
+        if location not in self._custom_val_cache:
+            try:
+                self._custom_val_cache[location] = self.load_custom_column(col["name"])
+            except ValueError, sqlite3.OperationalError:
+                self._custom_val_cache[location] = {}
+        val = self._custom_val_cache[location].get(book_id)
+        if val is None:
+            return None
+        if col["is_multiple"] and isinstance(val, str):
+            return [p.strip() for p in val.split(",") if p.strip()]
+        return val

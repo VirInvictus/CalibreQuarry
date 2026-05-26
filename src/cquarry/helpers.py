@@ -5,13 +5,19 @@ import struct
 import sys
 from typing import List, Optional, Tuple
 
-from cquarry.config import CALIBRE_RATING_SCALE, DEFAULT_DB_PATHS, get_db_path, set_db_path
+from cquarry.config import (
+    CALIBRE_RATING_SCALE,
+    DEFAULT_DB_PATHS,
+    get_db_path,
+    set_db_path,
+)
 
 C_HEADER = "1;33"  # Bold Yellow
-C_TITLE = "1;36"   # Bold Cyan
-C_ERR = "1;31"     # Bold Red
-C_WARN = "1;35"    # Bold Magenta
-C_DIM = "2"        # Dim
+C_TITLE = "1;36"  # Bold Cyan
+C_ERR = "1;31"  # Bold Red
+C_WARN = "1;35"  # Bold Magenta
+C_DIM = "2"  # Dim
+
 
 def color(text: str, code: str) -> str:
     """Wrap text in ANSI color codes if stdout is a TTY."""
@@ -20,39 +26,83 @@ def color(text: str, code: str) -> str:
     return text
 
 
+# SOF markers that carry frame dimensions (baseline, progressive, lossless, ...).
+# DHP (0xC4), DAC (0xCC) and the RST/SOI/EOI markers are deliberately excluded.
+_JPEG_SOF_MARKERS = frozenset(
+    {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+)
+
+
 def get_jpeg_size(filepath: str) -> Optional[Tuple[int, int]]:
-    """Parse JPEG header to extract (width, height) without external dependencies."""
+    """Return a JPEG's (width, height) by seeking through its segment markers.
+
+    Reads only segment headers, so a large EXIF/ICC block ahead of the SOF (which
+    a fixed 1 KB header read would miss) no longer hides the dimensions.
+    """
     try:
-        with open(filepath, 'rb') as f:
-            data = f.read(1024) # only need the header
-            if not data or data[0:2] != b'\xff\xd8':
+        with open(filepath, "rb") as f:
+            if f.read(2) != b"\xff\xd8":
                 return None
-            
-            i = 2
-            while i < len(data):
-                # Ensure we are at a marker
-                while i < len(data) and data[i] != 0xff:
-                    i += 1
-                while i < len(data) and data[i] == 0xff:
-                    i += 1
-                
-                if i >= len(data):
+            while True:
+                byte = f.read(1)
+                if not byte:
                     return None
-                
-                marker = data[i]
-                i += 1
-                
-                if marker in (0xc0, 0xc2): # SOF0 or SOF2
-                    if i + 7 <= len(data):
-                        height, width = struct.unpack(">HH", data[i+3:i+7])
-                        return width, height
-                
-                if i + 1 >= len(data):
+                if byte != b"\xff":
+                    continue
+                # Skip any fill 0xff bytes to land on the marker code.
+                marker = f.read(1)
+                while marker == b"\xff":
+                    marker = f.read(1)
+                if not marker:
                     return None
-                length = struct.unpack(">H", data[i:i+2])[0]
-                i += length
+                m = marker[0]
+                # Standalone markers (SOI/EOI and RSTn) carry no length payload.
+                if m == 0xD8 or m == 0xD9 or 0xD0 <= m <= 0xD7:
+                    continue
+                seg = f.read(2)
+                if len(seg) < 2:
+                    return None
+                length = struct.unpack(">H", seg)[0]
+                if m in _JPEG_SOF_MARKERS:
+                    payload = f.read(5)  # precision(1) + height(2) + width(2)
+                    if len(payload) < 5:
+                        return None
+                    height, width = struct.unpack(">HH", payload[1:5])
+                    return width, height
+                f.seek(length - 2, os.SEEK_CUR)
     except Exception:
-        pass
+        return None
+
+
+def get_png_size(filepath: str) -> Optional[Tuple[int, int]]:
+    """Return a PNG's (width, height) from its IHDR chunk."""
+    try:
+        with open(filepath, "rb") as f:
+            if f.read(8) != b"\x89PNG\r\n\x1a\n":
+                return None
+            chunk = f.read(8)  # length(4) + type(4)
+            if len(chunk) < 8 or chunk[4:8] != b"IHDR":
+                return None
+            wh = f.read(8)
+            if len(wh) < 8:
+                return None
+            width, height = struct.unpack(">II", wh)
+            return width, height
+    except Exception:
+        return None
+
+
+def get_image_size(filepath: str) -> Optional[Tuple[int, int]]:
+    """Return (width, height) for a JPEG or PNG, sniffing the format by signature."""
+    try:
+        with open(filepath, "rb") as f:
+            sig = f.read(8)
+    except OSError:
+        return None
+    if sig[:2] == b"\xff\xd8":
+        return get_jpeg_size(filepath)
+    if sig == b"\x89PNG\r\n\x1a\n":
+        return get_png_size(filepath)
     return None
 
 
@@ -70,9 +120,12 @@ def format_stars(rating: Optional[float]) -> str:
     full = int(rating)
     half = rating - full >= 0.5
     empty = 5 - full - (1 if half else 0)
+    # Half stars use the Latin-1 fraction glyph (U+00BD) rather than another
+    # outline star, so a 2.5 reads as \u2605\u2605\u00bd\u2606\u2606 and is visibly distinct from 2.0.
+    # U+00BD is universally available; a dedicated half-star glyph is not.
     s = "\u2605" * full
     if half:
-        s += "\u2606"
+        s += "\u00bd"
     s += "\u2606" * empty
     return f" [{s} {rating:.1f}/5]"
 
@@ -81,7 +134,7 @@ def normalize_author_display(authors: Optional[str], primary_only: bool = False)
     """Format author string for display."""
     if not authors:
         return "Unknown Author"
-    parts = [a.strip() for a in authors.split(',')]
+    parts = [a.strip() for a in authors.split(",")]
     if primary_only:
         return parts[0]
     return " & ".join(parts)
@@ -90,7 +143,7 @@ def normalize_author_display(authors: Optional[str], primary_only: bool = False)
 def author_sort_key(author_sort: Optional[str], primary_only: bool = False) -> str:
     key = (author_sort or "").lower()
     if primary_only:
-        key = key.split('&')[0].strip()
+        key = key.split("&")[0].strip()
     return key
 
 
@@ -99,7 +152,7 @@ def detect_series_gaps(indices_str: str, max_index: Optional[float]) -> List[int
     if not indices_str or max_index is None:
         return []
     indices = set()
-    for s in indices_str.split(','):
+    for s in indices_str.split(","):
         try:
             idx = float(s)
             if idx == int(idx):
@@ -153,7 +206,7 @@ def find_db(explicit: Optional[str] = None) -> str:
         print("First run: no Calibre database configured.")
         try:
             raw = input("  Path to metadata.db (or directory containing it): ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             raise FileNotFoundError(
                 "Could not find metadata.db. Specify with --db /path/to/metadata.db"
             )

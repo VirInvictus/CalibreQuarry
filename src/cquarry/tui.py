@@ -5,13 +5,18 @@ import os
 import subprocess
 import sys
 from contextlib import contextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from cquarry.config import VERSION, get_db_path, set_db_path
 from cquarry.db import CalibreDB
-from cquarry.helpers import find_db
 from cquarry.modes.catalog import write_catalog, write_all_wings
 from cquarry.modes.stats import show_stats
+from cquarry.modes.analytics import (
+    show_author_stats,
+    show_pace_stats,
+    show_tag_tree,
+    show_wing_overlap,
+)
 from cquarry.modes.audit import run_audit
 from cquarry.modes.display import show_recent, show_series, show_wings
 from cquarry.modes.export import run_export, run_search_export
@@ -19,6 +24,7 @@ from cquarry.modes.tags import show_tag_dump
 
 try:
     import curses
+
     HAVE_CURSES = True
 except ImportError:
     HAVE_CURSES = False
@@ -29,6 +35,7 @@ _USE_CURSES = HAVE_CURSES and sys.stdin.isatty()
 # =====================================
 # Terminal utilities
 # =====================================
+
 
 def _reset_terminal() -> None:
     if not sys.stdin.isatty():
@@ -76,8 +83,12 @@ def _safe_addstr(stdscr, y: int, x: int, text: str, attr: int) -> None:
 # Curses menu selector
 # =====================================
 
-def _tui_select(title: str, sections: list,
-                hints: str = "\u2191\u2193 Navigate  \u23ce Select  q Quit") -> Optional[tuple]:
+
+def _tui_select(
+    title: str,
+    sections: list,
+    hints: str = "\u2191\u2193 Navigate  \u23ce Select  q Quit",
+) -> Optional[tuple]:
     BOX_W = _TUI_BOX_W
     INNER = _TUI_INNER
 
@@ -106,8 +117,13 @@ def _tui_select(title: str, sections: list,
         _safe_addstr(stdscr, y, bx, "\u2554" + "\u2550" * INNER + "\u2557", fa)
         y += 1
         _safe_addstr(stdscr, y, bx, "\u2551", fa)
-        _safe_addstr(stdscr, y, bx + 1, f" {title:^{INNER - 2}} ",
-                     curses.color_pair(_CP_TITLE) | curses.A_BOLD)
+        _safe_addstr(
+            stdscr,
+            y,
+            bx + 1,
+            f" {title:^{INNER - 2}} ",
+            curses.color_pair(_CP_TITLE) | curses.A_BOLD,
+        )
         _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
         y += 1
         _safe_addstr(stdscr, y, bx, "\u2560" + "\u2550" * INNER + "\u2563", fa)
@@ -121,8 +137,13 @@ def _tui_select(title: str, sections: list,
             if hdr:
                 content = f"  {hdr}" + " " * (INNER - len(hdr) - 2)
                 _safe_addstr(stdscr, y, bx, "\u2551", fa)
-                _safe_addstr(stdscr, y, bx + 1, content,
-                             curses.color_pair(_CP_HEADER) | curses.A_BOLD)
+                _safe_addstr(
+                    stdscr,
+                    y,
+                    bx + 1,
+                    content,
+                    curses.color_pair(_CP_HEADER) | curses.A_BOLD,
+                )
                 _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
                 y += 1
             for ii, label in enumerate(items):
@@ -153,13 +174,13 @@ def _tui_select(title: str, sections: list,
         while True:
             _draw(stdscr, cur)
             key = stdscr.getch()
-            if key in (curses.KEY_UP, ord('k')):
+            if key in (curses.KEY_UP, ord("k")):
                 cur = (cur - 1) % len(flat)
-            elif key in (curses.KEY_DOWN, ord('j')):
+            elif key in (curses.KEY_DOWN, ord("j")):
                 cur = (cur + 1) % len(flat)
             elif key in (curses.KEY_ENTER, 10, 13):
                 return flat[cur]
-            elif key in (ord('q'), ord('Q'), 27):
+            elif key in (ord("q"), ord("Q"), 27):
                 return None
             elif key == curses.KEY_RESIZE:
                 pass
@@ -173,6 +194,7 @@ def _tui_select(title: str, sections: list,
 # =====================================
 # Curses text input prompt
 # =====================================
+
 
 def _tui_prompt_str(label: str, default: Optional[str]) -> str:
     BOX_W = _TUI_BOX_W
@@ -194,18 +216,29 @@ def _tui_prompt_str(label: str, default: Optional[str]) -> str:
             lbl = f"  {label}"
             padded_lbl = lbl + " " * max(0, INNER - len(lbl))
             _safe_addstr(stdscr, y, bx, "\u2551", fa)
-            _safe_addstr(stdscr, y, bx + 1, padded_lbl[:INNER],
-                         curses.color_pair(_CP_HEADER) | curses.A_BOLD)
+            _safe_addstr(
+                stdscr,
+                y,
+                bx + 1,
+                padded_lbl[:INNER],
+                curses.color_pair(_CP_HEADER) | curses.A_BOLD,
+            )
             _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
             y += 1
             _safe_addstr(stdscr, y, bx, "\u255f" + "\u2500" * INNER + "\u2562", fa)
             y += 1
             display = "".join(buf)
             max_input = INNER - 4
-            visible = "\u2026" + display[-(max_input - 1):] if len(display) > max_input else display
+            visible = (
+                "\u2026" + display[-(max_input - 1) :]
+                if len(display) > max_input
+                else display
+            )
             input_text = f" > {visible}" + " " * max(0, INNER - len(visible) - 3)
             _safe_addstr(stdscr, y, bx, "\u2551", fa)
-            _safe_addstr(stdscr, y, bx + 1, input_text[:INNER], curses.color_pair(_CP_ITEM))
+            _safe_addstr(
+                stdscr, y, bx + 1, input_text[:INNER], curses.color_pair(_CP_ITEM)
+            )
             _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
             input_y = y
             y += 1
@@ -213,7 +246,9 @@ def _tui_prompt_str(label: str, default: Optional[str]) -> str:
             y += 2
             hints = "\u23ce Confirm  Esc Default"
             hx = max(0, (w - len(hints)) // 2)
-            _safe_addstr(stdscr, y, hx, hints, curses.color_pair(_CP_HINT) | curses.A_DIM)
+            _safe_addstr(
+                stdscr, y, hx, hints, curses.color_pair(_CP_HINT) | curses.A_DIM
+            )
 
             cursor_x = bx + 4 + min(len(display), max_input)
             try:
@@ -241,7 +276,7 @@ def _tui_prompt_str(label: str, default: Optional[str]) -> str:
     except curses.error:
         try:
             raw = input(f"  {label} [{default}]: ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             sys.exit(130)
         return raw or (default or "")
 
@@ -249,6 +284,7 @@ def _tui_prompt_str(label: str, default: Optional[str]) -> str:
 # =====================================
 # Curses pause screen
 # =====================================
+
 
 def _tui_pause() -> None:
     BOX_W = _TUI_BOX_W
@@ -271,8 +307,13 @@ def _tui_pause() -> None:
         msg = "Press Enter to continue\u2026"
         padded = f" {msg:^{INNER - 2}} "
         _safe_addstr(stdscr, y, bx, "\u2551", fa)
-        _safe_addstr(stdscr, y, bx + 1, padded[:INNER],
-                     curses.color_pair(_CP_TITLE) | curses.A_BOLD)
+        _safe_addstr(
+            stdscr,
+            y,
+            bx + 1,
+            padded[:INNER],
+            curses.color_pair(_CP_TITLE) | curses.A_BOLD,
+        )
         _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
         y += 1
 
@@ -281,7 +322,7 @@ def _tui_pause() -> None:
 
         while True:
             key = stdscr.getch()
-            if key in (curses.KEY_ENTER, 10, 13, ord('q'), ord('Q'), 27):
+            if key in (curses.KEY_ENTER, 10, 13, ord("q"), ord("Q"), 27):
                 return
 
     try:
@@ -289,7 +330,7 @@ def _tui_pause() -> None:
     except curses.error:
         try:
             input("\n  Press Enter to continue...")
-        except (EOFError, KeyboardInterrupt):
+        except EOFError, KeyboardInterrupt:
             pass
 
 
@@ -297,8 +338,9 @@ def _tui_pause() -> None:
 # Curses scrollable text pager
 # =====================================
 
+
 def _tui_scroll_text(title: str, text: str) -> None:
-    lines = text.replace('\x00', '').expandtabs(4).splitlines()
+    lines = text.replace("\x00", "").expandtabs(4).splitlines()
 
     def _run(stdscr):
         _init_tui_colors()
@@ -308,27 +350,43 @@ def _tui_scroll_text(title: str, text: str) -> None:
             stdscr.erase()
             h, w = stdscr.getmaxyx()
 
-            max_line_len = max((len(l) for l in lines), default=0)
+            max_line_len = max((len(ln) for ln in lines), default=0)
             content_w = min(w, max(_TUI_BOX_W, max_line_len + 4))
             bx = max(0, (w - content_w) // 2)
 
             fa = curses.color_pair(_CP_FRAME)
 
-            _safe_addstr(stdscr, 0, bx, "\u2554" + "\u2550" * (content_w - 2) + "\u2557", fa)
-            _safe_addstr(stdscr, 0, bx + 2, f" {title} ",
-                         curses.color_pair(_CP_TITLE) | curses.A_BOLD)
-            _safe_addstr(stdscr, h - 2, bx, "\u255a" + "\u2550" * (content_w - 2) + "\u255d", fa)
+            _safe_addstr(
+                stdscr, 0, bx, "\u2554" + "\u2550" * (content_w - 2) + "\u2557", fa
+            )
+            _safe_addstr(
+                stdscr,
+                0,
+                bx + 2,
+                f" {title} ",
+                curses.color_pair(_CP_TITLE) | curses.A_BOLD,
+            )
+            _safe_addstr(
+                stdscr, h - 2, bx, "\u255a" + "\u2550" * (content_w - 2) + "\u255d", fa
+            )
 
             hints = "\u2191\u2193 Scroll  PgUp/Dn  q/Esc Close"
-            _safe_addstr(stdscr, h - 1, max(0, (w - len(hints)) // 2), hints,
-                         curses.color_pair(_CP_HINT) | curses.A_DIM)
+            _safe_addstr(
+                stdscr,
+                h - 1,
+                max(0, (w - len(hints)) // 2),
+                hints,
+                curses.color_pair(_CP_HINT) | curses.A_DIM,
+            )
 
             max_lines = max(1, h - 3)
             for i in range(max_lines):
                 if top + i < len(lines):
-                    line = lines[top + i][:content_w - 4]
+                    line = lines[top + i][: content_w - 4]
                     _safe_addstr(stdscr, i + 1, bx, "\u2551", fa)
-                    _safe_addstr(stdscr, i + 1, bx + 2, line, curses.color_pair(_CP_ITEM))
+                    _safe_addstr(
+                        stdscr, i + 1, bx + 2, line, curses.color_pair(_CP_ITEM)
+                    )
                     _safe_addstr(stdscr, i + 1, bx + content_w - 1, "\u2551", fa)
                 else:
                     _safe_addstr(stdscr, i + 1, bx, "\u2551", fa)
@@ -336,19 +394,19 @@ def _tui_scroll_text(title: str, text: str) -> None:
             stdscr.refresh()
 
             key = stdscr.getch()
-            if key in (curses.KEY_UP, ord('k')):
+            if key in (curses.KEY_UP, ord("k")):
                 top = max(0, top - 1)
-            elif key in (curses.KEY_DOWN, ord('j')):
+            elif key in (curses.KEY_DOWN, ord("j")):
                 top = min(max(0, len(lines) - max_lines), top + 1)
             elif key in (curses.KEY_PPAGE,):
                 top = max(0, top - max_lines)
             elif key in (curses.KEY_NPAGE,):
                 top = min(max(0, len(lines) - max_lines), top + max_lines)
-            elif key in (curses.KEY_HOME, ord('g')):
+            elif key in (curses.KEY_HOME, ord("g")):
                 top = 0
-            elif key in (curses.KEY_END, ord('G')):
+            elif key in (curses.KEY_END, ord("G")):
                 top = max(0, len(lines) - max_lines)
-            elif key in (ord('q'), ord('Q'), 27, curses.KEY_ENTER, 10, 13):
+            elif key in (ord("q"), ord("Q"), 27, curses.KEY_ENTER, 10, 13):
                 return
             elif key == curses.KEY_RESIZE:
                 pass
@@ -362,6 +420,7 @@ def _tui_scroll_text(title: str, text: str) -> None:
 # =====================================
 # Output capture + pager integration
 # =====================================
+
 
 @contextmanager
 def _capture_output():
@@ -403,6 +462,7 @@ def _run_with_capture(title: str, func, *args, **kwargs) -> None:
 # Fallback (non-curses) utilities
 # =====================================
 
+
 def _box_menu(title: str, sections: list, width: int = 44) -> None:
     iw = width - 4
     hbar = "\u2550" * (width - 2)
@@ -428,14 +488,14 @@ def _pause() -> None:
         return
     try:
         input("\n  Press Enter to continue...")
-    except (EOFError, KeyboardInterrupt):
+    except EOFError, KeyboardInterrupt:
         pass
 
 
 def _fallback_input(prompt: str, mapping: dict) -> Any:
     try:
         ch = input(prompt).strip().lower()
-    except (EOFError, KeyboardInterrupt):
+    except EOFError, KeyboardInterrupt:
         return None
     return mapping.get(ch, "invalid")
 
@@ -446,7 +506,7 @@ def _prompt_str(label: str, default: Optional[str]) -> str:
     display = default if default else ""
     try:
         raw = input(f"  {label} [{display}]: ").strip()
-    except (EOFError, KeyboardInterrupt):
+    except EOFError, KeyboardInterrupt:
         sys.exit(130)
     return raw or (default or "")
 
@@ -468,71 +528,134 @@ def _prompt_path(label: str, default: str = ".") -> str:
 # =====================================
 
 _MAIN_SECTIONS = [
-    ("OUTPUT", [
-        "Build catalog (full or by wing)",
-        "Generate all wing catalogs",
-        "Library statistics",
-        "Audit (issues report)",
-        "Search query export",
-    ]),
-    ("ANALYTICS", [
-        "Author statistics",
-        "Reading pace stats",
-        "Tag tree visualization",
-        "Wing overlap analysis",
-    ]),
-    ("LISTS", [
-        "Recently added",
-        "Series list (with gap detection)",
-        "List wings",
-        "Tag dump (flat list with counts)",
-    ]),
-    ("EXPORT", [
-        "Export (JSON/CSV/AI)",
-    ]),
-    ("SETTINGS", [
-        "Change database path",
-    ]),
+    (
+        "OUTPUT",
+        [
+            "Build catalog (full or by wing)",
+            "Generate all wing catalogs",
+            "Library statistics",
+            "Audit (issues report)",
+            "Search query export",
+        ],
+    ),
+    (
+        "ANALYTICS",
+        [
+            "Author statistics",
+            "Reading pace stats",
+            "Tag tree visualization",
+            "Wing overlap analysis",
+        ],
+    ),
+    (
+        "LISTS",
+        [
+            "Recently added",
+            "Series list (with gap detection)",
+            "List wings",
+            "Tag dump (flat list with counts)",
+        ],
+    ),
+    (
+        "EXPORT",
+        [
+            "Export (JSON/CSV/AI)",
+        ],
+    ),
+    (
+        "SETTINGS",
+        [
+            "Change database path",
+        ],
+    ),
     ("", ["Quit"]),
 ]
 
 _MAIN_FALLBACK_MAP = {
-    "1": (0, 0), "catalog": (0, 0),
-    "2": (0, 1), "all": (0, 1),
-    "3": (0, 2), "stats": (0, 2),
-    "4": (0, 3), "audit": (0, 3),
-    "5": (0, 4), "search": (0, 4),
-    "6": (1, 0), "author": (1, 0),
-    "7": (1, 1), "pace": (1, 1),
-    "8": (1, 2), "tags": (1, 2),
-    "9": (1, 3), "overlap": (1, 3),
-    "10": (2, 0), "recent": (2, 0),
-    "11": (2, 1), "series": (2, 1),
-    "12": (2, 2), "wings": (2, 2),
-    "13": (2, 3), "tag-dump": (2, 3), "tagdump": (2, 3),
-    "14": (3, 0), "export": (3, 0),
-    "s": (4, 0), "settings": (4, 0), "config": (4, 0),
-    "q": None, "quit": None, "exit": None,
+    "1": (0, 0),
+    "catalog": (0, 0),
+    "2": (0, 1),
+    "all": (0, 1),
+    "3": (0, 2),
+    "stats": (0, 2),
+    "4": (0, 3),
+    "audit": (0, 3),
+    "5": (0, 4),
+    "search": (0, 4),
+    "6": (1, 0),
+    "author": (1, 0),
+    "7": (1, 1),
+    "pace": (1, 1),
+    "8": (1, 2),
+    "tags": (1, 2),
+    "9": (1, 3),
+    "overlap": (1, 3),
+    "10": (2, 0),
+    "recent": (2, 0),
+    "11": (2, 1),
+    "series": (2, 1),
+    "12": (2, 2),
+    "wings": (2, 2),
+    "13": (2, 3),
+    "tag-dump": (2, 3),
+    "tagdump": (2, 3),
+    "14": (3, 0),
+    "export": (3, 0),
+    "s": (4, 0),
+    "settings": (4, 0),
+    "config": (4, 0),
+    "q": None,
+    "quit": None,
+    "exit": None,
 }
 
 
 def _select_main() -> Optional[tuple]:
     if _USE_CURSES:
         return _tui_select(f"CalibreQuarry v{VERSION}", _MAIN_SECTIONS)
-    _box_menu(f"CalibreQuarry v{VERSION}", [
-        ("OUTPUT", ["1) Build catalog", "2) Generate all wings", "3) Statistics", "4) Audit", "5) Search query export"]),
-        ("ANALYTICS", ["6) Author statistics", "7) Reading pace", "8) Tag tree", "9) Wing overlap"]),
-        ("LISTS", ["10) Recently added", "11) Series list", "12) List wings", "13) Tag dump"]),
-        ("EXPORT", ["14) Export (JSON/CSV/AI)"]),
-        ("SETTINGS", ["s) Change database path"]),
-        ("", ["q) Quit"]),
-    ])
+    _box_menu(
+        f"CalibreQuarry v{VERSION}",
+        [
+            (
+                "OUTPUT",
+                [
+                    "1) Build catalog",
+                    "2) Generate all wings",
+                    "3) Statistics",
+                    "4) Audit",
+                    "5) Search query export",
+                ],
+            ),
+            (
+                "ANALYTICS",
+                [
+                    "6) Author statistics",
+                    "7) Reading pace",
+                    "8) Tag tree",
+                    "9) Wing overlap",
+                ],
+            ),
+            (
+                "LISTS",
+                [
+                    "10) Recently added",
+                    "11) Series list",
+                    "12) List wings",
+                    "13) Tag dump",
+                ],
+            ),
+            ("EXPORT", ["14) Export (JSON/CSV/AI)"]),
+            ("SETTINGS", ["s) Change database path"]),
+            ("", ["q) Quit"]),
+        ],
+    )
     return _fallback_input("  Select [1-14/s/q]: ", _MAIN_FALLBACK_MAP)
 
 
 # =====================================
 # Interactive menu loop
 # =====================================
+
 
 def _resolve_db_for_tui() -> Optional[str]:
     """Resolve the database path, using TUI prompts for first-run config."""
@@ -542,6 +665,7 @@ def _resolve_db_for_tui() -> Optional[str]:
         return saved
 
     from cquarry.config import DEFAULT_DB_PATHS
+
     for p in DEFAULT_DB_PATHS:
         if os.path.exists(p):
             path = os.path.abspath(p)
@@ -610,23 +734,51 @@ def interactive_menu() -> int:
             if result == (0, 0):
                 wing = _prompt_str("Wing name (blank for all)", "")
                 wing = wing if wing else None
-                primary = _prompt_str("Primary author only? (y/N)", "N").lower().startswith('y')
-                tags = _prompt_str("Show tags instead of ratings? (y/N)", "N").lower().startswith('y')
-                ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith('y')
+                primary = (
+                    _prompt_str("Primary author only? (y/N)", "N")
+                    .lower()
+                    .startswith("y")
+                )
+                tags = (
+                    _prompt_str("Show tags instead of ratings? (y/N)", "N")
+                    .lower()
+                    .startswith("y")
+                )
+                ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith("y")
                 output = _prompt_str("Output file", "catalog.txt")
                 _reset_terminal()
-                _run_with_capture("Catalog", lambda: write_catalog(
-                    db, output, wing=wing, primary_only=primary,
-                    show_tags=tags, show_id=ids))
+                _run_with_capture(
+                    "Catalog",
+                    lambda: write_catalog(
+                        db,
+                        output,
+                        wing=wing,
+                        primary_only=primary,
+                        show_tags=tags,
+                        show_id=ids,
+                    ),
+                )
 
             elif result == (0, 1):
                 outdir = _prompt_str("Output directory", "catalogs")
-                primary = _prompt_str("Primary author only? (y/N)", "N").lower().startswith('y')
-                tags = _prompt_str("Show tags instead of ratings? (y/N)", "N").lower().startswith('y')
-                ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith('y')
+                primary = (
+                    _prompt_str("Primary author only? (y/N)", "N")
+                    .lower()
+                    .startswith("y")
+                )
+                tags = (
+                    _prompt_str("Show tags instead of ratings? (y/N)", "N")
+                    .lower()
+                    .startswith("y")
+                )
+                ids = _prompt_str("Show book IDs? (y/N)", "N").lower().startswith("y")
                 _reset_terminal()
-                _run_with_capture("Generate Wings", lambda: write_all_wings(
-                    db, outdir, primary_only=primary, show_tags=tags, show_id=ids))
+                _run_with_capture(
+                    "Generate Wings",
+                    lambda: write_all_wings(
+                        db, outdir, primary_only=primary, show_tags=tags, show_id=ids
+                    ),
+                )
 
             elif result == (0, 2):
                 _reset_terminal()
@@ -642,7 +794,9 @@ def interactive_menu() -> int:
                 if query:
                     output = _prompt_str("Output file", "search_results.txt")
                     _reset_terminal()
-                    _run_with_capture("Search Results", lambda: run_search_export(db, query, output))
+                    _run_with_capture(
+                        "Search Results", lambda: run_search_export(db, query, output)
+                    )
 
             elif result == (1, 0):
                 _reset_terminal()

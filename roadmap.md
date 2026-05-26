@@ -51,3 +51,17 @@ What's done, what's next. Updated as of v2.0.0.
 - [x] **Format migration report** — identify books only available in deprecated formats (MOBI, LIT)
 - [x] **Color CLI output** — ANSI color for terminal output in non-interactive mode
 - [x] **Tag dump** — flat list of every tag with book counts, replacing `calibredb list_categories -r tags`
+
+## Phase 5: Comprehensive Search Parity & Companion Tools (v3.0.0)
+*A faithful, stdlib-only port of Calibre's search engine, plus the maintenance scripts that live alongside the read-only core.*
+
+- [x] **Dedicated search engine** (`search.py`): ported grammar (quotes, escapes, parens, implicit AND) and candidate-set boolean evaluation
+- [x] **Full field-location support**: title, authors, series, publisher, tags (hierarchical), rating, formats, languages, dates, identifiers, comments, cover, id, uuid, `#custom`, `all`, `vl:`
+- [x] **Match kinds**: contains (accent/case-folded), `=` exact, `~` regex, `^` accent; numeric and date relational operators; boolean columns
+- [x] **Documented parity deviations** (regex engine, ICU folding, templates, anchored tags) recorded in `spec.md` and `README.md`
+- [x] **`--search` to stdout** and structured (`--format json/csv/ai`) output; empty query returns the whole library
+- [x] **Deeper cover audit**: seek-based JPEG SOF scan (no 1 KB cap) plus PNG dimension reading
+- [x] **Half-star glyph** (½) and a corrected series "complete" definition
+- [x] **Companion `scripts/`**: `compress_pdf.py` (write-capable) and `audit_epub_content.py` (read-only), documented as outside the package contract
+- [x] **Portable test suite**: parser/matcher/integration tests with no live-library dependency; Python floor raised to 3.14
+- [x] **Fixed the TUI analytics crash** (missing imports) and cleared all linter findings

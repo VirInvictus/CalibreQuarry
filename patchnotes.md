@@ -1,5 +1,39 @@
 # CalibreQuarry — Patch Notes
 
+## v3.0.0 (2026-05-26)
+
+---
+
+### Breaking
+
+**Python 3.14+.** The supported floor moved from 3.9 to 3.14 to match the development environment. The code does not depend on bleeding-edge syntax, but only 3.14+ is tested and supported.
+
+### New Features
+
+**Comprehensive search engine.** The search expression parser was rebuilt as a dedicated, stdlib-only engine (`src/cquarry/search.py`) that ports Calibre's grammar and matching semantics. It now resolves field locations beyond tags and authors: `series`, `publisher`, `rating`, `formats`, `languages`, `pubdate`/`date`/`last_modified`, `identifiers`/`isbn`, `comments`, `cover`, `id`, `uuid`, and `#custom` columns, in addition to `tags`, `authors`, `all`, and `vl:`. It supports contains/`=`exact/`~`regex/`^`accent match kinds, numeric and date relational operators (`rating:>=4`, `pubdate:>2015`, `date:30daysago`), and `field:true`/`field:false` presence tests. Boolean grouping, implicit AND, quotes, and escapes follow Calibre's grammar, evaluated with its candidate-set semantics. The previous build only handled `tags:`, `author(s):`, and `vl:`; other prefixes silently matched nothing.
+
+**`--search` prints to stdout.** With no `--output`, results stream to the terminal instead of forcing a file. `--format json|csv|ai` emits the matching books in that structured shape; otherwise a plain-text listing is produced. An empty query (`--search ''`) returns the whole library, matching Calibre.
+
+**Deeper cover audit.** Cover dimension reading no longer stops at the first 1 KB, so a JPEG whose SOF marker sits behind a large EXIF/ICC block is measured correctly; PNG covers are now read too.
+
+### Fixes
+
+**Interactive TUI analytics no longer crashes.** Selecting any item under the ANALYTICS menu (Author statistics, Reading pace, Tag tree, Wing overlap) raised a `NameError` because those functions were never imported into `tui.py`. They now work.
+
+**Half-star ratings are visibly distinct.** A 2.5 rating rendered identically to 2.0 (both `★★☆☆☆`); it now shows `★★½☆☆` using the universally available `½` glyph.
+
+**Series "complete" is computed correctly.** Completeness now means "no missing integer volumes" rather than "book count equals the top index", so a series with novellas (0.5) or duplicate editions is no longer wrongly marked incomplete.
+
+**Portability of the series rollup.** `get_all_series` was rewritten to aggregate in Python instead of using `GROUP_CONCAT(... ORDER BY ...)`, which required SQLite 3.44+.
+
+### Documentation & Tests
+
+**Honest parity claims.** The README and spec no longer claim "100% parity"; they document exactly which locations and operators are supported and the deliberate, dependency-bound deviations (stdlib `re` instead of the `regex` module, `unicodedata` folding instead of ICU, no GPM templates or saved-search references, and cquarry's anchored hierarchical `tags:` match).
+
+**Companion scripts.** `scripts/compress_pdf.py` (Ghostscript-based PDF shrinking with verify-or-rollback; writes files and `metadata.db`) and `scripts/audit_epub_content.py` (read-only EPUB content auditor) are now versioned alongside the toolkit and fully documented, explicitly outside the read-only `cquarry` package contract.
+
+**Portable test suite.** `tests/test_search.py` and `tests/test_helpers.py` cover the parser grammar (adapted from Calibre's own tests), the matcher against an in-memory provider, a full-stack integration test on a temporary SQLite fixture, and the rating/series/image helpers, all without needing a live Calibre library.
+
 ## v2.6.0 (2026-05-03)
 
 ---
