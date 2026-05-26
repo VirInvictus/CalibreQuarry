@@ -1,12 +1,15 @@
-"""Tests for the companion scripts' pure decision logic.
+"""Tests for the companion scripts' pure decision logic and DB sync.
 
 The scripts in scripts/ are standalone (not a package), so they are loaded by
-path. Only side-effect-free functions are exercised here; the I/O paths
-(Ghostscript, zip reading, DB writes) are not.
+path. The Ghostscript and zip-reading I/O paths are not exercised; the Calibre
+size sync is tested against a throwaway temporary SQLite fixture, never a live
+metadata.db.
 """
 
 import importlib.util
 import pathlib
+import sqlite3
+import tempfile
 import unittest
 
 _SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
@@ -144,6 +147,72 @@ class TestFindings(unittest.TestCase):
     def test_injection_signature(self):
         cats = [c for c, _ in audit_epub.findings(self._result(signature=True))]
         self.assertIn("INJECTION SIGNATURE", cats)
+
+
+class TestCalibreSizeSync(unittest.TestCase):
+    """update_calibre_size against a throwaway temp library (never the live DB)."""
+
+    def _make_library(self, *, with_plugin_table=True):
+        root = pathlib.Path(tempfile.mkdtemp(prefix="cq_lib_"))
+        con = sqlite3.connect(root / "metadata.db")
+        con.executescript("""
+            CREATE TABLE books (id INTEGER PRIMARY KEY, path TEXT);
+            CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT COLLATE NOCASE,
+                uncompressed_size INT NOT NULL, name TEXT, UNIQUE(book, format));
+            INSERT INTO books (id, path) VALUES (1, 'Author/Title (1)');
+            INSERT INTO data (book, format, uncompressed_size, name) VALUES (1, 'PDF', 1000000, 'Title - Author');
+        """)
+        if with_plugin_table:
+            con.executescript("""
+                CREATE TABLE books_pages_link (book INTEGER PRIMARY KEY, pages INT DEFAULT 0,
+                    algorithm INT DEFAULT 0, format TEXT DEFAULT '' COLLATE NOCASE,
+                    format_size INT DEFAULT 0, timestamp TIMESTAMP, needs_scan INT DEFAULT 0);
+                INSERT INTO books_pages_link (book, pages, format, format_size, needs_scan)
+                    VALUES (1, 300, 'PDF', 1000000, 0);
+            """)
+        con.commit()
+        con.close()
+        return root
+
+    def test_syncs_both_tables(self):
+        root = self._make_library()
+        pdf = root / "Author" / "Title (1)" / "Title - Author.pdf"
+        compress_pdf.update_calibre_size(root, pdf, 250000)
+        con = sqlite3.connect(root / "metadata.db")
+        try:
+            self.assertEqual(
+                con.execute(
+                    "SELECT uncompressed_size FROM data WHERE book=1 AND format='PDF'"
+                ).fetchone()[0],
+                250000,
+            )
+            size, needs = con.execute(
+                "SELECT format_size, needs_scan FROM books_pages_link WHERE book=1"
+            ).fetchone()
+            self.assertEqual((size, needs), (250000, 1))
+        finally:
+            con.close()
+
+    def test_works_without_plugin_table(self):
+        # data.uncompressed_size must still update when books_pages_link is absent.
+        root = self._make_library(with_plugin_table=False)
+        pdf = root / "Author" / "Title (1)" / "Title - Author.pdf"
+        compress_pdf.update_calibre_size(root, pdf, 99)
+        con = sqlite3.connect(root / "metadata.db")
+        try:
+            self.assertEqual(
+                con.execute(
+                    "SELECT uncompressed_size FROM data WHERE book=1"
+                ).fetchone()[0],
+                99,
+            )
+        finally:
+            con.close()
+
+    def test_missing_book_does_not_raise(self):
+        root = self._make_library()
+        stray = root / "Nobody" / "Nothing (9)" / "x.pdf"
+        compress_pdf.update_calibre_size(root, stray, 1)  # must not raise
 
 
 if __name__ == "__main__":

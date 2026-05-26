@@ -314,10 +314,15 @@ def find_calibre_library(start: Path) -> Path | None:
 
 
 def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> None:
-    """Sync books_pages_link.format_size for the given file, printing the outcome.
+    """Sync Calibre's recorded size for the replaced file, printing the outcome.
+
+    Updates both the core `data.uncompressed_size` (what Calibre uses to notice a
+    format changed on disk) and, when the Count Pages plugin is present, its
+    `books_pages_link.format_size` page-size cache.
 
     Best-effort: the PDF has already been replaced by the time this runs, so a
-    busy/locked database (Calibre open) or a missing row must never raise.
+    busy/locked database (Calibre open), a missing book, or a missing plugin
+    table must never raise.
     """
     rel = file_path.relative_to(library_root)
     parts = rel.parts
@@ -343,15 +348,29 @@ def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> N
             return
         book_id = row[0]
         cur.execute(
-            "UPDATE books_pages_link SET format_size = ?, needs_scan = 1 WHERE book = ? AND format = ?",
+            "UPDATE data SET uncompressed_size = ? WHERE book = ? AND format = ?",
             (new_size, book_id, fmt),
         )
+        synced = ["data.uncompressed_size"] if cur.rowcount > 0 else []
+
+        # books_pages_link is created by the Count Pages plugin and is optional.
+        try:
+            cur.execute(
+                "UPDATE books_pages_link SET format_size = ?, needs_scan = 1 WHERE book = ? AND format = ?",
+                (new_size, book_id, fmt),
+            )
+            if cur.rowcount > 0:
+                synced.append("books_pages_link.format_size")
+        except sqlite3.OperationalError as e:
+            if "no such table" not in str(e).lower():
+                raise  # a real error (e.g. lock) belongs to the outer handler
+
         con.commit()
-        if cur.rowcount > 0:
-            print(f"Updated books_pages_link.format_size in {db}")
+        if synced:
+            print(f"Synced {' + '.join(synced)} in {db}")
         else:
             print(
-                f"(No books_pages_link row for book {book_id}/{fmt}; size not synced.)"
+                f"(No data/books_pages_link rows for book {book_id}/{fmt}; size not synced.)"
             )
     except sqlite3.OperationalError as e:
         print(
