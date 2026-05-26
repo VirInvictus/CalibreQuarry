@@ -11,11 +11,24 @@ A CLI toolkit for Calibre users who treat their libraries as curated collections
 
 > **Note:** This is considered completed software. It has been thoroughly tested and is known to be fully functional on the primary development environment: **Fedora Linux 43 (Workstation Edition)**, kernel `6.19.12-200.fc43.x86_64`, using **Calibre 9.7**. While it is pure Python and should be cross-platform, this specific setup is the only officially tested environment.
 
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [Features](#features)
+- [Installation](#installation) · [Requirements](#requirements)
+- [Usage](#usage) · [Recipes](#recipes)
+- [Sample output](#sample-output)
+- [Search syntax & virtual library resolution](#search-syntax--virtual-library-resolution)
+- [Troubleshooting](#troubleshooting)
+- [How it reads the database](#how-it-reads-the-database)
+- [Full help output](#full-help-output)
+- [Companion scripts](#companion-scripts)
+
 ## Why this exists
 
 Calibre is a good database. It is not a good reporting tool. If you maintain a large library (3000+ books) organized with virtual libraries, hierarchical tags, and series tracking, you eventually want answers to questions Calibre's UI doesn't surface well: which series have gaps, how many books are unrated, what does a given wing actually contain, and can I get a machine-readable export without running `calibredb list` through a parser script.
 
-This tool reads the SQLite database directly in read-only mode. It resolves Calibre's virtual library search expressions (including `tags:`, `vl:` cross-references, and boolean operators), so your existing wing definitions work without being re-encoded anywhere.
+This tool reads the SQLite database directly in read-only mode. It ships a near-complete port of Calibre's own search engine (field prefixes like `tags:`, `author:`, `series:`, `rating:`, `pubdate:`; `vl:` cross-references; boolean and hierarchical matching), so your existing wing definitions and search habits work without being re-encoded anywhere.
 
 ## Features
 
@@ -120,6 +133,66 @@ cquarry --version
 ```
 
 If `metadata.db` is in the current directory or at `~/Calibre Library/metadata.db`, the `--db` flag can be omitted. On first run you'll be prompted for the path, which is saved to `~/.config/cquarry/config.json` for future sessions. If Calibre is running and has the database locked, CalibreQuarry will automatically read from a temporary snapshot.
+
+## Recipes
+
+Common questions mapped to a single command. These assume `--db` is configured (omit it after the first run). `--search` prints to the terminal; add `--output FILE` to save, or `--format json|csv|ai` to change the shape.
+
+**Curation and triage**
+
+```bash
+# What haven't I rated yet?
+cquarry --search 'rating:false'
+
+# Unrated books in a specific genre
+cquarry --search 'tags:Fic.Fantasy and rating:false'
+
+# Books with no cover, or a cover so small it should be replaced
+cquarry --search 'cover:false'
+cquarry --audit                       # the low_res_cover rows in the report
+
+# Books I have only as PDF (conversion / re-acquisition candidates)
+cquarry --search 'formats:PDF and not formats:EPUB'
+
+# Books with no ISBN recorded
+cquarry --search 'not identifiers:isbn:true'
+
+# Everything still in a deprecated-only format, plus duplicates and series gaps
+cquarry --audit --output audit.csv
+```
+
+**Discovery and reading planning**
+
+```bash
+# Top-rated science fiction
+cquarry --search 'tags:Fic.SciFi and rating:5'
+
+# Added in the last month / since a date
+cquarry --search 'date:30daysago'
+cquarry --search 'date:>=2026-01-01'
+
+# Everything by an author (substring; quote names with spaces)
+cquarry --search 'author:"Brandon Sanderson"'
+
+# Which series are incomplete, and what's missing
+cquarry --series
+
+# What's actually inside a wing
+cquarry --catalog --wing "Sci-Fi Wing" --output scifi.txt
+```
+
+**Exporting and feeding other tools**
+
+```bash
+# A whole wing as a compact, token-efficient list for an LLM prompt
+cquarry --search 'tags:Fic.Fantasy' --format ai --output fantasy.ai.txt
+
+# Full library as JSON / CSV for a spreadsheet or script
+cquarry --export --format csv --output library.csv
+
+# Calibre IDs for a batch calibredb operation
+cquarry --catalog --show-id --wing "Cooking" | grep '^\s*\*'
+```
 
 ## Sample output
 
@@ -241,6 +314,24 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 Run them with `PYTHONPATH=src python -m unittest tests.test_search tests.test_helpers`. The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
 
+## Troubleshooting
+
+**A search or wing returns nothing.**
+- Tags are anchored-hierarchical: `tags:Fic` matches `Fic` and `Fic.*`, but not a tag that merely contains "fic" in the middle. Use the full dotted path, or `=` for an exact leaf (`tags:"=Fic.SciFi.Cyberpunk"`).
+- Check the wing name with `cquarry --wings`; names are case-sensitive and must match Calibre exactly. Quote names with spaces: `--wing "Sci-Fi Wing"`.
+- A field prefix that Calibre supports but cquarry does not (templates `@...:`, saved searches `search:`) matches nothing. See [Parity scope](#parity-scope-stdlib-only-deviations).
+
+**"Database not found" or it points at the wrong library.**
+- Pass `--db /path/to/metadata.db` (or a directory containing it). The resolved path is saved to `~/.config/cquarry/config.json`; delete that file or pass `--db` to reset it.
+
+**The shell mangles my query.** Wrap the whole expression in single quotes and use double quotes inside: `cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'`. Without single quotes, your shell treats `OR`/`AND`/parentheses as separate arguments.
+
+**"Custom column not found."** Use the column's display name (e.g. `Status`), not its lookup name (`#reading_status`); the error message lists the available names.
+
+**Calibre is open / the database is locked.** Expected. cquarry prints a notice to stderr, reads from a temporary snapshot, and cleans it up on exit. Results reflect the last saved state.
+
+**Boxes or stars look like garbage in the TUI.** The interface uses Unicode box-drawing and star glyphs and a 256-color terminal. If `curses` is unavailable, cquarry falls back to a plain text menu automatically; piping or redirecting output disables color.
+
 ## How it reads the database
 
 CalibreQuarry opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, `identifiers`, `comments`, and `preferences`. Custom columns are not required, but are read on demand for `--show-custom` and `#column` searches.
@@ -307,7 +398,7 @@ The `scripts/` directory holds standalone maintenance tools. They are **not** pa
 
 ### `compress_pdf.py` — shrink oversize PDFs (writes)
 
-Re-encodes a bloated PDF (think 1 GB TTRPG sourcebooks) through Ghostscript with a quality preset, but only after verifying the result: it aborts if the page count changes or the output isn't smaller, and it keeps the original as `<name>.pre-compress.pdf`. If the file lives in a Calibre library, it also updates `books_pages_link.format_size` so Calibre doesn't treat its cache as stale.
+Re-encodes a bloated PDF (think 1 GB TTRPG sourcebooks) through Ghostscript with a quality preset, but only after verifying the result: it aborts if the page count changes or the output isn't smaller, and it keeps the original as `<name>.pre-compress.pdf`. If the file lives in a Calibre library, it syncs the new size back to the database (core `data.uncompressed_size`, plus the Count Pages plugin's `books_pages_link.format_size` if present) so Calibre doesn't see a stale size. A busy or locked database is handled gracefully: the PDF is still replaced and you are told to re-run with Calibre closed.
 
 > **This script modifies files and `metadata.db`.** It is the reason the companion scripts live outside the read-only `cquarry` package. Back up before a bulk run; close Calibre first.
 
