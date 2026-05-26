@@ -273,6 +273,10 @@ CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT);
 CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
 CREATE TABLE comments (book INT, text TEXT);
 CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
+CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT, datatype TEXT, is_multiple BOOL);
+-- A normalized single-valued enumeration: value table + link table, like Calibre.
+CREATE TABLE custom_column_1 (id INTEGER PRIMARY KEY, value TEXT, link TEXT DEFAULT '');
+CREATE TABLE books_custom_column_1_link (book INT, value INT);
 """
 
 
@@ -370,6 +374,16 @@ def _build_fixture(path):
         "INSERT INTO preferences (key,val) VALUES ('virtual_libraries', ?)",
         ('{"SciFi": "tags:\\"Fic.SciFi\\"", "Hugo": "tags:Award.Hugo"}',),
     )
+    # Normalized enumeration custom column "Status" (#status): book 1 = Read.
+    cur.execute(
+        "INSERT INTO custom_columns (id,label,name,datatype,is_multiple) "
+        "VALUES (1,'status','Status','enumeration',0)"
+    )
+    cur.executemany(
+        "INSERT INTO custom_column_1 (id,value) VALUES (?,?)",
+        [(1, "Read"), (2, "To Read")],
+    )
+    cur.execute("INSERT INTO books_custom_column_1_link (book,value) VALUES (1,1)")
     con.commit()
     con.close()
 
@@ -417,6 +431,13 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(radch["book_count"], 2)
         self.assertEqual(radch["max_index"], 2.0)
         self.assertEqual(radch["indices"], "1.0,2.0")
+
+    def test_normalized_custom_column(self):
+        # Regression: a normalized single-valued enumeration is stored via a
+        # link table, not directly. It must load and be searchable by #label.
+        self.assertEqual(self.db.load_custom_column("Status"), {1: "Read"})
+        self.assertEqual(self.db.search("#status:=Read"), {1})
+        self.assertEqual(self.db.search("#status:Read"), {1})  # contains too
 
 
 if __name__ == "__main__":

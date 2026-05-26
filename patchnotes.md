@@ -26,6 +26,8 @@
 
 **Portability of the series rollup.** `get_all_series` was rewritten to aggregate in Python instead of using `GROUP_CONCAT(... ORDER BY ...)`, which required SQLite 3.44+.
 
+**Normalized custom columns now load.** Single-valued text and enumeration custom columns (e.g. a "Status" / reading-state column) are stored by Calibre in a value table plus a `books_custom_column_N_link` table, exactly like multi-valued columns. The loader keyed off `is_multiple` and tried to read a `book` column straight from the value table, which errored and silently returned nothing. It now detects the link table, so `--show-custom` and `#column` searches work for every custom-column type.
+
 ### Documentation & Tests
 
 **Honest parity claims.** The README and spec no longer claim "100% parity"; they document exactly which locations and operators are supported and the deliberate, dependency-bound deviations (stdlib `re` instead of the `regex` module, `unicodedata` folding instead of ICU, no GPM templates or saved-search references, and cquarry's anchored hierarchical `tags:` match).

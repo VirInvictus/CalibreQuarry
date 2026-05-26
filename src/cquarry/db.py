@@ -206,24 +206,41 @@ class CalibreDB:
         cid = col["id"]
         cur = self.conn.cursor()
 
-        results = {}
+        # Calibre normalizes text/enumeration/series columns into a value table
+        # plus a books_custom_column_N_link table (regardless of is_multiple);
+        # int/float/bool/datetime/comments are stored directly with a `book`
+        # column. Detect which by whether the link table exists, rather than
+        # keying off is_multiple (a single-valued enumeration is still
+        # normalized, and SELECT book FROM its value table would error).
+        link_table = f"books_custom_column_{cid}_link"
+        has_link = bool(
+            cur.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (link_table,),
+            ).fetchone()
+        )
+
+        results: Dict[int, Any] = {}
         try:
-            if col["is_multiple"]:
-                # For multiple values (e.g. tags-like), it's a many-to-many relationship
+            if has_link:
                 cur.execute(f"""
                     SELECT l.book, c.value
-                    FROM books_custom_column_{cid}_link l
+                    FROM {link_table} l
                     JOIN custom_column_{cid} c ON c.id = l.value
                 """)
+                grouped: Dict[int, list] = {}
                 for row in cur.fetchall():
-                    book_id = row["book"]
-                    if book_id not in results:
-                        results[book_id] = []
-                    results[book_id].append(row["value"])
-                # Convert lists to comma-separated strings for consistency with other fields
-                return {k: ", ".join(v) for k, v in results.items()}
+                    grouped.setdefault(row["book"], []).append(row["value"])
+                if col["is_multiple"]:
+                    # Join to a comma-separated string for parity with other fields.
+                    return {
+                        k: ", ".join(str(v) for v in vals)
+                        for k, vals in grouped.items()
+                    }
+                # Single-valued normalized column (text, enumeration): one value.
+                return {k: vals[0] for k, vals in grouped.items()}
             else:
-                # For single values (text, int, bool, date), it's one-to-one
+                # Stored directly (int, float, bool, datetime, comments).
                 cur.execute(f"SELECT book, value FROM custom_column_{cid}")
                 for row in cur.fetchall():
                     results[row["book"]] = row["value"]
