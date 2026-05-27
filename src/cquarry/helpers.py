@@ -1,9 +1,6 @@
-from __future__ import annotations
-
 import os
 import struct
 import sys
-from typing import List, Optional, Tuple
 
 from cquarry.config import (
     CALIBRE_RATING_SCALE,
@@ -33,7 +30,7 @@ _JPEG_SOF_MARKERS = frozenset(
 )
 
 
-def get_jpeg_size(filepath: str) -> Optional[Tuple[int, int]]:
+def get_jpeg_size(filepath: str) -> tuple[int, int] | None:
     """Return a JPEG's (width, height) by seeking through its segment markers.
 
     Reads only segment headers, so a large EXIF/ICC block ahead of the SOF (which
@@ -74,7 +71,7 @@ def get_jpeg_size(filepath: str) -> Optional[Tuple[int, int]]:
         return None
 
 
-def get_png_size(filepath: str) -> Optional[Tuple[int, int]]:
+def get_png_size(filepath: str) -> tuple[int, int] | None:
     """Return a PNG's (width, height) from its IHDR chunk."""
     try:
         with open(filepath, "rb") as f:
@@ -92,7 +89,7 @@ def get_png_size(filepath: str) -> Optional[Tuple[int, int]]:
         return None
 
 
-def get_image_size(filepath: str) -> Optional[Tuple[int, int]]:
+def get_image_size(filepath: str) -> tuple[int, int] | None:
     """Return (width, height) for a JPEG or PNG, sniffing the format by signature."""
     try:
         with open(filepath, "rb") as f:
@@ -106,14 +103,14 @@ def get_image_size(filepath: str) -> Optional[Tuple[int, int]]:
     return None
 
 
-def calibre_rating_to_stars(rating: Optional[int]) -> Optional[float]:
+def calibre_rating_to_stars(rating: int | None) -> float | None:
     """Convert Calibre's internal rating (0-10) to stars (0-5)."""
     if rating is None or rating == 0:
         return None
     return rating / CALIBRE_RATING_SCALE
 
 
-def format_stars(rating: Optional[float]) -> str:
+def format_stars(rating: float | None) -> str:
     if rating is None:
         return ""
     rating = max(0.0, min(5.0, rating))
@@ -130,7 +127,7 @@ def format_stars(rating: Optional[float]) -> str:
     return f" [{s} {rating:.1f}/5]"
 
 
-def normalize_author_display(authors: Optional[str], primary_only: bool = False) -> str:
+def normalize_author_display(authors: str | None, primary_only: bool = False) -> str:
     """Format author string for display."""
     if not authors:
         return "Unknown Author"
@@ -140,14 +137,14 @@ def normalize_author_display(authors: Optional[str], primary_only: bool = False)
     return " & ".join(parts)
 
 
-def author_sort_key(author_sort: Optional[str], primary_only: bool = False) -> str:
+def author_sort_key(author_sort: str | None, primary_only: bool = False) -> str:
     key = (author_sort or "").lower()
     if primary_only:
         key = key.split("&")[0].strip()
     return key
 
 
-def detect_series_gaps(indices_str: str, max_index: Optional[float]) -> List[int]:
+def detect_series_gaps(indices_str: str, max_index: float | None) -> list[int]:
     """Detect missing entries in a series based on index numbers."""
     if not indices_str or max_index is None:
         return []
@@ -163,7 +160,7 @@ def detect_series_gaps(indices_str: str, max_index: Optional[float]) -> List[int
     return sorted(expected - indices)
 
 
-def _resolve_path(path: str) -> Optional[str]:
+def _resolve_path(path: str) -> str | None:
     """Expand and validate a path to metadata.db. Returns None if not found."""
     path = os.path.expanduser(path)
     if os.path.isdir(path):
@@ -173,7 +170,7 @@ def _resolve_path(path: str) -> Optional[str]:
     return None
 
 
-def find_db(explicit: Optional[str] = None) -> str:
+def find_db(explicit: str | None = None) -> str:
     """Locate metadata.db.
 
     Resolution order:

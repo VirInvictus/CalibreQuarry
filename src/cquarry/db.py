@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 import json
 import os
 import shutil
 import sqlite3
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from cquarry.helpers import calibre_rating_to_stars
 from cquarry.search import (
@@ -34,17 +32,17 @@ class CalibreDB:
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"Database not found: {db_path}")
         self.db_path = db_path
-        self._tmp_path: Optional[str] = None
-        self._vl_cache: Optional[Dict[str, str]] = None
-        self._books_cache: Optional[List[Dict[str, Any]]] = None
-        self._all_ids_cache: Optional[Set[int]] = None
+        self._tmp_path: str | None = None
+        self._vl_cache: dict[str, str] | None = None
+        self._books_cache: list[dict[str, Any]] | None = None
+        self._all_ids_cache: set[int] | None = None
 
         # Search-engine state (lazily built).
-        self._search_engine: Optional[SearchEngine] = None
-        self._search_view: Optional[Dict[int, Dict[str, Any]]] = None
-        self._custom_loc_cache: Optional[Dict[str, str]] = None
-        self._custom_label_cache: Optional[Dict[str, Dict[str, Any]]] = None
-        self._custom_val_cache: Dict[str, Dict[int, Any]] = {}
+        self._search_engine: SearchEngine | None = None
+        self._search_view: dict[int, dict[str, Any]] | None = None
+        self._custom_loc_cache: dict[str, str] | None = None
+        self._custom_label_cache: dict[str, dict[str, Any]] | None = None
+        self._custom_val_cache: dict[str, dict[int, Any]] = {}
 
         self.conn = self._open(db_path)
         self.conn.row_factory = sqlite3.Row
@@ -95,7 +93,7 @@ class CalibreDB:
 
     # --- Core queries ---
 
-    def get_all_books(self) -> List[Dict[str, Any]]:
+    def get_all_books(self) -> list[dict[str, Any]]:
         """Fetch all books with full metadata via joins. Results are cached."""
         if self._books_cache is not None:
             return self._books_cache
@@ -124,17 +122,17 @@ class CalibreDB:
         self._books_cache = [dict(row) for row in cur.fetchall()]
         return self._books_cache
 
-    def get_identifiers(self, book_id: int) -> Dict[str, str]:
+    def get_identifiers(self, book_id: int) -> dict[str, str]:
         cur = self.conn.cursor()
         cur.execute("SELECT type, val FROM identifiers WHERE book = ?", (book_id,))
         return {row["type"]: row["val"] for row in cur.fetchall()}
 
-    def get_all_tags(self) -> List[str]:
+    def get_all_tags(self) -> list[str]:
         cur = self.conn.cursor()
         cur.execute("SELECT DISTINCT name FROM tags ORDER BY name")
         return [row["name"] for row in cur.fetchall()]
 
-    def get_tag_counts(self) -> List[Tuple[str, int]]:
+    def get_tag_counts(self) -> list[tuple[str, int]]:
         """Return [(tag_name, book_count), ...] sorted by tag name."""
         cur = self.conn.cursor()
         cur.execute("""
@@ -146,14 +144,14 @@ class CalibreDB:
         """)
         return [(row["name"], row["count"]) for row in cur.fetchall()]
 
-    def get_all_series(self) -> List[Dict[str, Any]]:
+    def get_all_series(self) -> list[dict[str, Any]]:
         """Return per-series rollups, computed in Python from get_all_books().
 
         Computing this here (rather than via SQL GROUP_CONCAT(... ORDER BY ...))
         keeps cquarry working on SQLite older than 3.44, where the in-aggregate
         ORDER BY is a syntax error.
         """
-        groups: Dict[str, Dict[str, Any]] = {}
+        groups: dict[str, dict[str, Any]] = {}
         for b in self.get_all_books():
             name = b["series"]
             if not name:
@@ -162,7 +160,7 @@ class CalibreDB:
             g["indices"].append(b["series_index"])
             g["titles"].append((b["series_index"], b["title"]))
 
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         for name in sorted(groups):
             g = groups[name]
             present = [i for i in g["indices"] if i is not None]
@@ -183,7 +181,7 @@ class CalibreDB:
             )
         return out
 
-    def get_custom_columns(self) -> Dict[str, Dict[str, Any]]:
+    def get_custom_columns(self) -> dict[str, dict[str, Any]]:
         """Return metadata for all custom columns, keyed by display name."""
         cur = self.conn.cursor()
         try:
@@ -194,7 +192,7 @@ class CalibreDB:
         except sqlite3.OperationalError:
             return {}
 
-    def load_custom_column(self, col_name: str) -> Dict[int, Any]:
+    def load_custom_column(self, col_name: str) -> dict[int, Any]:
         """Load values for a specific custom column (by display name). Returns {book_id: value(s)}."""
         cols = self.get_custom_columns()
         if col_name not in cols:
@@ -220,7 +218,7 @@ class CalibreDB:
             ).fetchone()
         )
 
-        results: Dict[int, Any] = {}
+        results: dict[int, Any] = {}
         try:
             if has_link:
                 cur.execute(f"""
@@ -228,7 +226,7 @@ class CalibreDB:
                     FROM {link_table} l
                     JOIN custom_column_{cid} c ON c.id = l.value
                 """)
-                grouped: Dict[int, list] = {}
+                grouped: dict[int, list] = {}
                 for row in cur.fetchall():
                     grouped.setdefault(row["book"], []).append(row["value"])
                 if col["is_multiple"]:
@@ -252,7 +250,7 @@ class CalibreDB:
             )
             return {}
 
-    def get_virtual_libraries(self) -> Dict[str, str]:
+    def get_virtual_libraries(self) -> dict[str, str]:
         """Return {name: search_expression} from Calibre preferences."""
         if self._vl_cache is not None:
             return self._vl_cache
@@ -281,11 +279,11 @@ class CalibreDB:
             self._search_engine = SearchEngine(self)
         return self._search_engine
 
-    def search(self, query: str) -> Set[int]:
+    def search(self, query: str) -> set[int]:
         """Resolve an arbitrary Calibre search expression to a set of book IDs."""
         return self._engine().search(query)
 
-    def resolve_vl(self, vl_name: str) -> Set[int]:
+    def resolve_vl(self, vl_name: str) -> set[int]:
         """Resolve a virtual library name to a set of book IDs.
 
         Parses Calibre's VL search expressions (tags, vl cross-references,
@@ -301,13 +299,13 @@ class CalibreDB:
 
     # --- search.MetadataProvider interface ---
 
-    def all_ids(self) -> Set[int]:
+    def all_ids(self) -> set[int]:
         return set(self._get_all_book_ids())
 
-    def vl_expression(self, name: str) -> Optional[str]:
+    def vl_expression(self, name: str) -> str | None:
         return self.get_virtual_libraries().get(name)
 
-    def custom_locations(self) -> Dict[str, str]:
+    def custom_locations(self) -> dict[str, str]:
         cache = self._custom_loc_cache
         if cache is None:
             cache = self._custom_loc_cache = self._build_custom_locations()
@@ -321,7 +319,7 @@ class CalibreDB:
 
     # --- search-engine internals ---
 
-    def _get_all_book_ids(self) -> Set[int]:
+    def _get_all_book_ids(self) -> set[int]:
         """Return all book IDs, cached."""
         if self._all_ids_cache is None:
             self._all_ids_cache = {
@@ -330,15 +328,15 @@ class CalibreDB:
             }
         return self._all_ids_cache
 
-    def _build_search_view(self) -> Dict[int, Dict[str, Any]]:
+    def _build_search_view(self) -> dict[int, dict[str, Any]]:
         """Build a per-book, normalized field view for the search engine."""
         if self._search_view is not None:
             return self._search_view
 
-        def _split(s: Optional[str]) -> List[str]:
+        def _split(s: str | None) -> list[str]:
             return [p.strip() for p in s.split(",")] if s else []
 
-        view: Dict[int, Dict[str, Any]] = {}
+        view: dict[int, dict[str, Any]] = {}
         for b in self.get_all_books():
             view[b["id"]] = {
                 "title": b["title"] or "",
@@ -394,8 +392,8 @@ class CalibreDB:
         "datetime": DT_DATE,
     }
 
-    def _build_custom_locations(self) -> Dict[str, str]:
-        out: Dict[str, str] = {}
+    def _build_custom_locations(self) -> dict[str, str]:
+        out: dict[str, str] = {}
         for col in self.get_custom_columns().values():
             engine_dt = self._CUSTOM_DT_MAP.get(col["datatype"])
             if engine_dt is None:
@@ -405,7 +403,7 @@ class CalibreDB:
             out["#" + col["label"]] = engine_dt
         return out
 
-    def _custom_by_label(self) -> Dict[str, Dict[str, Any]]:
+    def _custom_by_label(self) -> dict[str, dict[str, Any]]:
         if self._custom_label_cache is None:
             self._custom_label_cache = {
                 c["label"]: c for c in self.get_custom_columns().values()

@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import io
 import os
 import subprocess
 import sys
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any
 
 from cquarry.config import VERSION, get_db_path, set_db_path
 from cquarry.db import CalibreDB
@@ -90,7 +88,7 @@ def _tui_select(
     title: str,
     sections: list,
     hints: str = "\u2191\u2193 Navigate  \u23ce Select  q Quit",
-) -> Optional[tuple]:
+) -> tuple | None:
     """Full-screen arrow-key menu. Returns the chosen (section, item) or None."""
     BOX_W = _TUI_BOX_W
     INNER = _TUI_INNER
@@ -170,7 +168,7 @@ def _tui_select(
         _safe_addstr(stdscr, y, hx, hints, curses.color_pair(_CP_HINT) | curses.A_DIM)
         stdscr.refresh()
 
-    def _run(stdscr) -> Optional[tuple]:
+    def _run(stdscr) -> tuple | None:
         _init_tui_colors()
         curses.curs_set(0)
         cur = 0
@@ -199,7 +197,7 @@ def _tui_select(
 # =====================================
 
 
-def _tui_prompt_str(label: str, default: Optional[str]) -> str:
+def _tui_prompt_str(label: str, default: str | None) -> str:
     """Single-line text input box; Enter confirms, Esc returns the default."""
     BOX_W = _TUI_BOX_W
     INNER = _TUI_INNER
@@ -506,7 +504,7 @@ def _fallback_input(prompt: str, mapping: dict) -> Any:
     return mapping.get(ch, "invalid")
 
 
-def _prompt_str(label: str, default: Optional[str]) -> str:
+def _prompt_str(label: str, default: str | None) -> str:
     if _USE_CURSES:
         return _tui_prompt_str(label, default)
     display = default if default else ""
@@ -616,7 +614,7 @@ _MAIN_FALLBACK_MAP = {
 }
 
 
-def _select_main() -> Optional[tuple]:
+def _select_main() -> tuple | None:
     if _USE_CURSES:
         return _tui_select(f"CalibreQuarry v{VERSION}", _MAIN_SECTIONS)
     _box_menu(
@@ -663,7 +661,7 @@ def _select_main() -> Optional[tuple]:
 # =====================================
 
 
-def _resolve_db_for_tui() -> Optional[str]:
+def _resolve_db_for_tui() -> str | None:
     """Resolve the database path, using TUI prompts for first-run config."""
     # Check saved config and default paths first
     saved = get_db_path()

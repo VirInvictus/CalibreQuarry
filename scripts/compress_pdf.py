@@ -27,8 +27,6 @@ Exit codes
     2 = setup error (ghostscript missing, file unreadable)
 """
 
-from __future__ import annotations
-
 import argparse
 import shutil
 import sqlite3

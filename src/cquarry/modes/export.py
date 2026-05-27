@@ -1,11 +1,8 @@
-from __future__ import annotations
-
 import csv
 import json
 import os
 import sys
 from contextlib import contextmanager
-from typing import Optional
 
 from cquarry.db import CalibreDB
 from cquarry.helpers import calibre_rating_to_stars
@@ -27,7 +24,7 @@ _CSV_FIELDS = [
 ]
 
 
-def _load_custom(db: CalibreDB, show_custom: Optional[str]) -> Optional[dict]:
+def _load_custom(db: CalibreDB, show_custom: str | None) -> dict | None:
     """Load a custom column, or {} if none requested. None signals an error."""
     if not show_custom:
         return {}
@@ -39,7 +36,7 @@ def _load_custom(db: CalibreDB, show_custom: Optional[str]) -> Optional[dict]:
 
 
 @contextmanager
-def _open_out(output: Optional[str]):
+def _open_out(output: str | None):
     """Yield (stream, path). A falsy output streams to stdout (path is None)."""
     if output:
         out_path = os.path.abspath(output)
@@ -144,7 +141,7 @@ def run_export(
     output: str,
     fmt: str = "json",
     *,
-    show_custom: Optional[str] = None,
+    show_custom: str | None = None,
     quiet: bool = False,
 ) -> None:
     """Export full library to JSON, CSV, or AI-readable format."""
@@ -171,10 +168,10 @@ def run_export(
 def run_search_export(
     db: CalibreDB,
     query: str,
-    output: Optional[str] = None,
+    output: str | None = None,
     *,
-    fmt: Optional[str] = None,
-    show_custom: Optional[str] = None,
+    fmt: str | None = None,
+    show_custom: str | None = None,
     quiet: bool = False,
 ) -> None:
     """Evaluate a search query and write matching books.

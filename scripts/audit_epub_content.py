@@ -41,8 +41,6 @@ A book is "expected-foreign" (reported but not a failure) when its tag is
 under NonFic.Language.* or its declared language is not English.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re

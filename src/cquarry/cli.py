@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import argparse
 import sys
-from typing import List, Optional
 
 from cquarry.config import VERSION
 from cquarry.db import CalibreDB
@@ -132,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     if len(argv) == 0:

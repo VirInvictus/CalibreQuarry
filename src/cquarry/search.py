@@ -30,12 +30,10 @@ Deliberate, documented deviations from Calibre (dependency-bound):
     long-standing cquarry invariant; see the project's CLAUDE.md.
 """
 
-from __future__ import annotations
-
 import re
 import unicodedata
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Protocol, Set, Tuple
+from typing import Any, Protocol
 
 # re.Scanner is a real, stable stdlib helper but is undocumented and untyped,
 # so reach it via getattr to keep type checkers quiet.
@@ -63,7 +61,7 @@ DT_ALL = "all"
 DT_VL = "vl"
 
 # Canonical location -> datatype, for the built-in Calibre fields.
-_BUILTIN_DATATYPES: Dict[str, str] = {
+_BUILTIN_DATATYPES: dict[str, str] = {
     "title": DT_TEXT,
     "author_sort": DT_TEXT,
     "series": DT_TEXT,
@@ -87,7 +85,7 @@ _BUILTIN_DATATYPES: Dict[str, str] = {
 }
 
 # Alias -> canonical location.
-_ALIASES: Dict[str, str] = {
+_ALIASES: dict[str, str] = {
     "author": "authors",
     "tag": "tags",
     "format": "formats",
@@ -119,7 +117,7 @@ class ParseException(Exception):
 class MetadataProvider(Protocol):
     """What the engine needs from a data source (CalibreDB implements this)."""
 
-    def all_ids(self) -> Set[int]: ...
+    def all_ids(self) -> set[int]: ...
 
     def field(self, book_id: int, location: str) -> Any:
         """Return a book's value for a *canonical* location.
@@ -133,11 +131,11 @@ class MetadataProvider(Protocol):
         """
         ...
 
-    def vl_expression(self, name: str) -> Optional[str]:
+    def vl_expression(self, name: str) -> str | None:
         """Return a virtual library's search expression, or None if unknown."""
         ...
 
-    def custom_locations(self) -> Dict[str, str]:
+    def custom_locations(self) -> dict[str, str]:
         """Return {location_token: datatype} for custom columns (e.g. '#read')."""
         ...
 
@@ -165,12 +163,12 @@ class _Parser:
         flags=re.DOTALL,
     )
 
-    def __init__(self, locations: Set[str]):
+    def __init__(self, locations: set[str]):
         self.locations = locations
-        self.tokens: List[Tuple[int, str]] = []
+        self.tokens: list[tuple[int, str]] = []
         self.current = 0
 
-    def _tokenize(self, expr: str) -> List[Tuple[int, str]]:
+    def _tokenize(self, expr: str) -> list[tuple[int, str]]:
         for k, v in self.REPLACEMENTS:
             expr = expr.replace(k, v)
         tokens, remainder = self._scanner.scan(expr)
@@ -199,7 +197,7 @@ class _Parser:
     def _ttype(self) -> int:
         return self.EOF if self._is_eof() else self.tokens[self.current][0]
 
-    def _token(self, advance: bool = False) -> Optional[str]:
+    def _token(self, advance: bool = False) -> str | None:
         if self._is_eof():
             return None
         res = self.tokens[self.current][1]
@@ -207,7 +205,7 @@ class _Parser:
             self.current += 1
         return res
 
-    def _lc(self) -> Optional[str]:
+    def _lc(self) -> str | None:
         t = self._token()
         return t.lower() if t is not None else None
 
@@ -277,7 +275,7 @@ def _fold(s: str) -> str:
     return s.casefold()
 
 
-def _matchkind(query: str) -> Tuple[int, str]:
+def _matchkind(query: str) -> tuple[int, str]:
     kind = CONTAINS
     if len(query) > 1:
         if query.startswith("\\"):
@@ -294,7 +292,7 @@ def _matchkind(query: str) -> Tuple[int, str]:
     return kind, query
 
 
-def _match_text(query: str, values: List[str], kind: int) -> bool:
+def _match_text(query: str, values: list[str], kind: int) -> bool:
     """Match a (single- or multi-valued) plain text field."""
     if kind == REGEXP:
         try:
@@ -315,7 +313,7 @@ def _match_text(query: str, values: List[str], kind: int) -> bool:
     return False
 
 
-def _match_hier(query: str, values: List[str], kind: int) -> bool:
+def _match_hier(query: str, values: list[str], kind: int) -> bool:
     """Match a hierarchical tag field.
 
     Default (contains): anchored — ``Foo`` matches ``Foo`` and ``Foo.*``.
@@ -412,7 +410,7 @@ class _DateQuery:
         self.target, self.field_count = self._parse_target(query.strip())
 
     @staticmethod
-    def _parse_target(q: str) -> Tuple[date, int]:
+    def _parse_target(q: str) -> tuple[date, int]:
         today = date.today()
         ql = q.lower()
         if ql in ("today", "_today"):
@@ -434,7 +432,7 @@ class _DateQuery:
         except ValueError, IndexError:
             raise ParseException(f"Invalid date in query: {q!r}")
 
-    def matches(self, value: Optional[date]) -> bool:
+    def matches(self, value: date | None) -> bool:
         if value is None:
             return False
         op, q, fc = self.op, self.target, self.field_count
@@ -485,7 +483,7 @@ class _DateQuery:
         return False
 
 
-def _parse_date(raw: Optional[str]) -> Optional[date]:
+def _parse_date(raw: str | None) -> date | None:
     if not raw:
         return None
     s = str(raw).strip()
@@ -521,7 +519,7 @@ class SearchEngine:
             set(_BUILTIN_DATATYPES) | set(_ALIASES) | {"isbn"} | set(self._custom)
         )
 
-    def search(self, expr: str) -> Set[int]:
+    def search(self, expr: str) -> set[int]:
         expr = (expr or "").strip()
         all_ids = self.provider.all_ids()
         if not expr:
@@ -530,7 +528,7 @@ class SearchEngine:
         return self._evaluate(tree, set(all_ids), set())
 
     # -- boolean evaluation with candidate-set semantics --
-    def _evaluate(self, node, candidates: Set[int], seen: Set[str]) -> Set[int]:
+    def _evaluate(self, node, candidates: set[int], seen: set[str]) -> set[int]:
         op = node[0]
         if op == "and":
             left = self._evaluate(node[1], candidates, seen)
@@ -548,7 +546,7 @@ class SearchEngine:
         location = location.lower().strip()
         return _ALIASES.get(location, location)
 
-    def _datatype(self, location: str) -> Optional[str]:
+    def _datatype(self, location: str) -> str | None:
         if location in _BUILTIN_DATATYPES:
             return _BUILTIN_DATATYPES[location]
         if location in self._custom:
@@ -556,8 +554,8 @@ class SearchEngine:
         return None
 
     def _get_matches(
-        self, location: str, query: str, candidates: Set[int], seen: Set[str]
-    ) -> Set[int]:
+        self, location: str, query: str, candidates: set[int], seen: set[str]
+    ) -> set[int]:
         if not candidates or query is None:
             return set()
 
@@ -585,7 +583,7 @@ class SearchEngine:
         # text-like
         return self._match_textlike(location, datatype, query, candidates)
 
-    def _values(self, book_id: int, location: str) -> List[str]:
+    def _values(self, book_id: int, location: str) -> list[str]:
         v = self.provider.field(book_id, location)
         if v is None:
             return []
@@ -594,7 +592,7 @@ class SearchEngine:
         s = str(v)
         return [s] if s else []
 
-    def _match_textlike(self, location, datatype, query, candidates) -> Set[int]:
+    def _match_textlike(self, location, datatype, query, candidates) -> set[int]:
         kind, q = _matchkind(query)
         # the bare true/false presence test (Calibre's contains special case)
         if kind == CONTAINS and q.lower() in (_BOOL_TRUE | _BOOL_FALSE):
@@ -603,7 +601,7 @@ class SearchEngine:
         matcher = _match_hier if datatype == DT_HIER else _match_text
         return {b for b in candidates if matcher(q, self._values(b, location), kind)}
 
-    def _match_numeric(self, location, datatype, query, candidates) -> Set[int]:
+    def _match_numeric(self, location, datatype, query, candidates) -> set[int]:
         pred, _ = _num_predicate(query.lower().strip(), datatype)
         out = set()
         for b in candidates:
@@ -617,7 +615,7 @@ class SearchEngine:
                 out.add(b)
         return out
 
-    def _match_date(self, location, query, candidates) -> Set[int]:
+    def _match_date(self, location, query, candidates) -> set[int]:
         q = query.lower().strip()
         if q in _BOOL_FALSE or q == "":
             return {
@@ -638,7 +636,7 @@ class SearchEngine:
             if dq.matches(_parse_date(self.provider.field(b, location)))
         }
 
-    def _match_bool(self, location, query, candidates) -> Set[int]:
+    def _match_bool(self, location, query, candidates) -> set[int]:
         q = query.lower().strip()
         if q in _BOOL_TRUE:
             return {b for b in candidates if bool(self.provider.field(b, location))}
@@ -646,7 +644,7 @@ class SearchEngine:
             return {b for b in candidates if not bool(self.provider.field(b, location))}
         return set()
 
-    def _match_identifiers(self, original, query, candidates) -> Set[int]:
+    def _match_identifiers(self, original, query, candidates) -> set[int]:
         # Mirrors Calibre's keypair_search. `isbn:X` is shorthand for an exact
         # `identifiers:=isbn:X` lookup. A bare `identifiers:foo` (no colon)
         # matches identifier *values*; use `identifiers:type:true` for presence.
@@ -683,7 +681,7 @@ class SearchEngine:
                 break
         return out
 
-    def _match_all(self, query, candidates) -> Set[int]:
+    def _match_all(self, query, candidates) -> set[int]:
         kind, q = _matchkind(query)
         out = set()
         for b in candidates:
@@ -695,7 +693,7 @@ class SearchEngine:
                     break
         return out
 
-    def _match_vl(self, name: str, candidates: Set[int], seen: Set[str]) -> Set[int]:
+    def _match_vl(self, name: str, candidates: set[int], seen: set[str]) -> set[int]:
         key = name.lower()
         if key in seen:
             raise ParseException(f"Recursive virtual library reference: {name!r}")

@@ -1,9 +1,6 @@
-from __future__ import annotations
-
 import csv
 import os
 from collections import Counter, defaultdict
-from typing import Dict, List
 
 from cquarry.db import CalibreDB
 from cquarry.helpers import (
@@ -22,7 +19,7 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
     """Report library issues to CSV."""
     books = db.get_all_books()
     all_series = db.get_all_series()
-    issues: List[Dict[str, str]] = []
+    issues: list[dict[str, str]] = []
 
     DEPRECATED_FORMATS = {"MOBI", "LIT", "LRF", "DJVU", "PDB", "AZW"}
     db_dir = os.path.dirname(db.db_path)
@@ -30,7 +27,7 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
     title_author_groups = defaultdict(list)
 
     for b in books:
-        problems: List[str] = []
+        problems: list[str] = []
 
         if not b["tags"]:
             problems.append("no_tags")

@@ -1,6 +1,5 @@
 import json
 import os
-from typing import Optional
 
 VERSION = "3.0.0"
 
@@ -18,7 +17,7 @@ CONFIG_FILE = os.path.expanduser("~/.config/cquarry/config.json")
 def load_config() -> dict:
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -31,7 +30,7 @@ def save_config(config: dict) -> None:
         json.dump(config, f, indent=4)
 
 
-def get_db_path() -> Optional[str]:
+def get_db_path() -> str | None:
     return load_config().get("db_path")
 
 

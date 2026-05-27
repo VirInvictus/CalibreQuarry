@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from cquarry.db import CalibreDB
 from cquarry.helpers import C_TITLE, color
 

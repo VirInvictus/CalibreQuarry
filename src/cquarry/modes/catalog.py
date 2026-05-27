@@ -1,10 +1,7 @@
-from __future__ import annotations
-
 import os
 import re
 import sys
 from datetime import datetime
-from typing import Optional
 
 from cquarry.db import CalibreDB
 from cquarry.helpers import (
@@ -22,11 +19,11 @@ def write_catalog(
     db: CalibreDB,
     output: str,
     *,
-    wing: Optional[str] = None,
+    wing: str | None = None,
     primary_only: bool = False,
     show_tags: bool = False,
     show_id: bool = False,
-    show_custom: Optional[str] = None,
+    show_custom: str | None = None,
     quiet: bool = False,
 ) -> None:
     """Write a formatted text catalog, optionally filtered to a virtual library."""
@@ -134,7 +131,7 @@ def write_all_wings(
     primary_only: bool = False,
     show_tags: bool = False,
     show_id: bool = False,
-    show_custom: Optional[str] = None,
+    show_custom: str | None = None,
     quiet: bool = False,
 ) -> None:
     """Generate a catalog file for each virtual library wing."""

@@ -83,7 +83,7 @@ Both `run_tests.sh` and `test_queries.sh` hardcode `DB_PATH="/home/bdkl/docs/Cal
 
 ## Style notes specific to this repo
 
-- `from __future__ import annotations` at the top of every module that uses type hints.
+- Modern typing only (Python 3.14 floor): builtin generics (`list[str]`, `dict[int, Any]`) and `X | None`, never `typing.List`/`Optional`. Import from `typing` only what has no builtin form (`Any`, `Protocol`). Do **not** add `from __future__ import annotations` — PEP 649 deferred annotations are the default in 3.14, so it is unnecessary boilerplate.
 - ANSI color via `helpers.color(text, code)` — it auto-disables when stdout isn't a TTY. Don't hand-roll `\033[` escapes elsewhere.
 - Mode functions print user-facing status to stdout and errors to stderr; they don't raise for "no results" — they print and return.
 - `--quiet` suppresses decorative output but not errors. Honor it in any new mode.
