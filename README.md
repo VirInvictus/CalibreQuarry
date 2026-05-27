@@ -285,6 +285,19 @@ Matching is near-complete but not bit-for-bit identical to Calibre, by design: C
 * GPM templates (`@...:`) and saved-search references (`search:`) are not evaluated.
 * `tags:` is **anchored-hierarchical** (matches `Foo` and `Foo.*`), where Calibre's raw default is an unanchored substring. This is intentional and is what curated dotted taxonomies want; use `=` for strict exact.
 
+### Custom columns
+
+Custom columns are referred to by **two different names**, which is easy to trip over:
+
+| Where | Which name | Example |
+|-------|-----------|---------|
+| `--show-custom` | the column's **display name** (what you see in Calibre) | `--show-custom "Status"` |
+| `--search` (the `#` prefix) | the column's **lookup name** (label), prefixed with `#` | `--search '#reading_status:Read'` |
+
+These two names are often different (display "Status", lookup `reading_status`). In Calibre, the lookup name is the one shown in *Preferences → Add your own columns* under "Lookup name"; the `#` search prefix always uses that one. If `--show-custom` reports "not found", the error lists the valid display names.
+
+**Watch the contains-vs-exact trap on enumerations.** A custom search is a substring match by default, so `#reading_status:Read` also matches `Reading` and `To Read` (both contain "read"). For the exact value, use `=`: `#reading_status:=Read`. Quote values with spaces: `#reading_status:"=To Read"`.
+
 ### Quote Handling (`"` and `'`)
 
 When running searches via the command line with `--search`, you must navigate your shell's quote-escaping rules. Items can be explicitly `""`'d or written unquoted (if they do not contain spaces).
@@ -326,7 +339,9 @@ Run them with `PYTHONPATH=src python -m unittest tests.test_search tests.test_he
 
 **The shell mangles my query.** Wrap the whole expression in single quotes and use double quotes inside: `cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'`. Without single quotes, your shell treats `OR`/`AND`/parentheses as separate arguments.
 
-**"Custom column not found."** Use the column's display name (e.g. `Status`), not its lookup name (`#reading_status`); the error message lists the available names.
+**"Custom column not found" (`--show-custom`).** Use the column's *display* name (e.g. `Status`); the error lists the available names. Note the asymmetry: `--show-custom` wants the display name, but a `#` search wants the *lookup* name (`#reading_status`). See [Custom columns](#custom-columns).
+
+**A `#custom` search matches too many rows.** Custom searches are substring matches, so `#reading_status:Read` also catches `Reading` and `To Read`. Use `=` for an exact value: `#reading_status:=Read`.
 
 **Calibre is open / the database is locked.** Expected. cquarry prints a notice to stderr, reads from a temporary snapshot, and cleans it up on exit. Results reflect the last saved state.
 
