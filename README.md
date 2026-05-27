@@ -9,7 +9,7 @@
 
 A CLI toolkit for Calibre users who treat their libraries as curated collections. Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries, no external libraries. Pure Python stdlib.
 
-> **Note:** This is considered completed software. It has been thoroughly tested and is known to be fully functional on the primary development environment: **Fedora Linux 43 (Workstation Edition)**, kernel `6.19.12-200.fc43.x86_64`, using **Calibre 9.7**. While it is pure Python and should be cross-platform, this specific setup is the only officially tested environment.
+> **Note:** This is considered completed software. It has been thoroughly tested and is known to be fully functional on the primary development environment: **Fedora Linux 44 (Workstation Edition)**, kernel `7.0.9-205.fc44.x86_64`, using **Calibre 9.8** on **Python 3.14**. While it is pure Python and should be cross-platform, this specific setup is the only officially tested environment.
 
 ## Contents
 
