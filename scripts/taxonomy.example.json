@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "description": "Example opinionated taxonomy for validate_metadata.py. Copy this to 'taxonomy.json' next to your library (or pass --taxonomy) and edit it to match your own tree. When a taxonomy is loaded, validate_metadata.py runs the opinionated, spec-driven checks (TAG_IN_SPEC, PUBLISHER_NOT_CONSOLIDATED, FORMAT_FICTION_PDF) in addition to the always-on integrity checks. A single-tag-per-book, hierarchical model is assumed: 'Fic.Fantasy.Epic'. A branch is a valid tag on its own only when its 'bare_allowed' is true; otherwise only its leaves are valid.",
+
+  "tree": [
+    {
+      "name": "Fic",
+      "bare_allowed": false,
+      "children": [
+        { "name": "Classic", "children": ["African", "American", "British", "European", "Russian", "Greek", "Roman", "Medieval", "Drama", "Gothic", "Epic", "Fable"] },
+        { "name": "Literary", "bare_allowed": true, "children": ["Experimental", "Postmodern", "Metafiction", "Satire"] },
+        { "name": "Contemporary", "bare_allowed": true, "children": ["Literary", "Upmarket", "ComingOfAge", "Domestic"] },
+        { "name": "SciFi", "bare_allowed": true, "children": ["SpaceOpera", "HardSF", "Cyberpunk", "Dystopian", "PostApocalyptic", "TimeTravel", "FirstContact", "Military", "Biopunk", "Steampunk", "Climate", "Weird", "TieIn"] },
+        { "name": "Fantasy", "bare_allowed": true, "children": ["Epic", "High", "Low", "Dark", "Grimdark", "Urban", "Sword", "Portal", "Fairytale", "Mythic", "Weird", "Romantasy", "TieIn"] },
+        { "name": "Horror", "bare_allowed": true, "children": ["Cosmic", "Gothic", "Weird", "Psychological", "Supernatural", "Splatterpunk", "Philosophical", "Folk", "Body"] },
+        { "name": "Crime", "bare_allowed": true, "children": ["Noir", "Detective", "Procedural", "Heist", "Organized"] },
+        { "name": "Thriller", "bare_allowed": true, "children": ["Crime", "Cyber", "Military", "Mystery", "Psychological", "Techno", "Legal", "Political", "Espionage", "TieIn"] },
+        { "name": "Mystery", "bare_allowed": true, "children": ["Cozy", "Whodunit", "Historical", "Hardboiled"] },
+        { "name": "Historical", "bare_allowed": true, "children": ["Literary", "Military", "Naval", "Mystery", "Western", "Romance", "Adventure"] },
+        { "name": "Romance", "bare_allowed": true, "children": ["Contemporary", "Historical", "Paranormal", "Romantasy"] },
+        { "name": "Adventure", "bare_allowed": true },
+        { "name": "Western", "bare_allowed": true },
+        { "name": "Humor", "bare_allowed": true },
+        { "name": "ShortStories", "bare_allowed": true },
+        { "name": "Poetry", "bare_allowed": true },
+        { "name": "Translated", "bare_allowed": false, "children": ["Japanese", "Chinese", "Korean", "French", "German", "Spanish", "Italian", "Portuguese", "Russian", "Polish", "Danish", "Swedish", "Norwegian", "Dutch", "Arabic", "Hebrew", "Czech", "Hungarian", "Greek", "Turkish"] }
+      ]
+    },
+    {
+      "name": "NonFic",
+      "bare_allowed": false,
+      "children": [
+        {
+          "name": "Tech",
+          "bare_allowed": true,
+          "children": [
+            { "name": "Lang", "bare_allowed": true, "children": ["C", "C++", "CSharp", "FSharp", "Rust", "Go", "Python", "Ruby", "Java", "Kotlin", "Scala", "JavaScript", "TypeScript", "Swift", "ObjectiveC", "Lisp", "Scheme", "Clojure", "Haskell", "OCaml", "Erlang", "Elixir", "Perl", "PHP", "R", "Julia", "Assembly", "COBOL", "Fortran", "Pascal", "Smalltalk", "Prolog", "SQL", "Shell", "LaTeX"] },
+            { "name": "CS", "bare_allowed": true, "children": ["Theory", "Fundamentals", "Algorithms", "Compilers", "Concurrency", "FormalMethods", "GameDev", "Complexity"] },
+            { "name": "OS", "bare_allowed": true, "children": ["Linux", "Unix", "BSD", "Solaris", "Windows", "Networking", "Architecture"] },
+            { "name": "Security", "bare_allowed": true, "children": ["Offensive", "Defensive", "Forensics", "Reversing"] },
+            { "name": "AI", "bare_allowed": true, "children": ["ML", "DeepLearning", "NLP", "DataScience"] },
+            "Cryptography", "Networking", "Databases", "Web", "DevOps", "DevTools", "SoftwareEngineering", "Graphics", "Hardware", "DistributedSystems", "Embedded", "Productivity", "Management", "History", "Culture"
+          ]
+        },
+        { "name": "Science", "bare_allowed": true, "children": ["Physics", "Biology", "Chemistry", "Mathematics", "Astronomy", "EarthScience", "Medicine", "Cognitive", "Statistics"] },
+        { "name": "Philosophy", "bare_allowed": true, "children": ["Ethics", "Logic", "Metaphysics", "Political", "Mind", "Eastern", "Stoicism", "Existentialism", "Aesthetics", "Science"] },
+        { "name": "History", "bare_allowed": true, "children": ["Ancient", "Medieval", "Modern", "Military", "American", "European", "World", "Economic", "Social"] },
+        { "name": "Biography", "bare_allowed": true, "children": ["Memoir", "Autobiography", "Letters"] },
+        { "name": "Culture", "bare_allowed": true, "children": ["Music", "Film", "Art", "Design", "Media", "Internet", "Food"] },
+        { "name": "Society", "bare_allowed": true, "children": ["Politics", "Sociology", "Economics", "Journalism", "TrueCrime", "Law"] },
+        { "name": "Language", "bare_allowed": true, "children": ["Linguistics", "Learning"] },
+        { "name": "GameDesign", "bare_allowed": true, "children": ["History", "Theory", "Design"] },
+        { "name": "Psychology", "bare_allowed": true },
+        { "name": "SelfHelp", "bare_allowed": true },
+        { "name": "Business", "bare_allowed": true },
+        { "name": "Religion", "bare_allowed": true },
+        { "name": "Mythology", "bare_allowed": true },
+        { "name": "Writing", "bare_allowed": true },
+        { "name": "Reference", "bare_allowed": true },
+        { "name": "Travel", "bare_allowed": true },
+        { "name": "Nature", "bare_allowed": true },
+        { "name": "Cooking", "bare_allowed": true },
+        { "name": "Essays", "bare_allowed": true },
+        { "name": "Mathematics", "bare_allowed": true }
+      ]
+    },
+    {
+      "name": "Gaming",
+      "bare_allowed": false,
+      "children": [
+        { "name": "TTRPG", "bare_allowed": true, "children": ["DnD", "Pathfinder", "CallOfCthulhu", "WorldOfDarkness", "Shadowrun", "Warhammer", "OSR", "PbtA", "Forged", "Indie", "Setting", "Adventure", "MORKBORG"] },
+        { "name": "Video", "bare_allowed": true, "children": ["Strategy", "RPG", "Lore", "Artbook", "Criticism"] },
+        { "name": "Board", "bare_allowed": true },
+        { "name": "Theory", "bare_allowed": true }
+      ]
+    }
+  ],
+
+  "fiction_roots": ["Fic"],
+  "format_prefer_epub": true,
+
+  "forbidden_identifier_types": [
+    "url", "uri", "urn", "guid", "id", "revision", "created", "genre",
+    "author_origin", "notes_images", "maxpg", "grvotes", "grrating",
+    "isbn-13", "isbn-10", "isbn13", "isbn10", "eisbn", "ean", "sbn", "urnisbn"
+  ],
+
+  "canonical_identifier_types": [
+    "isbn", "amazon", "amazon_uk", "amazon_de", "amazon_fr", "amazon_es",
+    "amazon_it", "amazon_ca", "amazon_jp", "amazon_in", "mobi-asin",
+    "goodreads", "google", "storygraph", "openlibrary", "isfdb",
+    "isfdb-title", "kobo", "barnesnoble", "fictiondb", "doi", "oclc",
+    "lccn", "hardcover", "hardcover-edition", "librarything", "douban",
+    "dnb", "worldcat", "issn"
+  ],
+
+  "publisher_canonicals": {
+    "Tor Books": ["Tor"],
+    "Penguin": ["Penguin Books"],
+    "Vintage": ["Vintage Books"],
+    "Anchor": ["Anchor Books"],
+    "Ace": ["Ace Books"],
+    "Berkley": ["Berkley Books"],
+    "Bloomsbury": ["Bloomsbury Publishing"],
+    "HarperCollins": ["HarperCollins Publishers"],
+    "Simon & Schuster": ["Simon Schuster"],
+    "Random House": ["Random House Inc"],
+    "Pocket Books": ["Pocket"],
+    "W. W. Norton & Company": ["W. W. Norton", "W.W. Norton", "W. W. Norton Company"],
+    "Independently published": [
+      "CreateSpace", "CreateSpace Independent Publishing Platform",
+      "Lulu.com", "Blurb", "Blurb, Incorporated", "iUniverse",
+      "Lightning Source Inc", "Lightning Source UK", "Self-Published",
+      "Wentworth Press", "Creative Media Partners, LLC"
+    ]
+  }
+}

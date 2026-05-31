@@ -18,6 +18,8 @@ build/
 *.csv
 *.json
 *.txt
+# ...but the shipped taxonomy template is config, not generated output
+!scripts/taxonomy.example.json
 
 # OS junk
 .DS_Store

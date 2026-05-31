@@ -409,7 +409,7 @@ options:
 
 ## Companion scripts
 
-The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and one of them writes. They are stdlib-only Python, but shell out to external command-line tools. Both are designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
+The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and one of them writes. They are stdlib-only Python; some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
 
 ### `compress_pdf.py` — shrink oversize PDFs (writes)
 
@@ -439,6 +439,55 @@ python3 audit_epub_content.py ~/Downloads  # vet loose .epub files before import
 ```
 
 Exit codes: `0` clean, `1` foreign-language content or injection signature found, `2` setup error.
+
+### `validate_metadata.py` — lint database integrity (read-only)
+
+A linter for `metadata.db` with two layers. It is the database-side companion to `audit_epub_content.py` (which checks book *content*), and it is strictly `mode=ro`.
+
+**Integrity layer (always on, zero config).** Taxonomy-agnostic, schema-level problems the UI and `--audit` leave alone: books with no language, one ISBN attached to two books, placeholder (`0101-01-01`) or unparseable publication dates, junk identifier types (`url`, `uri`, `guid`, `isbn13`, ...), an ISBN-10 misfiled under `amazon`/`mobi-asin` (checksum-verified, so genuine ASINs are left alone), and custom-column link rows orphaned by deleted books. Safe to point at any library; needs no configuration.
+
+**Opinionated layer (on when a taxonomy is loaded).** A `taxonomy.json` describes your tag tree, publisher consolidations, and identifier vocabulary, and these checks enforce it: every tag in use must be declared (`TAG_IN_SPEC`), alias publishers must be merged into their canonical (`PUBLISHER_NOT_CONSOLIDATED`), and fiction should not be PDF-only (`FORMAT_FICTION_PDF`). Loading a taxonomy also makes the identifier-type vocabulary authoritative (the `--strict` behavior turns on automatically). A comprehensive, ready-to-adapt template ships as **`scripts/taxonomy.example.json`** (three roots — `Fic` / `NonFic` / `Gaming` — with a deep, single-tag-per-book hierarchy; a branch is a valid tag on its own only when its `bare_allowed` is `true`).
+
+Errors are bad data Calibre or tooling can trip on; warnings are hygiene.
+
+```bash
+python3 scripts/validate_metadata.py                   # integrity checks on ./metadata.db
+python3 scripts/validate_metadata.py ~/Calibre         # a library directory
+python3 scripts/validate_metadata.py library/metadata.db
+python3 scripts/validate_metadata.py --strict          # also flag non-canonical identifier types
+python3 scripts/validate_metadata.py --quiet           # only problems; truncate long lists
+
+# Opinionated mode: copy the template, edit it to match your tree, drop it
+# beside your library (it is auto-detected), or pass it explicitly.
+cp scripts/taxonomy.example.json taxonomy.json
+python3 scripts/validate_metadata.py --taxonomy taxonomy.json
+python3 scripts/validate_metadata.py --no-taxonomy     # force integrity-only
+```
+
+Sample output (opinionated mode):
+
+```
+Validating /path/to/metadata.db
+Taxonomy: /path/to/taxonomy.json
+
+ERRORS (2)
+  NO_DUPLICATE_ISBN (1)
+    ISBN 9780026581509 appears on books: 6352,6355
+  TAG_IN_SPEC (1)
+    tag 'Fic.Fantasy.Wierd' is not declared in the taxonomy
+
+WARNINGS (2)
+  FORMAT_FICTION_PDF (1)
+    #5145 'Vermis I' (tag 'Fic.Fantasy.Weird') is PDF-only; fiction prefers EPUB
+  PUBLISHER_NOT_CONSOLIDATED (1)
+    publisher 'Tor' should be merged into 'Tor Books'
+
+FAIL: 2 error(s), 2 warning(s).
+```
+
+A `taxonomy.json` next to the library, the script, or the working directory is loaded automatically; `taxonomy.example.json` is a template and is never auto-loaded.
+
+Exit codes: `0` clean (warnings do not fail), `1` one or more errors, `2` setup error (no `metadata.db`, or a bad taxonomy file).
 
 ## Support
 
