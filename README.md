@@ -489,6 +489,41 @@ A `taxonomy.json` next to the library, the script, or the working directory is l
 
 Exit codes: `0` clean (warnings do not fail), `1` one or more errors, `2` setup error (no `metadata.db`, or a bad taxonomy file).
 
+### `reconcile_file_metadata.py` — sync DB metadata into book files (writes with `--apply`)
+
+Calibre's `metadata.db` is where you curate titles, authors, series, tags, publishers, dates, identifiers, and blurbs; the copy embedded *inside* each EPUB/MOBI/AZW3/PDF/DJVU is what travels with the book when it leaves the library. Those drift apart whenever you edit metadata in Calibre without re-exporting the file. This script finds that drift and, with `--apply`, closes it. The flow is always database to file; it never reads file metadata back into the database.
+
+It reads the database `mode=ro`, reads each file's embedded metadata with `ebook-meta` (EPUB/MOBI/AZW3/PDF) or `djvused` (DJVU), and diffs a per-format set of fields so a format is never faulted for something it cannot carry (a PDF holds title/author/publisher/date, a DJVU only title/author, an EPUB the full record). Default is a dry-run report. `--apply` touches only the drifted files, with a writer chosen per format: `calibredb embed_metadata` for EPUB/MOBI/AZW3 (full record plus cover), `exiftool` for PDF (Info dict + XMP; calibredb is skipped for PDF because it silently leaves some PDFs unchanged, whereas exiftool wrote every PDF tested), and `djvused` for DJVU. It refuses `--apply` while Calibre is running unless you pass `--force`. `--apply` needs `calibredb` and `exiftool` on PATH (the dry run does not).
+
+```bash
+python3 scripts/reconcile_file_metadata.py                 # dry-run report, ./metadata.db
+python3 scripts/reconcile_file_metadata.py ~/Calibre       # a library directory
+python3 scripts/reconcile_file_metadata.py --sample 50     # a random 50 books (quick look)
+python3 scripts/reconcile_file_metadata.py --id 6688,6690  # specific books
+python3 scripts/reconcile_file_metadata.py --format epub   # only EPUB files
+python3 scripts/reconcile_file_metadata.py --apply         # embed DB metadata into drifted files
+```
+
+Reading every file spawns a subprocess per file, so an unscoped run is slow (tens of minutes for thousands of books); scope it with `--sample` / `--id` / `--format` for a quick look. Sample output:
+
+```
+Reconciling /path/to/metadata.db  [5 book(s)]
+
+DRIFT (5 file(s))
+  #6688 [EPUB] Slumdog Deckbuilder
+      differs: title, series, publisher, pubdate, tags, identifiers, comments
+  #5061 [PDF] Rogue Trader: Core Rulebook
+      differs: authors
+  #2231 [DJVU] The B-Book: Assigning Programs to Meanings
+      differs: title, authors
+
+checked 5 file(s): 0 in sync, 5 drifted, 0 unreadable/missing.
+
+Run again with --apply to embed the database metadata into the drifted files.
+```
+
+Exit codes: `0` no drift (or `--apply` finished cleanly), `1` drift found (dry run) or an apply/embed step failed, `2` setup error (no `metadata.db`, or a missing external tool).
+
 ## Support
 
 If CalibreQuarry's useful to you and you'd like to chip in:
