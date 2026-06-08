@@ -1,0 +1,1146 @@
+# CalibreQuarry: example taxonomy (YAML)
+#
+# This is a real, comprehensive opinionated taxonomy, the spec consumed by the
+# library-side linter validate_library.py. It is provided as a ready-to-adapt
+# reference for a single-tag-per-book Calibre library (three roots: Fic,
+# NonFic, Gaming). Note: the stdlib-only scripts/validate_metadata.py reads the
+# JSON form (taxonomy.example.json); this YAML is a richer reference, not parsed
+# by the packaged tools. Per-library book ids have been removed.
+#
+version: 1
+last_updated: '2026-06-07'
+library_path: /home/bdkl/docs/Calibre Library
+roots:
+  Fic:
+    bare_allowed: false
+    subtrees:
+      Classic:
+        bare_allowed: false
+        leaves:
+        - African
+        - Drama
+        - Historical
+        - Horror
+        - LatinAmerican
+        - Literary
+        - Mystery
+        - Mythology
+        - Noir
+        - Persian
+        - Philosophical
+        - Poetry
+        - SouthernGothic
+        - Turkish
+        - Western
+      Contemporary:
+        bare_allowed: false
+        leaves:
+        - Literary
+        - MagicalRealism
+        - Philosophical
+        - SocialRealism
+        - SouthernGothic
+        - War
+        - YoungAdult
+      Espionage:
+        bare_allowed: true
+        leaves: []
+      Fantasy:
+        bare_allowed: false
+        leaves:
+        - Classic
+        - Cozy
+        - Epic
+        - Flintlock
+        - Grimdark
+        - Historical
+        - Japanese
+        - LitRPG
+        - Mythic
+        - Progression
+        - Romantasy
+        - Satirical
+        - Speculative
+        - Steampunk
+        - SwordSorcery
+        - TieIn
+        - Urban
+        - Warhammer
+        - Weird
+      Historical:
+        bare_allowed: false
+        leaves:
+        - Literary
+        - Military
+        - Mystery
+        - Naval
+        - Thriller
+        - Western
+      Horror:
+        bare_allowed: true
+        leaves:
+        - Anthology
+        - Apocalyptic
+        - Body
+        - Dystopian
+        - Folk
+        - Gothic
+        - Philosophical
+        - Psychological
+        - Slasher
+        - SouthernGothic
+        - Vampire
+        - Weird
+      Poetry:
+        bare_allowed: true
+        leaves: []
+      Romance:
+        bare_allowed: false
+        leaves:
+        - Contemporary
+        - Dark
+        - Historical
+        - Paranormal
+      SciFi:
+        bare_allowed: true
+        leaves:
+        - Anthology
+        - Classic
+        - Contemporary
+        - Cyberpunk
+        - Dystopian
+        - HardSF
+        - Historical
+        - SpaceOpera
+        - Steampunk
+        - TieIn
+        - Warhammer
+      Thriller:
+        bare_allowed: false
+        leaves:
+        - Crime
+        - Cyber
+        - Japanese
+        - Military
+        - Mystery
+        - Psychological
+        - Techno
+        - TieIn
+      Translated:
+        bare_allowed: false
+        leaves:
+        - Arabic
+        - Bulgarian
+        - Chinese
+        - Czech
+        - Danish
+        - French
+        - German
+        - Greek
+        - Hungarian
+        - Icelandic
+        - Italian
+        - Japanese
+        - Korean
+        - Norwegian
+        - Persian
+        - Polish
+        - Portuguese
+        - Romanian
+        - Russian
+        - Spanish
+        - Swedish
+  Gaming:
+    bare_allowed: false
+    subtrees:
+      TTRPG:
+        bare_allowed: false
+        leaves:
+        - Cyberpunk
+        - DeltaGreen
+        - DnD
+        - Dolmenwood
+        - DrawSteel
+        - Fantasy
+        - Fantasy.Adventure
+        - ForbiddenLands
+        - GURPS
+        - Generic
+        - Horror
+        - KULT
+        - LotFP
+        - Magazine
+        - Mothership
+        - MÖRKBORG
+        - NSR
+        - Narrative
+        - Narrative.FitD
+        - OSR
+        - OSR.Megadungeon
+        - Pathfinder
+        - PostApocalyptic
+        - SciFi
+        - Setting
+        - Solo
+        - Symbaroum
+        - Traditional
+        - Weird
+        - WoD.Mage
+        - WoD.Vampire
+        - WoD.Werewolf
+        - WoD.Wraith
+      VideoGames:
+        bare_allowed: false
+        leaves:
+        - Lore
+  NonFic:
+    bare_allowed: false
+    subtrees:
+      Art:
+        bare_allowed: true
+        leaves: []
+      Biography:
+        bare_allowed: false
+        leaves:
+        - History
+        - Math
+        - Memoir
+        - Nature
+        - Sports
+        - Tech
+        - War
+      Business:
+        bare_allowed: true
+        leaves:
+        - Management
+      Cats:
+        bare_allowed: true
+        leaves: []
+      Culture:
+        bare_allowed: false
+        leaves:
+        - Media
+        - Music
+        - Radical
+      Design:
+        bare_allowed: true
+        leaves:
+        - Architecture
+        - Typography
+        - UX
+      Economics:
+        bare_allowed: false
+        leaves:
+        - Cryptocurrency
+        - GameTheory
+        - History
+        - Investing
+        - Theory
+      Education:
+        bare_allowed: true
+        leaves:
+        - Language
+      Essays:
+        bare_allowed: true
+        leaves: []
+      Film:
+        bare_allowed: true
+        leaves: []
+      Food:
+        bare_allowed: false
+        leaves:
+        - Cooking
+        - Culinary
+      GameDesign:
+        bare_allowed: true
+        leaves:
+        - Business
+        - Criticism
+        - History
+      Gaming:
+        bare_allowed: false
+        leaves:
+        - Culture
+        - History
+        - Poker
+        - Theory
+      Health:
+        bare_allowed: false
+        leaves:
+        - Sleep
+      History:
+        bare_allowed: false
+        leaves:
+        - Ancient
+        - Asia
+        - Canadian
+        - ColdWar
+        - Film
+        - Indigenous
+        - Maritime
+        - Medicine
+        - Medieval
+        - Military
+        - Norse
+        - Persia
+        - Philosophy
+        - Politics
+        - Rome
+        - Science
+        - TrueCrime
+        - World
+      Journalism:
+        bare_allowed: true
+        leaves: []
+      Language:
+        bare_allowed: false
+        leaves:
+        - Arabic
+        - Chinese
+        - French
+        - German
+        - Japanese
+        - Korean
+        - Latin
+        - Russian
+        - Spanish
+      Linguistics:
+        bare_allowed: true
+        leaves: []
+      Math:
+        bare_allowed: false
+        leaves:
+        - Academic
+        - Logic
+        - Theory
+      Mythology:
+        bare_allowed: true
+        leaves: []
+      Nature:
+        bare_allowed: false
+        leaves:
+        - Animals
+      Parenting:
+        bare_allowed: true
+        leaves: []
+      Philosophy:
+        bare_allowed: true
+        leaves:
+        - Buddhism
+        - Media
+        - Stoicism
+        - Taoism
+      Politics:
+        bare_allowed: true
+        leaves:
+        - Media
+      Psychology:
+        bare_allowed: true
+        leaves:
+        - Clinical
+        - Communication
+        - Economics
+        - Neuroscience
+        - Recovery
+        - Relationships
+        - Society
+      Reference:
+        bare_allowed: false
+        leaves:
+        - Home
+      Religion:
+        bare_allowed: false
+        leaves:
+        - Christianity
+        - Islam
+        - Satanism
+      Science:
+        bare_allowed: false
+        leaves:
+        - Biology
+        - Chemistry
+        - Cognition
+        - Complexity
+        - Education
+        - Energy
+        - General
+        - Geology
+        - InformationTheory
+        - Medicine
+        - Medicine.Psychiatry
+        - Paleontology
+        - Physics
+        - Popular
+        - Systems
+      SelfHelp:
+        bare_allowed: true
+        leaves:
+        - Creativity
+        - Culture
+        - Minimalism
+        - Organization
+        - Productivity
+        - Relationships
+      Sociology:
+        bare_allowed: true
+        leaves:
+        - GameTheory
+        - Games
+      Sports:
+        bare_allowed: false
+        leaves:
+        - Basketball
+        - Boxing
+        - Soccer
+      Survival:
+        bare_allowed: true
+        leaves: []
+      Tech:
+        bare_allowed: false
+        leaves:
+        - AI
+        - Architecture
+        - Audio
+        - CS.Compilers
+        - CS.Concurrency
+        - CS.FormalMethods
+        - CS.Fundamentals
+        - CS.GameDev
+        - CS.Theory
+        - ComputerVision
+        - Cryptography
+        - Culture
+        - Data
+        - Data.Science
+        - Design
+        - Design.UIUX
+        - DevOps
+        - DevTools
+        - DistributedSystems
+        - Engineering
+        - Government
+        - Graphics
+        - Hardware
+        - Hardware.History
+        - History
+        - Lang
+        - Lang.ABAP
+        - Lang.ALGOL
+        - Lang.APL
+        - Lang.ActionScript
+        - Lang.Ada
+        - Lang.Agda
+        - Lang.Assembly
+        - Lang.C
+        - Lang.C++
+        - Lang.COBOL
+        - Lang.CSharp
+        - Lang.Clojure
+        - Lang.Coq
+        - Lang.Crystal
+        - Lang.D
+        - Lang.Dart
+        - Lang.Delphi
+        - Lang.Elixir
+        - Lang.Elm
+        - Lang.Erlang
+        - Lang.FSharp
+        - Lang.Forth
+        - Lang.Fortran
+        - Lang.Go
+        - Lang.Groovy
+        - Lang.Haskell
+        - Lang.Idris
+        - Lang.Java
+        - Lang.JavaScript
+        - Lang.Julia
+        - Lang.Kotlin
+        - Lang.LaTeX
+        - Lang.Lean
+        - Lang.Lisp
+        - Lang.Logo
+        - Lang.Lua
+        - Lang.ML
+        - Lang.Nim
+        - Lang.OCaml
+        - Lang.ObjectiveC
+        - Lang.Odin
+        - Lang.PHP
+        - Lang.PL1
+        - Lang.Pascal
+        - Lang.Perl
+        - Lang.PostScript
+        - Lang.Prolog
+        - Lang.Python
+        - Lang.Q
+        - Lang.QBasic
+        - Lang.R
+        - Lang.Regex
+        - Lang.Ruby
+        - Lang.Rust
+        - Lang.Scala
+        - Lang.Scheme
+        - Lang.Scratch
+        - Lang.Simula
+        - Lang.Smalltalk
+        - Lang.Swift
+        - Lang.Tcl
+        - Lang.TypeScript
+        - Lang.VHDL
+        - Lang.Verilog
+        - Lang.Wolfram
+        - Lang.Zig
+        - Management
+        - MediaProduction
+        - Networking
+        - OS
+        - OS.Architecture
+        - OS.BSD
+        - OS.Linux
+        - OS.Networking
+        - OS.Solaris
+        - OS.Unix
+        - OS.Windows
+        - Philosophy
+        - Productivity
+        - Safety
+        - Security
+        - SoftwareEngineering
+        - Sustainability
+        - SysAdmin
+        - Systems
+        - WebAssembly
+        - WebDesign
+      Travel:
+        bare_allowed: false
+        leaves:
+        - Culture
+      TrueCrime:
+        bare_allowed: true
+        leaves: []
+      Writing:
+        bare_allowed: true
+        leaves: []
+naming:
+  format: CamelCase ASCII
+  acronyms_uppercase:
+  - APL
+  - COBOL
+  - DCC
+  - DnD
+  - FitD
+  - GURPS
+  - ML
+  - NSR
+  - OSR
+  - PHP
+  - PostScript
+  - TTRPG
+  - UIUX
+  - UX
+  - WoD
+  exceptions:
+    Gaming.TTRPG.MÖRKBORG: Publisher brand styling
+    NonFic.Tech.Lang.C++: Programming language name (++ literal)
+    NonFic.Tech.Lang.CSharp: C# rendered as CSharp (# breaks tooling)
+    NonFic.Tech.Lang.FSharp: F# rendered as FSharp
+    NonFic.Tech.Lang.Lisp: Lisp is mixed-case (not LISP)
+    Fic.SciFi.HardSF: HardSF is canonical genre acronym
+rules:
+- id: EVERY_BOOK_TAGGED
+  severity: error
+  description: Every book must have at least one tag
+- id: EVERY_BOOK_PUBLISHER
+  severity: error
+  description: Every book must have a publisher
+- id: EVERY_BOOK_COVER
+  severity: error
+  description: Every book must have has_cover = 1
+- id: EVERY_BOOK_LANGUAGE
+  severity: error
+  description: Every book must have a language
+- id: EVERY_BOOK_COMMENT
+  severity: error
+  description: Every book must have a comments record
+- id: COMMENT_MIN_LENGTH
+  severity: warning
+  threshold: 100
+  description: Comment must be at least 100 chars
+- id: NO_SENTINEL_PUBDATE
+  severity: error
+  description: pubdate must not be 0101-01-01 placeholder
+- id: NO_FUTURE_PUBDATE
+  severity: error
+  description: pubdate must not exceed today
+- id: NO_DUPLICATE_ISBN
+  severity: error
+  description: Each ISBN must appear on at most one book
+- id: NO_EMPTY_TAGS
+  severity: warning
+  description: Every tag should have at least one book
+- id: NO_ORPHAN_AUTHORS
+  severity: warning
+  description: Every author record should be linked to at least one book
+- id: TAG_IN_SPEC
+  severity: error
+  description: Every tag must be listed in the YAML roots tree
+- id: PUBDATE_PARSEABLE
+  severity: error
+  description: pubdate must be a valid ISO date
+- id: AUTHOR_NO_TRAILING_WHITESPACE
+  severity: warning
+  description: Author names must be TRIM()ed
+- id: TITLE_NO_TRAILING_WHITESPACE
+  severity: warning
+  description: Titles must be TRIM()ed
+- id: TRANSLATOR_MISSING
+  severity: warning
+  description: Every Fic.Translated.* book should have a Translator(s) value
+- id: READ_NO_DATE
+  severity: warning
+  description: A book marked Read should carry a Date Read
+- id: RATED_NOT_READ
+  severity: warning
+  description: A rated book should be marked Read or DNF
+- id: SINGLETON_SERIES
+  severity: warning
+  description: A series with only one book contradicts the standalone-leaves-series-empty rule
+- id: SOURCE_MISSING
+  severity: warning
+  description: Every book should carry a Source value
+- id: TITLE_NO_CURLY_APOSTROPHE
+  severity: warning
+  description: Titles should use straight apostrophes, not curly
+- id: TITLE_NO_EM_DASH
+  severity: warning
+  description: Titles should not contain em-dashes
+- id: TITLE_NO_THREE_DOT_ELLIPSIS
+  severity: warning
+  description: Titles should use Unicode ellipsis '…' instead of '...'
+- id: AUTHOR_NO_HONORIFIC
+  severity: warning
+  description: Author names should not carry Dr./Prof./Ph.D/M.D. honorifics
+- id: AUTHOR_ORG_AS_AUTHOR
+  severity: warning
+  description: Organisation-style authors usually overlap publishers; prefer a human credit
+- id: AUTHOR_DUPLICATE_SORTKEY
+  severity: warning
+  description: Multiple authors collapsing to the same sort key are usually one person split
+- id: SERIES_INDEX_ZERO
+  severity: warning
+  description: Prequels should use 0.5 / 0.7 not raw 0
+- id: LANG_NOT_ENG_WITHOUT_TAG_HINT
+  severity: warning
+  description: Non-eng books should sit under Fic.Translated.* or NonFic.Language.*
+- id: FORMAT_FICTION_PDF
+  severity: warning
+  description: Fiction prefers EPUB; flag PDF-only Fic.* books
+- id: NO_ORPHAN_CC_LINKS
+  severity: error
+  description: Custom-column link tables must not retain rows for deleted books
+- id: MOBI_ASIN_SHAPE
+  severity: warning
+  description: mobi-asin values must match the Kindle ASIN pattern B + 9 alnum
+- id: AMAZON_IS_ISBN10
+  severity: warning
+  description: amazon / mobi-asin fields should not hold ISBN-10 values
+- id: AUTHOR_NAME_PIPE
+  severity: warning
+  description: Author names must not contain '|' (Calibre author-separator import bug)
+- id: AUTHOR_SORT_ALL_CAPS
+  severity: warning
+  description: Author sort fields should not be entirely UPPER (Goodreads-export residue)
+- id: DATE_READ_NOT_READ
+  severity: warning
+  description: A book with a Date Read should be marked Read or DNF
+custom_columns:
+- label: audience
+  name: Audience
+  datatype: text
+- label: reading_status
+  name: Status
+  datatype: enumeration
+  values:
+  - To Read
+  - Reading
+  - Read
+  - DNF
+- label: translators
+  name: Translator(s)
+  datatype: text
+- label: date_read
+  name: Date Read
+  datatype: datetime
+- label: source
+  name: Source
+  datatype: enumeration
+  values:
+  - Standard Ebooks
+  - Library Genesis
+  - Bought EPUB
+  - Bought physical, ripped
+  - Anna's Archive
+  - Free
+  - Gifted
+  - Other
+virtual_libraries:
+  expected:
+  - AI & Data Wing
+  - Art & Design Wing
+  - Business & Biography Wing
+  - CS Theory Wing
+  - Contemporary Wing
+  - Cooking
+  - Economics Wing
+  - Fantasy Wing
+  - Game Business Wing
+  - Grimdark & Epic Wing
+  - Historical Fiction Wing
+  - History Wing
+  - Horror Wing
+  - Languages Wing
+  - Lifestyle & Misc Wing
+  - Math & Science Wing
+  - Mind & Self Wing
+  - Philosophy & Faith Wing
+  - Programming Languages Wing
+  - Romance Wing
+  - Sci-Fi Wing
+  - Security & Crypto Wing
+  - Society & Reportage Wing
+  - Software Engineering Wing
+  - Systems Wing
+  - Tech Culture & History Wing
+  - The Classics
+  - The Tabletop
+  - Thriller Wing
+  - Translated Fiction Wing
+  - Unsorted
+  - Writing & Essays Wing
+  unsorted_must_be_empty: true
+publisher_canonicals:
+  HarperCollins:
+  - Harper Collins
+  - HarperCollinss
+  - HarperCollins - AU
+  - HarperCollins Canada, Limited
+  - HarperCollins e-books
+  - HarperHindi
+  - Harper
+  - HarperBusiness
+  - HarperPress
+  - Harperteen
+  - HarperTrophy
+  - HarperPrism
+  - HarperVia
+  Harper Perennial:
+  - HarperCollins Perennial
+  Harper Voyager:
+  - HarperVoyager
+  HarperTorch:
+  - HarperCollins Publishers Inc t/a HarperTorch
+  Random House:
+  - RANDOM HOUSE US
+  - Random House Australia
+  - Random House Children's Books
+  - Random House Large Print
+  - Random House Trade Paperbacks
+  Vintage:
+  - Vintage Books / Random House
+  - Vintage Books USA
+  - Vintage International
+  - Vintage Digital
+  Tor Books:
+  - Tor UK
+  St. Martin's Press:
+  - St. Martin's Publishing Group
+  Knopf:
+  - Alfred A. Knopf
+  Little, Brown:
+  - Little, Brown Books for Young Readers
+  W. W. Norton & Company:
+  - Norton
+  - W. W. Norton, Incorporated
+  - WW Norton
+  - WW Norton & Co
+  Macmillan:
+  - Macmillan Australia
+  - Pan Macmillan
+  - PanMacmillan
+  - PanMacmillan Australia
+  Atria Books:
+  - Atria/Emily Bestler Books
+  Picador:
+  - Picador USA
+  Pocket Books:
+  - Pocket Books / Simon & Schuster, Inc.
+  - Pocket Star
+  Farrar, Straus and Giroux:
+  - Farrar Straus Giroux
+  Hachette Books:
+  - Hachette Digital
+  - Hachette UK
+  - Hachette+ORM
+  Oxford University Press:
+  - OUP Oxford
+  - Oxford University Press, USA
+  No Starch Press:
+  - No Starch Pr
+  Houghton Mifflin Harcourt:
+  - Houghton Mifflin
+  Free League Publishing:
+  - Fria Ligan AB (Free League)
+  Paizo Inc.:
+  - Paizo Incorporated
+  MIT Press:
+  - Mit Pr
+  Pragmatic Bookshelf:
+  - The Pragmatic Programmers LLC
+  Wiley:
+  - John Wiley & Sons
+  Faber & Faber:
+  - Faber Faber
+  Henry Holt and Co.:
+  - Holt Paperbacks
+  - Henry Holt and Co. (BYR)
+  Baen:
+  - Baen Books
+  Chaosium:
+  - Chaosium Inc.
+  Coriolis Group Books:
+  - Coriolis Group
+  Exalted Funeral Press:
+  - Exalted Funeral
+  False Machine:
+  - False Machine Publishing
+  G.K. Hall:
+  - G K Hall & Co
+  Gallery / Saga Press:
+  - Gallery/Saga Press
+  Lulu.com:
+  - Lulu
+  Manning:
+  - Manning Publications
+  McGraw-Hill:
+  - McGraw Hill
+  Nocturnal Media:
+  - Nocturnal Media, LLC
+  Penguin:
+  - Penguin Press
+  Pitman:
+  - Pitman Publishing
+  Prentice Hall:
+  - Prentice-Hall
+  Schubert-Verlag:
+  - SCHUBERT Verlag
+  Stanford University Press:
+  - Stanford University
+  The Merry Mushmen & Kamchatka Publishing:
+  - The Merry Mushmen / Kamchatka Publishing
+  TSR:
+  - TSR, Inc.
+  William Morrow:
+  - William Morrow & Company
+  Wraithmarked Creative:
+  - Wraithmarked Creative, LLC
+canonical_id_types:
+- isbn
+- goodreads
+- google
+- storygraph
+- amazon
+- mobi-asin
+- openlibrary
+- isfdb
+- isfdb-title
+- kobo
+- barnesnoble
+- epl
+- fictiondb
+- doi
+- oclc
+- lccn
+- hardcover
+- hardcover-edition
+- amazon_uk
+- amazon_de
+- ff
+- wd
+- epubbud
+- douban
+- moly_hu
+- libri_hu
+- skoob
+- babelio_id
+- anobii_id
+- ligmd5
+- edelweiss
+- odid
+- eplid
+- sonybookid
+accepted_org_authors:
+  # Stylized handles that look corporate but are individuals (TAXONOMY § 11)
+  - qntm
+  - momatoes
+  - Pirateaba
+  - thoughtbot
+  - Snow
+  - Wildbow
+  - why the lucky stiff
+  - nobody103
+  - watt
+  - ErraticErrata
+  # Confirmed legitimate corporate / collective bylines (Brandon-approved)
+  - CrimethInc.
+  - Adobe Systems Inc.
+  - Games Workshop
+  - Bitmap Books
+  - The Rust Team
+  - The Univalent Foundations Program
+  - Modiphius Entertainment
+  - Steamforged Games Ltd
+
+accepted_duplicate_comments: []  # per-library: SHA1(12) prefixes of blurbs that legitimately repeat across companion volumes (populate for your own)
+
+forbidden_id_types:
+- url
+- uri
+- urn
+- guid
+- revision
+- grvotes
+- grrating
+- isbn-13
+- isbn-10
+- isbn13
+- isbn10
+- eisbn
+- ean
+- sbn
+- urnisbn
+- maxpg
+- created
+- notes_images
+- author_origin
+- genre
+- id
+# Real multi-book series with one volume currently owned (the anti-library case,
+# TAXONOMY § 8). SINGLETON_SERIES does not warn for these. Populated after the
+# 2026-05-24 singleton triage; new singletons stay flagged until reviewed.
+# Book IDs deliberately held in a non-English edition that has no fitting
+# Fic.Translated.* / NonFic.Language.* branch. check_lang_no_tag_hint skips these
+# so the warnings list stays actionable-only.
+lang_hint_exempt: []  # per-library: Calibre book ids of non-English books whose genre tag carries no language hint (populate for your own)
+
+singleton_series_allowed:
+- Bridget Jones
+- Dark Olympus
+- Fever
+- Kate Daniels
+- Mercy Thompson
+- Monsters in the Dark
+- Psy-Changeling
+- Twisted
+- Walsh Family
+- Arbai
+- Brothers Sinister
+- Karla Trilogy
+- Revelation Space
+- Seasonal Quartet
+- The Last Death Witch
+- The London Trilogy
+- The Marsdens
+- Jack Foley
+- Sackett's
+- The Liberation Trilogy
+- Theseus
+- Lord of the Isles
+- Wheelock's Latin
+- A Will Eternal
+- After the War
+- Alex Cross
+- Alex Stern
+- Ambergris
+- American Gods
+- Arkady Renko
+- Articles of Faith
+- Ashes of the Unhewn Throne
+- Autumn's Fall Saga
+- Azteca
+- Bel Dame Apocrypha
+- Bernard Samson
+- Best Laid Plans
+- Beyond Ash and Sand
+- Black Legion
+- Bomb Light
+- Book of the Art
+- Bride Quartet
+- Bromance Book Club
+- Capital
+- Castles Ever After
+- Catch-22
+- Cato
+- Centenal Cycle
+- Charles Latimer
+- Chili Palmer
+- Clay
+- Contos de Kolimá
+- Craft Sequence
+- Crowns of Nyaxia
+- Cults of RuneQuest
+- Cundo Rey
+- D.O.D.O.
+- Dead Djinn Universe
+- Dead River Series
+- Detective Galileo
+- Detour
+- Die Danziger Trilogie
+- Die Welt als Wille und Vorstellung
+- Dungeon Crawl Classics
+- Earthseed
+- Easy Rawlins
+- Effective C++
+- Elder Race
+- Eternal Path Trilogy
+- Ferdinand Bardamu
+- Fight Club
+- Firefly Lane
+- Gabriel Allon
+- Gael Song Era 2
+- Goon Squad
+- Grail Quest
+- Green Town
+- Harry Bosch
+- Hercule Poirot
+- Hidden Legacy
+- Hofmann Report
+- Holly Gibney
+- House of Suns
+- Hrimland Saga
+- I nostri antenati
+- Imperial Radch
+- Inheritance Trilogy
+- Jake Brigance
+- Japanese Grammar Dictionary
+- Jason Bourne
+- Jeeves
+- Julia Z
+- Jurassic Park
+- 'KLEAR: Integrated Korean'
+- Let the Right One In
+- London Below
+- Love Medicine
+- Mars Trilogy
+- Maya Angelou's Autobiography
+- Metal Gear Solid
+- Milo Weaver
+- Min kamp
+- Mindf*ck
+- Mistland
+- Mitch McDeere
+- Mitch Rapp
+- Monster Hunter International
+- Narratives of Empire
+- Net Force
+- Nicholai Hel
+- Night's Dawn
+- Odessa
+- Old Kingdom
+- Olive Kitteridge
+- Oprichnik's Russia
+- Orthogonal
+- Pact and Pattern
+- Pactverse
+- Part of Your World
+- Phaedrus
+- Pine Deep
+- Political Order
+- Psycho
+- Queng Ho
+- Rama
+- Reacher
+- Redwall
+- Reluctant Royals
+- Remembering the Kanji
+- Rifters
+- Rivers of London
+- Riverworld
+- Romance of the Three Kingdoms
+- Rosemary's Baby
+- Savages
+- Scoundrels
+- Shadow Slave
+- Sharpe
+- Slough House
+- Southern Reach
+- Space Marine Battles
+- Spindle Cove
+- St. Leibowitz
+- Stalingrad Trilogy
+- 'Star Wars: A Clone Wars Novel'
+- Stephen Fry's Great Mythology
+- Strange & Norrell
+- Takeshi Kovacs
+- Terra Ignota
+- The Academy of Kindness
+- The Architecture of Open Source Applications
+- The Aurelian Cycle
+- The Bridge Kingdom
+- The Brown Sisters
+- The Chronicles of Hanuvar
+- The Chronicles of Master Li and Number Ten Ox
+- The Chronicles of Osreth
+- The Commodore Series
+- The Councillor
+- The Crescent Moon Kingdoms
+- The Dark Star Trilogy
+- The Deer and the Cauldron
+- The Demon Cycle
+- The Devils
+- The Drenai Saga
+- The Empire Trilogy
+- The Exorcist
+- The Five Penalties
+- The Forever War
+- The Godfather
+- The Golem and the Jinni
+- The Grave of Empires
+- The Great Silence
+- The Kylar Chronicles
+- The Last Unicorn
+- The Long London Quintet
+- The Lost Souls Series
+- The Machineries of Empire
+- The Obsidian Path
+- The Perfect Run
+- The Quincunx Cycle
+- The Rakada
+- The Rat
+- The Ravenels
+- The Rising Tide
+- The Saga of Arturo Bandini
+- The Singing Hills Cycle
+- The Sparrow
+- The Stonewater Kingdom
+- The Sundering
+- The Sympathizer
+- The Ties That Bind
+- The Twice-dead King
+- The Wanderlands
+- The Wretched Trilogy
+- The Zimiamvian Trilogy
+- To Kill a Mockingbird
+- Tom Clancy's Endwar
+- Tomes & Tea
+- Toothsucker
+- Trilogía Musashi
+- Under Heaven
+- Vlad Taltos
+- WWII
+- Wallflowers
+- Watership Down
+- Wild Cards
+- Worth the Candle
+- Zones of Thought
+- À la recherche du temps perdu
+

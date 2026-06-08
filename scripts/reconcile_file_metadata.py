@@ -15,8 +15,8 @@ file metadata back into the database; the flow is always database -> file.
 What it does:
   * Reads the database read-only (handles a locked DB by copying it, like the
     cquarry package).
-  * Reads each file's embedded metadata with `ebook-meta` (EPUB/MOBI/AZW3/PDF)
-    or `djvused` (DJVU).
+  * Reads each file's embedded metadata with `ebook-meta` (EPUB/MOBI/AZW3),
+    `exiftool` (PDF; ebook-meta misreads some PDF XMP), or `djvused` (DJVU).
   * Diffs a per-format set of fields (see FORMAT_FIELDS) and reports, per book,
     which fields differ. Fields a format cannot reliably carry are not compared,
     to keep the noise down (a PDF is not faulted for lacking your tag tree).
@@ -26,7 +26,9 @@ With --apply (only the drifted books are touched):
     (and the cover) straight from the database.
   * PDF: `exiftool` writes title/author/publisher/date to the Info dict and
     XMP. calibredb is skipped for PDF because it silently leaves some PDFs
-    unchanged; exiftool wrote every PDF tested.
+    unchanged; exiftool wrote every PDF tested. A few PDFs have a damaged xref
+    table that exiftool refuses; with `--repair-pdf` those are rebuilt in place
+    by `qpdf --replace-input` (page count preserved) and the embed is retried.
   * DJVU: `djvused` sets the title and author (all DJVU's flat metadata holds);
     Calibre cannot embed DJVU.
 
@@ -37,6 +39,7 @@ Usage:
     python3 reconcile_file_metadata.py --id 6688,6690  # specific books
     python3 reconcile_file_metadata.py --format epub   # only EPUB files
     python3 reconcile_file_metadata.py --apply          # embed DB metadata into drifted files
+    python3 reconcile_file_metadata.py --apply --repair-pdf  # also qpdf-fix broken-xref PDFs
     python3 reconcile_file_metadata.py --apply --force  # skip the "Calibre is running" guard
 
 Reading every file spawns a subprocess per file, so a full-library dry run is
@@ -48,12 +51,13 @@ Exit codes:
     1 = drift found (dry run), or one or more apply/embed operations failed
     2 = setup error (metadata.db or a required external tool not found)
 
-Stdlib only; shells out to `calibredb`, `ebook-meta`, `djvused`, and (for PDF
-writes) `exiftool`. All but exiftool ship with Calibre / djvulibre; `--apply`
-checks for what it needs and exits 2 if a tool is missing.
+Stdlib only; shells out to `ebook-meta`, `djvused`, and `exiftool` to read (all
+required), `calibredb` to write EPUB/MOBI/AZW3 on `--apply`, and `qpdf` only
+with `--repair-pdf`. Missing a needed tool exits 2.
 """
 
 import argparse
+import json
 import os
 import random
 import re
@@ -89,6 +93,8 @@ ALL_FIELDS = (
 FORMAT_FIELDS: dict[str, tuple[str, ...]] = {
     "EPUB": ALL_FIELDS,
     "AZW3": ALL_FIELDS,
+    # MOBI carries isbn/asin but not arbitrary identifier types (goodreads,
+    # storygraph, ...), so identifiers are not compared for it.
     "MOBI": (
         "title",
         "authors",
@@ -96,14 +102,14 @@ FORMAT_FIELDS: dict[str, tuple[str, ...]] = {
         "pubdate",
         "languages",
         "tags",
-        "identifiers",
         "comments",
     ),
-    # PDF carries title/author in its Info dict and publisher/date in XMP;
-    # calibredb embed_metadata writes all four and ebook-meta reads them back.
-    # Tags/series/comments/identifiers do not reliably round-trip, so they are
-    # not compared for PDF.
-    "PDF": ("title", "authors", "publisher", "pubdate"),
+    # PDF carries title/author in its Info dict and publisher in XMP; all three
+    # round-trip through exiftool. pubdate is embedded too but NOT compared: PDF
+    # XMP dates are stored with a timezone, so a date-only compare false-flags
+    # when the instant lands on a different calendar day in another zone.
+    # Tags/series/comments/identifiers do not round-trip either.
+    "PDF": ("title", "authors", "publisher"),
     "DJVU": ("title", "authors"),
 }
 # Each format's writer on --apply. EPUB/MOBI/AZW3 go through calibredb (it
@@ -292,6 +298,17 @@ def read_ebook_meta(path: Path) -> dict[str, str] | None:
     return fields
 
 
+def djvused_unescape(value: str) -> str:
+    """djvused `print-meta` renders non-ASCII as `\\ooo` octal byte escapes and
+    backslash-escapes quotes. Decode back to UTF-8 so an author like
+    `Gr\\303\\266tschel` compares as `Grötschel`."""
+    value = value.replace('\\"', '"').replace("\\\\", "\\")
+    if re.search(r"\\[0-7]{3}", value):
+        value = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), value)
+        value = value.encode("latin-1", "ignore").decode("utf-8", "ignore")
+    return value
+
+
 def read_djvu_meta(path: Path) -> dict[str, str] | None:
     """Read DJVU metadata via `djvused -e 'print-meta'` (key "value" lines)."""
     try:
@@ -309,13 +326,44 @@ def read_djvu_meta(path: Path) -> dict[str, str] | None:
     for line in out.stdout.splitlines():
         m = re.match(r'^(\w+)\s+"?(.*?)"?\s*$', line.strip())
         if m:
-            fields[m.group(1).lower()] = m.group(2)
+            fields[m.group(1).lower()] = djvused_unescape(m.group(2))
     return fields
+
+
+def read_pdf_meta(path: Path) -> dict[str, str] | None:
+    """Read PDF metadata with exiftool, not ebook-meta: ebook-meta does not
+    reliably surface the XMP dc:publisher / dc:date we embed there, so it would
+    report false drift on PDFs that are correctly synced. Returns the same key
+    shape as read_ebook_meta for the fields PDF carries."""
+    try:
+        out = subprocess.run(
+            ["exiftool", "-j", "-Title", "-Author", "-Publisher", "-Date", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    try:
+        data = json.loads(out.stdout)[0]
+    except json.JSONDecodeError, IndexError:
+        return None
+    return {
+        "title": str(data.get("Title", "")),
+        "author(s)": str(data.get("Author", "")),
+        "publisher": str(data.get("Publisher", "")),
+        # exiftool dates are 'YYYY:MM:DD ...'; norm_date wants 'YYYY-MM-DD'
+        "published": str(data.get("Date", "")).replace(":", "-", 2),
+    }
 
 
 def file_metadata(path: Path, fmt: str) -> dict[str, str] | None:
     if fmt in DJVUSED_FORMATS:
         return read_djvu_meta(path)
+    if fmt in EXIFTOOL_FORMATS:
+        return read_pdf_meta(path)
     return read_ebook_meta(path)
 
 
@@ -361,10 +409,21 @@ def diff_fields(db: dict, fm: dict[str, str], fmt: str) -> list[str]:
             if norm_set(db["tags"]) != norm_set(re.split(r",\s*", fm.get("tags", ""))):
                 drift.append("tags")
         elif field == "identifiers":
-            if db["identifiers"] != parse_identifiers(fm.get("identifiers")):
+            # Directional: every curated identifier must be embedded. The file
+            # may legitimately carry extras the library does not track (the
+            # EPUB's own urn:uuid surfaces as a `uri` id; some files keep an
+            # `ean`), so a strict equality would false-flag those.
+            file_ids = parse_identifiers(fm.get("identifiers"))
+            if any(file_ids.get(k) != v for k, v in db["identifiers"].items()):
                 drift.append("identifiers")
         elif field == "comments":
-            if norm_comment(db["comments"]) != norm_comment(fm.get("comments")):
+            # ebook-meta truncates long comments in its readout, so a correctly
+            # embedded blurb comes back as a prefix of the DB text. Accept a
+            # non-empty file comment that is a prefix of (or equal to) the DB
+            # comment; flag only an empty or genuinely divergent one.
+            dn = norm_comment(db["comments"])
+            fn = norm_comment(fm.get("comments"))
+            if dn != fn and not (fn and dn.startswith(fn)):
                 drift.append("comments")
     return drift
 
@@ -433,9 +492,17 @@ def embed_djvu(db: dict, path: Path) -> bool:
         os.unlink(meta_file)
 
 
-def embed_pdf(db: dict, path: Path) -> bool:
-    """Write PDF metadata with exiftool (Info dict + XMP). More reliable than
-    calibredb, which silently leaves some PDFs unchanged. Authors are joined
+_PDF_REPAIRABLE = re.compile(r"xref|damaged|invalid", re.IGNORECASE)
+
+
+def is_repairable_pdf_error(stderr: str) -> bool:
+    """Does an exiftool failure look like a broken cross-reference table (which
+    qpdf can rebuild), rather than something unrelated like a permission error?"""
+    return bool(_PDF_REPAIRABLE.search(stderr))
+
+
+def _run_exiftool(db: dict, path: Path) -> subprocess.CompletedProcess:
+    """Write PDF metadata with exiftool (Info dict + XMP). Authors are joined
     with ' & ' to match Calibre's display so the diff round-trips; the single
     genre tag is written as a keyword for completeness (not compared)."""
     authors = " & ".join(db["authors"])
@@ -457,14 +524,32 @@ def embed_pdf(db: dict, path: Path) -> bool:
         args.append(f"-Keywords={'; '.join(db['tags'])}")
         args.append(f"-XMP-dc:Subject={'; '.join(db['tags'])}")
     args.append(str(path))
-    res = subprocess.run(args, capture_output=True, text=True)
-    if res.returncode != 0:
-        print(
-            f"  {RED}exiftool failed{RESET} on {path.name}: {res.stderr.strip()[:160]}",
-            file=sys.stderr,
+    return subprocess.run(args, capture_output=True, text=True)
+
+
+def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
+    """exiftool is more reliable than calibredb for PDF (calibredb silently
+    leaves some PDFs unchanged). When `repair` is on and the write fails on a
+    broken cross-reference table, rebuild it in place with `qpdf --replace-input`
+    (page count preserved) and retry once."""
+    res = _run_exiftool(db, path)
+    if res.returncode == 0:
+        return True
+    if repair and is_repairable_pdf_error(res.stderr):
+        qpdf = subprocess.run(
+            ["qpdf", "--replace-input", str(path)], capture_output=True, text=True
         )
-        return False
-    return True
+        if qpdf.returncode in (0, 3):  # 0 = clean, 3 = rebuilt with warnings
+            retry = _run_exiftool(db, path)
+            if retry.returncode == 0:
+                print(f"  {YELLOW}repaired xref{RESET} on {path.name} (qpdf), embedded")
+                return True
+            res = retry
+    print(
+        f"  {RED}exiftool failed{RESET} on {path.name}: {res.stderr.strip()[:160]}",
+        file=sys.stderr,
+    )
+    return False
 
 
 # --- driver ----------------------------------------------------------------
@@ -528,18 +613,28 @@ def main() -> int:
         "--seed", type=int, default=20260607, help="random seed for --sample"
     )
     parser.add_argument(
+        "--repair-pdf",
+        action="store_true",
+        help="with --apply, rebuild a broken PDF xref with qpdf and retry the embed",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="print only drift, truncate long field lists",
     )
     args = parser.parse_args()
 
-    for tool in ("ebook-meta", "djvused"):
+    # exiftool reads (and writes) PDF; ebook-meta reads epub/mobi/azw3; djvused
+    # reads/writes djvu. All three are needed just to scan.
+    for tool in ("ebook-meta", "djvused", "exiftool"):
         if shutil.which(tool) is None:
             print(f"ERROR: required tool '{tool}' not found on PATH.", file=sys.stderr)
             return 2
     if args.apply:
-        for tool in ("calibredb", "exiftool"):
+        needed = ["calibredb"]
+        if args.repair_pdf:
+            needed.append("qpdf")
+        for tool in needed:
             if shutil.which(tool) is None:
                 print(f"ERROR: --apply needs '{tool}' on PATH.", file=sys.stderr)
                 return 2
@@ -637,9 +732,10 @@ def main() -> int:
         print(f"  embedding {len(unique_ids)} book(s) via calibredb...")
         ok = embed_calibredb(unique_ids, library_root) and ok
     if drifted_pdf:
-        print(f"  embedding {len(drifted_pdf)} PDF(s) via exiftool...")
+        via = "exiftool, qpdf-repairing broken ones" if args.repair_pdf else "exiftool"
+        print(f"  embedding {len(drifted_pdf)} PDF(s) via {via}...")
         for rec, fpath in drifted_pdf:
-            ok = embed_pdf(rec, fpath) and ok
+            ok = embed_pdf(rec, fpath, repair=args.repair_pdf) and ok
     for rec, fpath in drifted_djvu:
         print(f"  djvused #{rec['id']} {fpath.name}")
         ok = embed_djvu(rec, fpath) and ok

@@ -82,6 +82,23 @@ class TestParsing(unittest.TestCase):
         )
         self.assertEqual(rfm.parse_identifiers(None), {})
 
+    def test_djvused_unescape(self):
+        # djvused prints non-ASCII as octal byte escapes; decode to UTF-8.
+        self.assertEqual(rfm.djvused_unescape("Gr\\303\\266tschel"), "Grötschel")
+        self.assertEqual(
+            rfm.djvused_unescape("L\\303\\241szl\\303\\263 Lov\\303\\241sz"),
+            "László Lovász",
+        )
+        self.assertEqual(rfm.djvused_unescape("Plain ASCII"), "Plain ASCII")
+
+    def test_is_repairable_pdf_error(self):
+        # A broken cross-reference table is qpdf-repairable; unrelated failures
+        # (e.g. permissions) are not, so --repair-pdf should leave them alone.
+        self.assertTrue(rfm.is_repairable_pdf_error("Error: Invalid xref table"))
+        self.assertTrue(rfm.is_repairable_pdf_error("warning: file is damaged"))
+        self.assertFalse(rfm.is_repairable_pdf_error("Error: Permission denied"))
+        self.assertFalse(rfm.is_repairable_pdf_error(""))
+
 
 class TestDiff(unittest.TestCase):
     def test_in_sync_epub_has_no_drift(self):
@@ -115,7 +132,7 @@ class TestDiff(unittest.TestCase):
             rfm.diff_fields(db_record(), file_meta(published="1937-09-21"), "EPUB"), []
         )
 
-    def test_identifier_drift(self):
+    def test_identifier_drift_on_wrong_value(self):
         self.assertIn(
             "identifiers",
             rfm.diff_fields(
@@ -123,14 +140,44 @@ class TestDiff(unittest.TestCase):
             ),
         )
 
+    def test_identifier_missing_from_file_is_drift(self):
+        # DB has an isbn the file lacks entirely.
+        self.assertIn(
+            "identifiers",
+            rfm.diff_fields(db_record(), file_meta(identifiers="goodreads:1"), "EPUB"),
+        )
+
+    def test_extra_file_identifiers_are_not_drift(self):
+        # File carries the curated isbn plus its own urn:uuid and an ean; the
+        # curated id is present, so no drift (directional subset check).
+        fm = file_meta(
+            identifiers="uri:urn:uuid:abc, ean:4057664648839, isbn:9780000000001"
+        )
+        self.assertNotIn("identifiers", rfm.diff_fields(db_record(), fm, "EPUB"))
+
     def test_comment_html_insensitive(self):
         # File stores plain text, DB stores HTML of the same blurb -> no drift.
         self.assertNotIn("comments", rfm.diff_fields(db_record(), file_meta(), "EPUB"))
 
-    def test_pdf_ignores_tags_series_comments(self):
-        # PDF holds title/author/publisher/date but not the tag tree, series,
-        # or comments, so drift in those must not be reported for PDF.
-        fm = file_meta(tags="Totally.Different.Tag", series="Other #9")
+    def test_comment_truncated_by_ebook_meta_is_not_drift(self):
+        # ebook-meta truncates long comments; a prefix of the DB text is fine.
+        fm = file_meta()
+        fm["comments"] = "A hobbit's"  # prefix of "A hobbit's tale."
+        self.assertNotIn("comments", rfm.diff_fields(db_record(), fm, "EPUB"))
+
+    def test_comment_empty_or_divergent_is_drift(self):
+        fm = file_meta()
+        fm["comments"] = ""
+        self.assertIn("comments", rfm.diff_fields(db_record(), fm, "EPUB"))
+        fm["comments"] = "A completely different blurb"
+        self.assertIn("comments", rfm.diff_fields(db_record(), fm, "EPUB"))
+
+    def test_pdf_ignores_tags_series_comments_and_pubdate(self):
+        # PDF compares title/author/publisher only. Tags, series, comments, and
+        # pubdate (timezone-fuzzy in PDF XMP) must not be reported for PDF.
+        fm = file_meta(
+            tags="Totally.Different.Tag", series="Other #9", published="1999-01-01"
+        )
         fm["comments"] = "completely different blurb"
         self.assertEqual(rfm.diff_fields(db_record(), fm, "PDF"), [])
 
