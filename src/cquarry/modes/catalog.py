@@ -27,7 +27,9 @@ def write_catalog(
     quiet: bool = False,
 ) -> None:
     """Write a formatted text catalog, optionally filtered to a virtual library."""
-    books = db.get_all_books()
+    # Copy: get_all_books() hands out the shared cache, and the sort below
+    # must not reorder it for every later consumer in the session.
+    books = list(db.get_all_books())
 
     if wing:
         try:

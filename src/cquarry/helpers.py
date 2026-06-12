@@ -204,9 +204,11 @@ def find_db(explicit: str | None = None) -> str:
         try:
             raw = input("  Path to metadata.db (or directory containing it): ").strip()
         except EOFError, KeyboardInterrupt:
+            # Deliberate translation: an aborted prompt means "no DB found",
+            # and the EOFError/KeyboardInterrupt context is noise there.
             raise FileNotFoundError(
                 "Could not find metadata.db. Specify with --db /path/to/metadata.db"
-            )
+            ) from None
         if raw:
             resolved = _resolve_path(raw)
             if resolved:

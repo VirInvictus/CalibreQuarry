@@ -6,8 +6,11 @@ size sync is tested against a throwaway temporary SQLite fixture, never a live
 metadata.db.
 """
 
+import contextlib
 import importlib.util
+import os
 import pathlib
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -215,5 +218,117 @@ class TestCalibreSizeSync(unittest.TestCase):
         compress_pdf.update_calibre_size(root, stray, 1)  # must not raise
 
 
+class TestBackupGuard(unittest.TestCase):
+    """A leftover .pre-compress.pdf rollback file must never be overwritten."""
+
+    @unittest.skipUnless(shutil.which("gs"), "ghostscript not installed")
+    def test_existing_backup_aborts_before_compressing(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="cq_pdf_"))
+        src = tmp / "book.pdf"
+        backup = tmp / "book.pre-compress.pdf"
+        src.write_bytes(b"%PDF-1.4 fake")
+        backup.write_bytes(b"%PDF-1.4 original")
+        rc = compress_pdf.compress(src, "ebook", dry_run=False)
+        self.assertEqual(rc, 1)
+        # both files untouched
+        self.assertEqual(backup.read_bytes(), b"%PDF-1.4 original")
+        self.assertEqual(src.read_bytes(), b"%PDF-1.4 fake")
+
+
+class TestResolveLibraryRoot(unittest.TestCase):
+    """audit_epub_content finds the library next to the script or in the cwd."""
+
+    @contextlib.contextmanager
+    def _cwd(self, path):
+        old = os.getcwd()
+        os.chdir(path)
+        try:
+            yield
+        finally:
+            os.chdir(old)
+
+    def test_cwd_with_db_resolves(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="cq_root_"))
+        (tmp / "metadata.db").write_bytes(b"")
+        with self._cwd(tmp):
+            root = audit_epub.resolve_library_root()
+        self.assertIsNotNone(root)
+        self.assertEqual(root.resolve(), tmp.resolve())
+
+    def test_no_db_anywhere_is_none(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="cq_empty_"))
+        with self._cwd(tmp):
+            self.assertIsNone(audit_epub.resolve_library_root())
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+spot_check = _load("spot_check")
+
+
+class TestSpotCheckLint(unittest.TestCase):
+    def test_case_garble_title_flags(self):
+        flags = spot_check.lint_title("The Birth and Death of the Personal SPuter")
+        self.assertTrue(any(f.startswith("TITLE_CASE_GARBLE") for f in flags))
+        self.assertEqual(spot_check.lint_title("McHugh's HTTP Guide"), [])
+        self.assertEqual(spot_check.lint_title("SQLite for QBasic Fans"), [])
+
+    def test_mojibake_and_whitespace(self):
+        self.assertIn("TITLE_MOJIBAKE", spot_check.lint_title("Itâ€™s Broken"))
+        self.assertIn("TITLE_WHITESPACE", spot_check.lint_title("Double  Space"))
+
+    def test_author_junk(self):
+        flags = spot_check.lint_authors(["Mybooks Classics", "Jane Austen"])
+        self.assertTrue(any(f.startswith("AUTHOR_JUNK") for f in flags))
+        self.assertEqual(spot_check.lint_authors(["Ursula K. Le Guin"]), [])
+
+    def test_comment_stub_and_missing(self):
+        self.assertEqual(spot_check.lint_comment(None), ["COMMENT_MISSING"])
+        self.assertTrue(
+            spot_check.lint_comment("<p>short</p>")[0].startswith("COMMENT_STUB")
+        )
+        self.assertEqual(spot_check.lint_comment("x" * 200), [])
+
+
+class TestSpotCheckEpub(unittest.TestCase):
+    OPF = (
+        '<package xmlns="http://www.idpf.org/2007/opf">'
+        "<manifest>"
+        '<item id="c1" href="text.xhtml" media-type="application/xhtml+xml"/>'
+        "</manifest>"
+        '<spine><itemref idref="c1"/></spine></package>'
+    )
+    CONTAINER = (
+        '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+        '<rootfiles><rootfile full-path="content.opf" '
+        'media-type="application/oebps-package+xml"/></rootfiles></container>'
+    )
+
+    def _build(self, tmp, spine_doc=True):
+        import zipfile as zf
+
+        p = pathlib.Path(tmp) / "t.epub"
+        with zf.ZipFile(p, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER)
+            z.writestr("content.opf", self.OPF)
+            if spine_doc:
+                z.writestr("text.xhtml", "<html>" + "x" * 40_000 + "</html>")
+        return p
+
+    def test_intact_epub_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(spot_check.check_epub(self._build(tmp)), [])
+
+    def test_missing_spine_doc_is_hard_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            flags = spot_check.check_epub(self._build(tmp, spine_doc=False))
+            self.assertTrue(any(f.startswith("EPUB_SPINE_MISSING") for f in flags))
+
+    def test_garbage_file_is_badzip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = pathlib.Path(tmp) / "junk.epub"
+            p.write_bytes(b"not a zip at all")
+            self.assertTrue(spot_check.check_epub(p)[0].startswith("EPUB_BADZIP"))

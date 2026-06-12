@@ -35,9 +35,9 @@ import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
-# re.Scanner is a real, stable stdlib helper but is undocumented and untyped,
-# so reach it via getattr to keep type checkers quiet.
-_Scanner = getattr(re, "Scanner")
+# re.Scanner is a real, stable stdlib helper but is undocumented and absent
+# from typeshed, so the access needs an explicit type-checker ignore.
+_Scanner = re.Scanner  # type: ignore[attr-defined]
 
 # --- Match kinds ---
 CONTAINS = 0
@@ -298,7 +298,7 @@ def _match_text(query: str, values: list[str], kind: int) -> bool:
         try:
             pat = re.compile(query, re.IGNORECASE | re.UNICODE)
         except re.error as e:
-            raise ParseException(f"Invalid regular expression {query!r}: {e}")
+            raise ParseException(f"Invalid regular expression {query!r}: {e}") from e
         return any(pat.search(v) is not None for v in values)
 
     q = _fold(query)
@@ -324,7 +324,7 @@ def _match_hier(query: str, values: list[str], kind: int) -> bool:
         try:
             pat = re.compile(query, re.IGNORECASE | re.UNICODE)
         except re.error as e:
-            raise ParseException(f"Invalid regular expression {query!r}: {e}")
+            raise ParseException(f"Invalid regular expression {query!r}: {e}") from e
         return any(pat.search(v) is not None for v in values)
 
     q = _fold(query)
@@ -389,8 +389,8 @@ def _num_predicate(query: str, datatype: str):
     cast = float if datatype in (DT_FLOAT, DT_RATING) else int
     try:
         q = cast(query) * mult
-    except ValueError, TypeError:
-        raise ParseException(f"Non-numeric value in query: {query!r}")
+    except (ValueError, TypeError) as e:
+        raise ParseException(f"Non-numeric value in query: {query!r}") from e
     return (lambda v: v is not None and op(v, q)), q
 
 
@@ -429,8 +429,8 @@ class _DateQuery:
             if len(parts) == 2:
                 return date(int(parts[0]), int(parts[1]), 1), 2
             return date(int(parts[0]), int(parts[1]), int(parts[2])), 3
-        except ValueError, IndexError:
-            raise ParseException(f"Invalid date in query: {q!r}")
+        except (ValueError, IndexError) as e:
+            raise ParseException(f"Invalid date in query: {q!r}") from e
 
     def matches(self, value: date | None) -> bool:
         if value is None:

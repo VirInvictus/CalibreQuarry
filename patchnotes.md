@@ -1,5 +1,27 @@
 # CalibreQuarry — Patch Notes
 
+## v3.0.1 (2026-06-12)
+
+### New Features
+
+**`scripts/spot_check.py`: randomized metadata + file-integrity audit.** Samples N random books (reproducible with `--seed`) and checks what pattern-based sweeps miss: title corruption and mojibake, junk author entries, missing or stub descriptions, EPUB archive integrity (CRC, container/OPF sanity, spine completeness, text volume), PDF header/page count, and DJVU page count. Emits a machine-readable flag report plus a review bundle (title/author/tag/series/blurb per sampled book) for a human or LLM judgment pass. Read-only against `metadata.db`; validator-owned checks are not duplicated. First 600-book run against the live library caught a wrong-book description, a truncated description, three mojibake descriptions, and an EPUB with ten dangling spine references.
+
+### Fixes
+
+**`reconcile_file_metadata.py` PDF embeds no longer fail silently.** Two related defects: exiftool refuses to rewrite XMP packets containing duplicate properties (seen in the wild: a doubled `prism:doi`) unless `-m` is passed, and it exits 0 with "files unchanged", which the tool read as success; The embed now passes `-m`. (An interim attempt to also write a bare `-Publisher` tag was reverted: on PDFs exiftool maps it to the same XMP dc:publisher bag, so double assignment appended duplicate entries and broke the round-trip.)
+
+**`write_catalog` no longer corrupts the shared book cache.** It sorted the list returned by `get_all_books()` in place, silently reordering the session cache for every later consumer. It now sorts a copy; a regression test pins the behavior (`tests/test_modes.py`).
+
+**`compress_pdf.py` cannot clobber a rollback original.** If a `.pre-compress` rollback file already exists, an in-place run now aborts instead of overwriting the only copy of the true original with an already-compressed file.
+
+**`audit_epub_content.py` finds the library from either home.** The library root resolves to wherever `metadata.db` sits: next to the script (the copy living inside the library) or the current working directory (running the repo copy from a library), in that order.
+
+**`reconcile --id` rejects malformed id lists cleanly** via a dedicated parser instead of an unhandled `ValueError`.
+
+### Internals
+
+Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; unused loop variable removed in wing-overlap analytics; `re.Scanner` access satisfied for type checkers; new test coverage for the backup guard, library-root resolution, and cache isolation (suite: 87 tests).
+
 ## v3.0.0 (2026-05-26)
 
 ---

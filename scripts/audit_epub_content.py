@@ -51,8 +51,16 @@ from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-LIBRARY_ROOT = Path(__file__).resolve().parent
-DB_PATH = LIBRARY_ROOT / "metadata.db"
+
+def resolve_library_root() -> Path | None:
+    """The library root is wherever metadata.db sits: next to this script (the
+    copy living inside the library) or the current working directory (running
+    the repo copy from inside a library), in that order."""
+    for d in (Path(__file__).resolve().parent, Path.cwd()):
+        if (d / "metadata.db").is_file():
+            return d
+    return None
+
 
 # ANSI colours; suppress when stdout isn't a TTY (matches validate_library.py)
 USE_COLOR = sys.stdout.isatty()
@@ -232,11 +240,16 @@ def findings(r: dict) -> list[tuple[str, str]]:
 
 
 def audit_library() -> int:
-    if not DB_PATH.exists():
-        print(f"ERROR: {DB_PATH} not found. Run from the library directory.")
+    library_root = resolve_library_root()
+    if library_root is None:
+        print(
+            "ERROR: no metadata.db next to this script or in the current "
+            "directory. Run from the library directory."
+        )
         return 2
+    db_path = library_root / "metadata.db"
 
-    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     cur = con.cursor()
     # Aggregate ALL tags / languages per book. A plain dict() would keep only the
     # last row, so a multi-tagged book (e.g. NonFic.Language.* plus a genre tag)
@@ -266,7 +279,7 @@ def audit_library() -> int:
     scanned = 0
 
     for book_id, title, path, name in rows:
-        full = LIBRARY_ROOT / path / f"{name}.epub"
+        full = library_root / path / f"{name}.epub"
         tags = booktags.get(book_id, [])
         tag = tags[0] if tags else "?"
         langs = declared.get(book_id, set())
@@ -293,10 +306,14 @@ def audit_library() -> int:
             else:
                 signature_hits.append((book_id, title, tag, expected, detail))
 
-    return report(scanned, nonlatin_hits, latin_foreign, signature_hits, errors)
+    return report(
+        scanned, nonlatin_hits, latin_foreign, signature_hits, errors, library_root
+    )
 
 
-def report(scanned, nonlatin_hits, latin_foreign, signature_hits, errors) -> int:
+def report(
+    scanned, nonlatin_hits, latin_foreign, signature_hits, errors, library_root
+) -> int:
     def show(label: str, hits: list[tuple], color: str) -> int:
         unexpected = [h for h in hits if not h[3]]
         expected = [h for h in hits if h[3]]
@@ -311,7 +328,7 @@ def report(scanned, nonlatin_hits, latin_foreign, signature_hits, errors) -> int
             print()
         return len(unexpected)
 
-    print(f"Scanned {scanned} EPUBs in {LIBRARY_ROOT}\n")
+    print(f"Scanned {scanned} EPUBs in {library_root}\n")
     unexpected = 0
     unexpected += show("NON-LATIN SCRIPT", nonlatin_hits, RED)
     unexpected += show("LATIN-SCRIPT FOREIGN (stopword vote)", latin_foreign, RED)

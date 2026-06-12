@@ -147,7 +147,7 @@ def _tui_select(
                 )
                 _safe_addstr(stdscr, y, bx + BOX_W - 1, "\u2551", fa)
                 y += 1
-            for ii, label in enumerate(items):
+            for label in items:
                 is_sel = idx == cur
                 if is_sel:
                     text = f" \u25ba {label}"

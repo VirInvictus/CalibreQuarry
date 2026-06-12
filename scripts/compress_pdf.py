@@ -408,6 +408,15 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
         out_tmp = src.with_suffix(".compress.tmp.pdf")
         final_out = src
     backup = src.with_suffix(".pre-compress.pdf")
+    # A leftover rollback file is the only copy of the true original; replacing
+    # it with the (already once-compressed) src would destroy it silently.
+    if out_dir is None and not dry_run and backup.exists():
+        print(
+            f"{RED}ABORT{RESET}: rollback file already exists: {backup}. "
+            "Replacing would overwrite the original from a previous run; "
+            "move or delete it first."
+        )
+        return 1
 
     cmd = [
         gs,

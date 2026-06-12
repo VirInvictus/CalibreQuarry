@@ -91,6 +91,11 @@ class TestParsing(unittest.TestCase):
         )
         self.assertEqual(rfm.djvused_unescape("Plain ASCII"), "Plain ASCII")
 
+    def test_parse_id_list(self):
+        self.assertEqual(rfm.parse_id_list("6688,6690"), {6688, 6690})
+        self.assertEqual(rfm.parse_id_list("1, 2 3"), {1, 2, 3})
+        self.assertIsNone(rfm.parse_id_list("6688,foo"))
+
     def test_is_repairable_pdf_error(self):
         # A broken cross-reference table is qpdf-repairable; unrelated failures
         # (e.g. permissions) are not, so --repair-pdf should leave them alone.

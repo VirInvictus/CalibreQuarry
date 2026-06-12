@@ -113,7 +113,7 @@ def show_wing_overlap(db: CalibreDB, *, quiet: bool = False) -> None:
             pass  # ignore unparseable
 
     overlap_counts = Counter()
-    for bid, wings in book_wings.items():
+    for wings in book_wings.values():
         if len(wings) > 1:
             overlap_counts[tuple(sorted(wings))] += 1
 

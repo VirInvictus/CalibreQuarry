@@ -509,6 +509,10 @@ def _run_exiftool(db: dict, path: Path) -> subprocess.CompletedProcess:
     args = [
         "exiftool",
         "-overwrite_original",
+        # -m: without it exiftool refuses to rewrite XMP packets containing
+        # duplicate properties (seen in the wild: doubled prism:doi) and exits 0
+        # with "files unchanged", which reads as success.
+        "-m",
         "-q",
         f"-Title={norm_text(db['title'])}",
         f"-XMP-dc:Title={norm_text(db['title'])}",
@@ -516,6 +520,9 @@ def _run_exiftool(db: dict, path: Path) -> subprocess.CompletedProcess:
         f"-XMP-dc:Creator={authors}",
     ]
     if db["publisher"]:
+        # exactly one assignment: on PDFs exiftool maps bare -Publisher to
+        # XMP-dc:Publisher (a bag), so writing both tags appends two entries
+        # and the value never round-trips
         args.append(f"-XMP-dc:Publisher={norm_text(db['publisher'])}")
     date = norm_date(db["pubdate"])
     if date:
@@ -568,9 +575,17 @@ def resolve_db_path(arg: str | None) -> Path | None:
     return None
 
 
+def parse_id_list(arg: str) -> set[int] | None:
+    """'6688, 6690' -> {6688, 6690}; None when a token is not an integer."""
+    try:
+        return {int(x) for x in re.split(r"[,\s]+", arg) if x.strip()}
+    except ValueError:
+        return None
+
+
 def select_ids(cur, args) -> list[int]:
     if args.id:
-        wanted = {int(x) for x in re.split(r"[,\s]+", args.id) if x.strip()}
+        wanted = parse_id_list(args.id) or set()
         return [
             r[0]
             for r in cur.execute("SELECT id FROM books ORDER BY id")
@@ -623,6 +638,13 @@ def main() -> int:
         help="print only drift, truncate long field lists",
     )
     args = parser.parse_args()
+
+    if args.id and parse_id_list(args.id) is None:
+        print(
+            f"ERROR: --id expects comma-separated numeric book ids, got {args.id!r}.",
+            file=sys.stderr,
+        )
+        return 2
 
     # exiftool reads (and writes) PDF; ebook-meta reads epub/mobi/azw3; djvused
     # reads/writes djvu. All three are needed just to scan.
