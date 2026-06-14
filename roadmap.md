@@ -72,6 +72,7 @@ What's done, what's next. Updated as of v3.0.0.
 - [x] **`validate_metadata.py`** — integrity linter (no language, duplicate ISBN, junk identifiers, orphan cc-links) plus an optional taxonomy-driven opinionated layer
 - [x] **`reconcile_file_metadata.py`** — diff the curated `metadata.db` against each file's embedded metadata and embed the DB values back (calibredb for EPUB/MOBI/AZW3, exiftool for PDF, djvused for DJVU); dry-run by default, `--apply` only touches drifted files
 - [x] **`--repair-pdf` for `reconcile_file_metadata.py`** — opt-in flag that, when an exiftool write fails on a broken cross-reference table, rebuilds it in place with `qpdf --replace-input` and retries the embed (page count preserved). Default off because it structurally rewrites the file. Automates the by-hand fix done during the 2026-06-07 full-library run, where 20 PDFs hit "Invalid xref table".
+- [x] **`audit_epub_pagenumbers.py`** — reads EPUB body text to flag print page numbers (and running headers) baked into the flow by bad PDF/OCR conversions, which reflow mid-sentence. Flags only genuine prose interruptions (lowercase continuation, word split, running-header abutment); leaves chapter/section numbers and endnotes alone. Hand-validated against the full reference library: 21 true positives, no false positives.
 
 ## Maintenance (workspace sweep, 2026-06-09)
 *Small behaviour-neutral pass; everything else was clean (42 tests green, default ruff rule set clean).*

@@ -440,6 +440,17 @@ python3 audit_epub_content.py ~/Downloads  # vet loose .epub files before import
 
 Exit codes: `0` clean, `1` foreign-language content or injection signature found, `2` setup error.
 
+### `audit_epub_pagenumbers.py` — flag baked-in page numbers (read-only)
+
+Reads EPUB body text to find print page numbers (and running headers) that a bad PDF/OCR conversion captured as paragraphs instead of real pagination, so they reflow into the middle of a sentence. It flags a number only when it actually interrupts prose (a lowercase continuation, a word split across it, or a repeated running header beside it), leaving legitimate chapter/section numbers and endnote markers alone. It opens `metadata.db` strictly `mode=ro`. As a side effect it also surfaces piracy watermarks and bad OCR scans.
+
+```bash
+python3 audit_epub_pagenumbers.py              # audit the whole library (run from the library dir)
+python3 audit_epub_pagenumbers.py ~/Downloads  # vet loose .epub files before importing them
+```
+
+Exit codes: `0` clean, `1` baked-in page numbers found, `2` setup error.
+
 ### `validate_metadata.py` — lint database integrity (read-only)
 
 A linter for `metadata.db` with two layers. It is the database-side companion to `audit_epub_content.py` (which checks book *content*), and it is strictly `mode=ro`.

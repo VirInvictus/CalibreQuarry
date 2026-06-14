@@ -332,3 +332,85 @@ class TestSpotCheckEpub(unittest.TestCase):
             p = pathlib.Path(tmp) / "junk.epub"
             p.write_bytes(b"not a zip at all")
             self.assertTrue(spot_check.check_epub(p)[0].startswith("EPUB_BADZIP"))
+
+
+pagenum = _load("audit_epub_pagenumbers")
+
+
+class TestPageNumberValue(unittest.TestCase):
+    def test_arabic_and_roman(self):
+        self.assertEqual(pagenum.number_value("42"), 42)
+        self.assertEqual(pagenum.number_value("xiv"), 14)
+        self.assertEqual(pagenum.number_value("II"), 2)
+
+    def test_rejects_non_numbers(self):
+        self.assertIsNone(pagenum.number_value("Chapter"))
+        self.assertIsNone(pagenum.number_value("12345"))  # >4 digits
+        self.assertIsNone(pagenum.number_value("i"))  # lone roman i is too noisy
+        self.assertIsNone(pagenum.number_value("42a"))
+
+
+class TestIsDefective(unittest.TestCase):
+    def _r(self, **over):
+        r = {"n_hits": 10, "span": 0.9, "run": 5, "watermark": False, "examples": []}
+        r.update(over)
+        return r
+
+    def test_clear_defect(self):
+        self.assertTrue(pagenum.is_defective(self._r()))
+
+    def test_too_few_hits(self):
+        self.assertFalse(pagenum.is_defective(self._r(n_hits=4)))
+
+    def test_localized_cluster_dropped_by_span(self):
+        # a footnote-poem / scraped-comment cluster: many hits, tiny span
+        self.assertFalse(pagenum.is_defective(self._r(n_hits=20, span=0.02)))
+
+
+class TestPageNumberScan(unittest.TestCase):
+    """End-to-end scan() over synthetic EPUBs: a baked-in conversion flags, a
+    clean chapter-numbered book does not."""
+
+    CONTAINER = (
+        '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+        '<rootfiles><rootfile full-path="content.opf" '
+        'media-type="application/oebps-package+xml"/></rootfiles></container>'
+    )
+    OPF = (
+        '<package xmlns="http://www.idpf.org/2007/opf">'
+        "<manifest>"
+        '<item id="c1" href="text.xhtml" media-type="application/xhtml+xml"/>'
+        "</manifest>"
+        '<spine><itemref idref="c1"/></spine></package>'
+    )
+
+    def _epub(self, tmp, body):
+        import zipfile as zf
+
+        p = pathlib.Path(tmp) / "t.epub"
+        with zf.ZipFile(p, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER)
+            z.writestr("content.opf", self.OPF)
+            z.writestr("text.xhtml", f"<html><body>{body}</body></html>")
+        return p
+
+    def test_baked_page_numbers_flag(self):
+        # a page number wedged between an unfinished paragraph and its lowercase
+        # continuation, repeated through the book: the real defect.
+        para_a = "<p>" + ("the quick brown fox jumped over " * 6) + "and then</p>"
+        para_b = "<p>" + ("continued in lowercase as the sentence ran on " * 6) + "</p>"
+        body = "".join(f"{para_a}<p>{n}</p>{para_b}" for n in range(1, 8))
+        with tempfile.TemporaryDirectory() as tmp:
+            r = pagenum.scan(self._epub(tmp, body))
+        self.assertGreaterEqual(r["n_hits"], 5)
+        self.assertTrue(pagenum.is_defective(r))
+
+    def test_clean_chapter_numbers_do_not_flag(self):
+        # a number that opens a chapter (next text is a fresh capitalized
+        # sentence) is legitimate, not baked.
+        chapter = "<p>" + ("A clean chapter of ordinary prose ends here. " * 6) + "</p>"
+        body = "".join(f"<p>{n}</p>{chapter}" for n in range(1, 12))
+        with tempfile.TemporaryDirectory() as tmp:
+            r = pagenum.scan(self._epub(tmp, body))
+        self.assertFalse(pagenum.is_defective(r))

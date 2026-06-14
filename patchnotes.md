@@ -1,5 +1,11 @@
 # CalibreQuarry — Patch Notes
 
+## v3.0.2 (2026-06-14)
+
+### New Features
+
+**`scripts/audit_epub_pagenumbers.py`: find print page numbers baked into EPUB body text.** Bad PDF/OCR-to-EPUB conversions capture the print page number (and often the running header) as a literal paragraph in the flow instead of real EPUB pagination, so it reflows into the middle of a sentence ("where the hay cart 16 was taking him"). The detector reads each book's blocks in spine order and flags a number only when it genuinely interrupts prose: a lowercase continuation after it, a word split across it (the previous block ends in a hyphen), or it abuts a repeated running header/footer. Section and chapter numbers (which open the next block with a capital) and endnote/footnote numbers and chronology years are left alone. Library mode (DB-driven, `mode=ro`) and directory mode (vet downloads before import), mirroring `audit_epub_content.py`. Validated by hand against the full reference library: 21 flagged, every one a true positive; the false-positive tail (an experimental footnote-poem, a scraped web-serial's vote counts, placeholder section labels) all fell under the hit-count or book-span floors. It also surfaces piracy watermarks and bad OCR scans that ride along with the page-number cruft.
+
 ## v3.0.1 (2026-06-12)
 
 ### New Features

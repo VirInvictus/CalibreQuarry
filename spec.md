@@ -119,5 +119,6 @@ The `scripts/` directory holds standalone maintenance tools that are **not** par
 |--------|--------------|---------|----------------|
 | `compress_pdf.py` | Shrinks an oversize PDF via Ghostscript with verify-or-rollback; syncs the new size to `data.uncompressed_size` (and the Count Pages `books_pages_link.format_size` if present) so Calibre isn't stale | **Yes** (replaces the PDF; updates `metadata.db`) | `gs`, `pdfinfo`/`pdfimages`/`pdfdetach` (poppler) |
 | `audit_epub_content.py` | Reads EPUB text to flag wrong-language editions and injected foreign-language notices that metadata cannot catch | No (`metadata.db` opened `mode=ro`) | none |
+| `audit_epub_pagenumbers.py` | Reads EPUB text to flag print page numbers baked into the body (bad PDF/OCR conversions) that reflow mid-sentence | No (`metadata.db` opened `mode=ro`) | none |
 
 `compress_pdf.py` is the reason these live outside the package: it has write capability, which the `cquarry` core forbids. Keeping it adjacent but separate preserves the toolkit's read-only promise.
