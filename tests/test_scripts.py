@@ -26,7 +26,7 @@ def _load(name):
 
 
 compress_pdf = _load("compress_pdf")
-audit_epub = _load("audit_epub_content")
+audit_epub = _load("audit_epub")
 
 
 def _features(**over):
@@ -334,7 +334,7 @@ class TestSpotCheckEpub(unittest.TestCase):
             self.assertTrue(spot_check.check_epub(p)[0].startswith("EPUB_BADZIP"))
 
 
-pagenum = _load("audit_epub_pagenumbers")
+pagenum = audit_epub  # merged into audit_epub.py
 
 
 class TestPageNumberValue(unittest.TestCase):
@@ -402,7 +402,7 @@ class TestPageNumberScan(unittest.TestCase):
         para_b = "<p>" + ("continued in lowercase as the sentence ran on " * 6) + "</p>"
         body = "".join(f"{para_a}<p>{n}</p>{para_b}" for n in range(1, 8))
         with tempfile.TemporaryDirectory() as tmp:
-            r = pagenum.scan(self._epub(tmp, body))
+            r = pagenum.scan_pagenumbers(self._epub(tmp, body))
         self.assertGreaterEqual(r["n_hits"], 5)
         self.assertTrue(pagenum.is_defective(r))
 
@@ -412,11 +412,11 @@ class TestPageNumberScan(unittest.TestCase):
         chapter = "<p>" + ("A clean chapter of ordinary prose ends here. " * 6) + "</p>"
         body = "".join(f"<p>{n}</p>{chapter}" for n in range(1, 12))
         with tempfile.TemporaryDirectory() as tmp:
-            r = pagenum.scan(self._epub(tmp, body))
+            r = pagenum.scan_pagenumbers(self._epub(tmp, body))
         self.assertFalse(pagenum.is_defective(r))
 
 
-emptytext = _load("audit_epub_emptytext")
+emptytext = audit_epub  # merged into audit_epub.py
 
 
 class TestVisibleChars(unittest.TestCase):
@@ -463,18 +463,18 @@ class TestEmptyTextScan(unittest.TestCase):
         # a Bookmate-style stub: a single cover image, no body text
         body = '<p><img src="cover.png"/></p>'
         with tempfile.TemporaryDirectory() as tmp:
-            r = emptytext.scan(self._epub(tmp, body))
+            r = emptytext.scan_emptytext(self._epub(tmp, body))
         self.assertEqual(r["chars"], 0)
         self.assertEqual(emptytext.classify(r, 2000, 20000), "EMPTY")
 
     def test_full_text_ok(self):
         body = "<p>" + ("Real prose that fills the book. " * 1000) + "</p>"
         with tempfile.TemporaryDirectory() as tmp:
-            r = emptytext.scan(self._epub(tmp, body))
+            r = emptytext.scan_emptytext(self._epub(tmp, body))
         self.assertEqual(emptytext.classify(r, 2000, 20000), "OK")
 
     def test_thin_is_advisory(self):
         body = "<p>" + ("short story prose. " * 300) + "</p>"  # ~5700 chars
         with tempfile.TemporaryDirectory() as tmp:
-            r = emptytext.scan(self._epub(tmp, body))
+            r = emptytext.scan_emptytext(self._epub(tmp, body))
         self.assertEqual(emptytext.classify(r, 2000, 20000), "THIN")

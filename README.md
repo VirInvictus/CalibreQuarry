@@ -429,42 +429,29 @@ python3 scripts/compress_pdf.py book.pdf --out-dir ~/out # write a copy elsewher
 
 Exit codes: `0` compressed/verified (or clean inspect), `1` aborted (no shrink, page-count mismatch), `2` setup error (Ghostscript missing, unreadable file).
 
-### `audit_epub_content.py` — flag non-English / tampered EPUBs (read-only)
+### `audit_epub.py` — flag EPUB content problems (read-only)
 
-Reads the actual text of EPUBs to catch problems metadata can't: editions whose body is in the wrong language (declared `eng` but actually Portuguese, Russian, etc.) and an injected foreign-language ad-notice signature. It votes a language across stopword sets and counts non-Latin script, and opens `metadata.db` strictly `mode=ro`.
+Reads the actual body text of EPUBs to catch problems metadata and structural validators cannot see. Three analyzers in one tool, selected by subcommand:
 
-```bash
-python3 audit_epub_content.py              # audit the whole library (run from the library dir)
-python3 audit_epub_content.py ~/Downloads  # vet loose .epub files before importing them
-```
+- `content` — editions whose body is in the wrong language (declared `eng` but actually Portuguese, Russian, etc.) and an injected foreign-language ad-notice signature. Votes a language across stopword sets and counts non-Latin script.
+- `pagenumbers` — print page numbers (and running headers) a bad PDF/OCR conversion captured as paragraphs instead of real pagination, so they reflow into the middle of a sentence. Flags a number only when it interrupts prose (a lowercase continuation, a word split across it, or a repeated running header beside it), leaving legitimate chapter/section numbers and endnote markers alone. Also surfaces piracy watermarks and bad OCR scans.
+- `emptytext` — content-less stubs (the "Bookmate" export is cover/promo images plus a tiny HTML placeholder, the spine pointing only at the placeholder, the book itself absent). Such a file passes `epubcheck` and a structural repairer because its one referenced doc is valid; only counting rendered characters catches it. EMPTY (`<=2000` chars, `--min-chars`) is a real defect; THIN (`<20000`, `--thin-chars`) is advisory.
+- `all` — runs all three in a single decompression pass per book (the expensive part is decompression, so this is much faster than three separate runs).
 
-Exit codes: `0` clean, `1` foreign-language content or injection signature found, `2` setup error.
-
-### `audit_epub_pagenumbers.py` — flag baked-in page numbers (read-only)
-
-Reads EPUB body text to find print page numbers (and running headers) that a bad PDF/OCR conversion captured as paragraphs instead of real pagination, so they reflow into the middle of a sentence. It flags a number only when it actually interrupts prose (a lowercase continuation, a word split across it, or a repeated running header beside it), leaving legitimate chapter/section numbers and endnote markers alone. It opens `metadata.db` strictly `mode=ro`. As a side effect it also surfaces piracy watermarks and bad OCR scans.
+It opens `metadata.db` strictly `mode=ro`. (Merged in v3.1.0 from the former `audit_epub_content.py` / `audit_epub_pagenumbers.py` / `audit_epub_emptytext.py`, which shared the same spine resolution, dual-mode, and exit codes.)
 
 ```bash
-python3 audit_epub_pagenumbers.py              # audit the whole library (run from the library dir)
-python3 audit_epub_pagenumbers.py ~/Downloads  # vet loose .epub files before importing them
+python3 audit_epub.py all                 # all three audits, whole library (from the library dir)
+python3 audit_epub.py content             # one audit, whole library
+python3 audit_epub.py all ~/Downloads     # vet loose .epub files before importing them
+python3 audit_epub.py emptytext ~/Downloads --min-chars 1000
 ```
 
-Exit codes: `0` clean, `1` baked-in page numbers found, `2` setup error.
-
-### `audit_epub_emptytext.py` — flag empty / no-body-text EPUBs (read-only)
-
-Counts the rendered characters across an EPUB's resolved spine to catch content-less files: the "Bookmate" stub is the canonical case (cover and promo images plus a tiny HTML placeholder, the spine pointing only at the placeholder, the book itself absent). Such a file passes `epubcheck`, "repairs" clean in a structural repairer, and shows no foreign text to `audit_epub_content.py` because there is no text at all; only counting characters catches it. EMPTY (`<=2000` chars, tunable with `--min-chars`) is a real defect to re-source; THIN (`<20000`, `--thin-chars`) is advisory, since a genuine short story or a publisher sample can both land there. A Bookmate origin is not itself a defect; most Bookmate exports carry their full text. Opens `metadata.db` strictly `mode=ro`.
-
-```bash
-python3 audit_epub_emptytext.py              # audit the whole library (run from the library dir)
-python3 audit_epub_emptytext.py ~/Downloads  # vet loose .epub files before importing them
-```
-
-Exit codes: `0` clean (THIN is advisory), `1` empty file(s) found or a scan error, `2` setup error.
+Exit codes: `0` clean (THIN is advisory), `1` a real problem (foreign content, baked page numbers, empty book) or a scan error, `2` setup error.
 
 ### `validate_metadata.py` — lint database integrity (read-only)
 
-A linter for `metadata.db` with two layers. It is the database-side companion to `audit_epub_content.py` (which checks book *content*), and it is strictly `mode=ro`.
+A linter for `metadata.db` with two layers. It is the database-side companion to `audit_epub.py` (which checks book *content*), and it is strictly `mode=ro`.
 
 **Integrity layer (always on, zero config).** Taxonomy-agnostic, schema-level problems the UI and `--audit` leave alone: books with no language, one ISBN attached to two books, placeholder (`0101-01-01`) or unparseable publication dates, junk identifier types (`url`, `uri`, `guid`, `isbn13`, ...), an ISBN-10 misfiled under `amazon`/`mobi-asin` (checksum-verified, so genuine ASINs are left alone), and custom-column link rows orphaned by deleted books. Safe to point at any library; needs no configuration.
 

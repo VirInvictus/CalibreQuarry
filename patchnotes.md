@@ -1,5 +1,11 @@
 # CalibreQuarry — Patch Notes
 
+## v3.1.0 (2026-06-20)
+
+### Changes
+
+**The three EPUB-content audits are merged into one `scripts/audit_epub.py`.** `audit_epub_content.py`, `audit_epub_pagenumbers.py`, and `audit_epub_emptytext.py` shared the same spine resolution, library/directory dual-mode, read-only contract, and exit codes, and differed only in the per-book verdict; they are now three analyzers behind one tool, selected by subcommand: `audit_epub.py content|pagenumbers|emptytext|all [directory]`. The detection logic of each is unchanged (same thresholds, same results). Two wins beyond removing the duplicated scaffolding: `all` opens each EPUB once and runs all three analyzers in a single decompression pass (the expensive part is decompression, so this is much faster than three separate full-library runs), and there is now one spine resolver to maintain instead of three slightly-diverging copies. The old script names are removed; update any caller to `audit_epub.py <mode>`. The `--min-chars` / `--thin-chars` knobs (emptytext) carry over.
+
 ## v3.0.3 (2026-06-20)
 
 ### New Features
