@@ -451,6 +451,17 @@ python3 audit_epub_pagenumbers.py ~/Downloads  # vet loose .epub files before im
 
 Exit codes: `0` clean, `1` baked-in page numbers found, `2` setup error.
 
+### `audit_epub_emptytext.py` — flag empty / no-body-text EPUBs (read-only)
+
+Counts the rendered characters across an EPUB's resolved spine to catch content-less files: the "Bookmate" stub is the canonical case (cover and promo images plus a tiny HTML placeholder, the spine pointing only at the placeholder, the book itself absent). Such a file passes `epubcheck`, "repairs" clean in a structural repairer, and shows no foreign text to `audit_epub_content.py` because there is no text at all; only counting characters catches it. EMPTY (`<=2000` chars, tunable with `--min-chars`) is a real defect to re-source; THIN (`<20000`, `--thin-chars`) is advisory, since a genuine short story or a publisher sample can both land there. A Bookmate origin is not itself a defect; most Bookmate exports carry their full text. Opens `metadata.db` strictly `mode=ro`.
+
+```bash
+python3 audit_epub_emptytext.py              # audit the whole library (run from the library dir)
+python3 audit_epub_emptytext.py ~/Downloads  # vet loose .epub files before importing them
+```
+
+Exit codes: `0` clean (THIN is advisory), `1` empty file(s) found or a scan error, `2` setup error.
+
 ### `validate_metadata.py` — lint database integrity (read-only)
 
 A linter for `metadata.db` with two layers. It is the database-side companion to `audit_epub_content.py` (which checks book *content*), and it is strictly `mode=ro`.

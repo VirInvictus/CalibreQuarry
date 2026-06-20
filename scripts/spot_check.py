@@ -56,7 +56,7 @@ _AUTHOR_JUNK = re.compile(
 # capitals welded onto a lowercase tail, or capitals erupting mid-word. Real
 # tech intercaps (SQLite, QBasic) are allowlisted; this flag is advisory.
 _CASE_GARBLE = re.compile(r"\b[A-Z]{2,}[a-z]{2,}\w*|[a-z][A-Z]{2,}[a-z]")
-_CASE_OK = {"SQLite", "QBasic", "OAuth", "JScript", "DRMed", "POSIXly"}
+_CASE_OK = {"SQLite", "QBasic", "OAuth", "JScript", "DRMed", "POSIXly", "OCaml", "NCurses"}
 
 MIN_COMMENT = 120  # chars; below this a description is a stub
 MIN_EPUB_TEXT = 30_000  # bytes of spine text; below this a "book" is suspect

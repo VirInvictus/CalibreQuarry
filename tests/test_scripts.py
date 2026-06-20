@@ -414,3 +414,67 @@ class TestPageNumberScan(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             r = pagenum.scan(self._epub(tmp, body))
         self.assertFalse(pagenum.is_defective(r))
+
+
+emptytext = _load("audit_epub_emptytext")
+
+
+class TestVisibleChars(unittest.TestCase):
+    def test_strips_tags_scripts_and_styles(self):
+        html = (
+            "<style>p{color:red}</style><p>Hello <b>world</b></p>"
+            "<script>var x = 1</script>"
+        )
+        self.assertEqual(emptytext._visible_chars(html), len("Hello world"))
+
+    def test_decodes_entities(self):
+        self.assertEqual(emptytext._visible_chars("<p>a &amp; b</p>"), len("a & b"))
+
+
+class TestEmptyTextScan(unittest.TestCase):
+    """End-to-end scan() over synthetic EPUBs: a content-less stub is EMPTY,
+    a real-text book is OK, a short work is THIN (advisory)."""
+
+    CONTAINER = (
+        '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+        '<rootfiles><rootfile full-path="content.opf" '
+        'media-type="application/oebps-package+xml"/></rootfiles></container>'
+    )
+    OPF = (
+        '<package xmlns="http://www.idpf.org/2007/opf">'
+        "<manifest>"
+        '<item id="c1" href="text.xhtml" media-type="application/xhtml+xml"/>'
+        "</manifest>"
+        '<spine><itemref idref="c1"/></spine></package>'
+    )
+
+    def _epub(self, tmp, body):
+        import zipfile as zf
+
+        p = pathlib.Path(tmp) / "t.epub"
+        with zf.ZipFile(p, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER)
+            z.writestr("content.opf", self.OPF)
+            z.writestr("text.xhtml", f"<html><body>{body}</body></html>")
+        return p
+
+    def test_empty_stub_flagged(self):
+        # a Bookmate-style stub: a single cover image, no body text
+        body = '<p><img src="cover.png"/></p>'
+        with tempfile.TemporaryDirectory() as tmp:
+            r = emptytext.scan(self._epub(tmp, body))
+        self.assertEqual(r["chars"], 0)
+        self.assertEqual(emptytext.classify(r, 2000, 20000), "EMPTY")
+
+    def test_full_text_ok(self):
+        body = "<p>" + ("Real prose that fills the book. " * 1000) + "</p>"
+        with tempfile.TemporaryDirectory() as tmp:
+            r = emptytext.scan(self._epub(tmp, body))
+        self.assertEqual(emptytext.classify(r, 2000, 20000), "OK")
+
+    def test_thin_is_advisory(self):
+        body = "<p>" + ("short story prose. " * 300) + "</p>"  # ~5700 chars
+        with tempfile.TemporaryDirectory() as tmp:
+            r = emptytext.scan(self._epub(tmp, body))
+        self.assertEqual(emptytext.classify(r, 2000, 20000), "THIN")

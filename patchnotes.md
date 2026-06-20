@@ -1,5 +1,15 @@
 # CalibreQuarry — Patch Notes
 
+## v3.0.3 (2026-06-20)
+
+### New Features
+
+**`scripts/audit_epub_emptytext.py`: find empty / no-body-text EPUBs.** Catches the failure mode every other audit misses: a content-less stub that still validates. The canonical case is the "Bookmate" export, where the archive holds only cover and promo images plus a tiny HTML placeholder, the OPF spine points only at that placeholder, and the book itself is absent. Such a file passes `epubcheck`, "repairs" clean in a structural repairer (its one referenced document is well-formed), and shows no foreign text to `audit_epub_content.py` because there is no text at all; the metadata looks perfect. The detector resolves the spine, drops `<script>`/`<style>`, strips tags, decodes entities, and counts the rendered characters: EMPTY (`<=2000`, `--min-chars`) is a real defect to re-source, THIN (`<20000`, `--thin-chars`) is advisory because a genuine short story or a publisher sample can also land there. A Bookmate origin is not itself a defect; most Bookmate exports carry their full text, so the flag is on empty content, not provenance. Library mode (DB-driven, `mode=ro`) and directory mode (vet downloads before import), mirroring the other two EPUB audits. First full-library run flagged four real defects (a Bujold stub, two image-only scans with no text layer, and a Draft2Digital sample of a full novel hiding in the THIN tier) against three genuinely short stories left alone.
+
+### Fixes
+
+**`spot_check.py` no longer flags OCaml and NCurses as case garble.** The intercaps allowlist (`_CASE_OK`) now includes `OCaml` and `NCurses` alongside `SQLite`, `QBasic`, and the rest, so legitimate library titles stop tripping the advisory case-garble heuristic.
+
 ## v3.0.2 (2026-06-14)
 
 ### New Features
