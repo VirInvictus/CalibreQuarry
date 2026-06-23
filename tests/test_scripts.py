@@ -478,3 +478,51 @@ class TestEmptyTextScan(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             r = emptytext.scan_emptytext(self._epub(tmp, body))
         self.assertEqual(emptytext.classify(r, 2000, 20000), "THIN")
+
+
+class TestPctDecode(unittest.TestCase):
+    def test_reserved_char(self):
+        self.assertEqual(
+            audit_epub._pct_decode("Text/CR%21X_split.html"), "Text/CR!X_split.html"
+        )
+
+    def test_multibyte_utf8(self):
+        # 'ö' is the two-byte run %C3%B6, which must decode together, not per-byte
+        self.assertEqual(audit_epub._pct_decode("a%C3%B6b"), "aöb")
+
+    def test_invalid_escape_left_literal(self):
+        self.assertEqual(audit_epub._pct_decode("50%-off"), "50%-off")
+
+
+class TestPercentEncodedSpine(unittest.TestCase):
+    """Regression: a spine doc whose archive name has a reserved char is
+    referenced percent-encoded in the OPF (Sigil/calibre emit '%21' for '!').
+    The href must be decoded before matching the namelist, or a text-full book
+    resolves to nothing and reads as EMPTY (the Serpent Sea false positive)."""
+
+    CONTAINER = TestEmptyTextScan.CONTAINER
+    OPF = (
+        '<package xmlns="http://www.idpf.org/2007/opf">'
+        "<manifest>"
+        '<item id="c1" href="Text/CR%21RT_split_001.html" media-type="application/xhtml+xml"/>'
+        "</manifest>"
+        '<spine><itemref idref="c1"/></spine></package>'
+    )
+
+    def _epub(self, tmp):
+        import zipfile as zf
+
+        p = pathlib.Path(tmp) / "t.epub"
+        body = "<p>" + ("Real prose that fills the book. " * 1000) + "</p>"
+        with zf.ZipFile(p, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER)
+            z.writestr("content.opf", self.OPF)
+            z.writestr("Text/CR!RT_split_001.html", f"<html><body>{body}</body></html>")
+        return p
+
+    def test_encoded_href_resolves_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = emptytext.scan_emptytext(self._epub(tmp))
+        self.assertGreater(r["chars"], 20000)
+        self.assertEqual(emptytext.classify(r, 2000, 20000), "OK")

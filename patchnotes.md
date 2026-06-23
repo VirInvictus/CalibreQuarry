@@ -1,5 +1,11 @@
 # CalibreQuarry — Patch Notes
 
+## v3.1.1 (2026-06-23)
+
+### Fixes
+
+**`audit_epub.py` now percent-decodes spine hrefs, fixing false EMPTY verdicts.** OPF manifest hrefs are IRIs, so a content document whose archive filename contains a reserved character (commonly `!`, written `%21`; Sigil and calibre emit these routinely) was matched against the raw zip namelist undecoded, failed to resolve, and dropped out of the spine. A text-full book whose every chapter file had such a name resolved to zero readable spine documents and was reported EMPTY: the exact false positive hit on Martha Wells's *The Serpent Sea* (every `split_NNN.html` was named `CR!RT...`). The resolver now decodes the percent-encoding (UTF-8, with multi-byte runs decoded together) and strips any `#fragment` before matching the namelist. Stdlib-only via a small `re`-based decoder (`_pct_decode`); no urllib dependency added. The fix lands in the shared spine resolver, so all three analyzers (`content`, `pagenumbers`, `emptytext`) benefit. Regression tests cover the decoder (reserved char, multi-byte UTF-8, invalid escape) and an end-to-end encoded-spine EPUB.
+
 ## v3.1.0 (2026-06-20)
 
 ### Changes

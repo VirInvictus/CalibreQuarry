@@ -79,6 +79,19 @@ RESET = "\033[0m" if USE_COLOR else ""
 CONTAINER_NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
 OPF_NS = "{http://www.idpf.org/2007/opf}"
 
+_PCT = re.compile(r"(?:%[0-9A-Fa-f]{2})+")
+
+
+def _pct_decode(href: str) -> str:
+    """Percent-decode an OPF href (UTF-8). OPF manifest hrefs are IRIs, so a
+    reserved char like '!' is written '%21' and a multi-byte char as a run of
+    %XX (e.g. 'ö' -> '%C3%B6'); each run must be decoded as bytes together.
+    Stdlib-only stand-in for urllib.parse.unquote; invalid escapes stay literal."""
+    return _PCT.sub(
+        lambda m: bytes.fromhex(m.group(0).replace("%", "")).decode("utf-8", "replace"),
+        href,
+    )
+
 
 class Book:
     """A decompressed EPUB: spine documents read once and shared by every
@@ -126,6 +139,11 @@ def load_book(path: Path) -> Book:
                 break
 
         def full(href: str) -> str:
+            # Decode the percent-encoded IRI and drop any #fragment before
+            # matching the archive namelist; otherwise a spine doc whose
+            # filename has a reserved char (e.g. '!' written '%21') resolves to
+            # nothing and the book reads as empty (false EMPTY verdict).
+            href = _pct_decode(href.split("#", 1)[0])
             return os.path.normpath(f"{base}/{href}" if base else href).replace(
                 "\\", "/"
             )
