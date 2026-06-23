@@ -1,5 +1,11 @@
 # CalibreQuarry — Patch Notes
 
+## v3.2.0 (2026-06-23)
+
+### New Features
+
+**`audit_epub.py emptytext` now flags partial / placeholder exports (new PARTIAL verdict).** The whole-book character count missed a failure mode: a DRM-locked or sample export where most chapters are an identical "content unavailable" placeholder while one or two real chapters carry enough text to clear the THIN floor, so the book validates, repairs clean, and reads as full-length to the old total-char check. The canonical case was a BookShout export of *Johannes Cabal: The Fear Institute*, where 15 of 17 chapters were the same 138-char "something went wrong loading... bookshout.com" stub; even after structural repair to zero epubcheck fatals it stayed a 2-chapter sample. The analyzer now flags PARTIAL when a known DRM-placeholder signature appears anywhere in the spine, or when the same short stub (12 to 600 chars) repeats across at least 3 spine documents and at least 30% of the spine. PARTIAL is a real defect (counts as FOUND, exit 1, needs re-sourcing), distinct from the advisory THIN. The false-positive guard is the per-document distribution: a well-made book full of small but DISTINCT section dividers does not trip it (only repeated-identical stubs do), so the three full novels in the batch that surfaced this stayed OK. Library and directory modes both report it.
+
 ## v3.1.1 (2026-06-23)
 
 ### Fixes

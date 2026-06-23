@@ -526,3 +526,66 @@ class TestPercentEncodedSpine(unittest.TestCase):
             r = emptytext.scan_emptytext(self._epub(tmp))
         self.assertGreater(r["chars"], 20000)
         self.assertEqual(emptytext.classify(r, 2000, 20000), "OK")
+
+
+class TestPlaceholderExport(unittest.TestCase):
+    """Partial / placeholder exports: most chapters are an identical stub (a DRM
+    'content unavailable' notice) while one or two real chapters push the
+    whole-book char count over the THIN floor, so the total-char check is fooled.
+    classify() must call these PARTIAL; a full book with many DISTINCT small
+    section dividers must stay OK (the false-positive guard)."""
+
+    CONTAINER = TestEmptyTextScan.CONTAINER
+
+    def _epub(self, tmp, docs):
+        # docs: list of (name, body_html); spine follows the list order
+        import zipfile as zf
+
+        manifest = "".join(
+            f'<item id="d{i}" href="{n}" media-type="application/xhtml+xml"/>'
+            for i, (n, _) in enumerate(docs)
+        )
+        spine = "".join(f'<itemref idref="d{i}"/>' for i in range(len(docs)))
+        opf = (
+            '<package xmlns="http://www.idpf.org/2007/opf">'
+            f"<manifest>{manifest}</manifest><spine>{spine}</spine></package>"
+        )
+        p = pathlib.Path(tmp) / "t.epub"
+        with zf.ZipFile(p, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER)
+            z.writestr("content.opf", opf)
+            for n, body in docs:
+                z.writestr(n, f"<html><body>{body}</body></html>")
+        return p
+
+    def test_drm_signature_is_partial(self):
+        real = "<p>" + ("Real prose. " * 3000) + "</p>"
+        stub = "<p>sorry something went wrong loading your content. Contact support@bookshout.com</p>"
+        docs = [("c0.xhtml", real)] + [(f"c{i}.xhtml", stub) for i in range(1, 12)]
+        with tempfile.TemporaryDirectory() as tmp:
+            r = emptytext.scan_emptytext(self._epub(tmp, docs))
+        self.assertGreater(r["chars"], 20000)  # would otherwise clear the THIN floor
+        self.assertTrue(r["placeholder_sig"])
+        self.assertEqual(emptytext.classify(r, 2000, 20000), "PARTIAL")
+
+    def test_repeated_stub_without_signature_is_partial(self):
+        real = "<p>" + ("Real prose. " * 3000) + "</p>"
+        stub = "<p>This chapter is not included in this edition preview.</p>"
+        docs = [("c0.xhtml", real)] + [(f"c{i}.xhtml", stub) for i in range(1, 12)]
+        with tempfile.TemporaryDirectory() as tmp:
+            r = emptytext.scan_emptytext(self._epub(tmp, docs))
+        self.assertFalse(r["placeholder_sig"])
+        self.assertGreaterEqual(r["stub_docs"], 3)
+        self.assertEqual(emptytext.classify(r, 2000, 20000), "PARTIAL")
+
+    def test_distinct_small_dividers_stay_ok(self):
+        real = "<p>" + ("Real prose. " * 3000) + "</p>"
+        docs = [("c0.xhtml", real)] + [
+            (f"d{i}.xhtml", f"<p>Part {i}: a distinct section divider heading.</p>")
+            for i in range(12)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            r = emptytext.scan_emptytext(self._epub(tmp, docs))
+        self.assertLess(r["stub_docs"], 3)  # distinct text, so no repeated stub
+        self.assertEqual(emptytext.classify(r, 2000, 20000), "OK")

@@ -530,38 +530,79 @@ DEFAULT_THIN_CHARS = 20000  # below this: THIN (advisory review)
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
 BOOKMATE_MARKERS = ("bookmate.css", "calibre_bookmarks.txt")
 
+# Partial / placeholder exports: a DRM-locked or sample export leaves most
+# chapters as the same tiny "content unavailable" placeholder, so the book
+# validates and clears the total-char floor on the strength of one or two real
+# chapters (the whole-book char count is fooled). Detect by a known signature,
+# or by the same short stub repeated across a large fraction of the spine.
+# Seen cases: BookShout ("something went wrong loading... bookshout.com").
+_PLACEHOLDER_SIG = re.compile(
+    r"bookshout|something went wrong loading|failed to load|"
+    r"(content|page|book)\s+(is\s+)?(not available|unavailable|could not be loaded)",
+    re.I,
+)
+PLACEHOLDER_STUB_MIN = 12  # ignore blank / trivial spine docs
+PLACEHOLDER_STUB_MAX = 600  # a placeholder stub is short
+PLACEHOLDER_MIN_REPEAT = 3  # the same stub across at least this many spine docs
+PLACEHOLDER_MIN_FRAC = 0.30  # ...and at least this fraction of the spine
+
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b.*?</\1>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
 
-def _visible_chars(html: str) -> int:
-    """Rendered character count: drop script/style, strip tags, decode entities,
-    collapse whitespace."""
+def _visible_text(html: str) -> str:
+    """Rendered text: drop script/style, strip tags, decode entities, collapse
+    whitespace."""
     from html import unescape
 
     html = _SCRIPT_STYLE_RE.sub(" ", html)
     text = _TAG_RE.sub(" ", html)
     text = unescape(text)
-    return len(_WS_RE.sub(" ", text).strip())
+    return _WS_RE.sub(" ", text).strip()
+
+
+def _visible_chars(html: str) -> int:
+    return len(_visible_text(html))
 
 
 def analyze_emptytext(book: Book) -> dict:
     """Count visible text across the (pre-read) spine and gather triage signals."""
-    chars = sum(_visible_chars(book.docs.get(doc, "")) for doc in book.spine)
+    texts = [_visible_text(book.docs.get(doc, "")) for doc in book.spine]
+    chars = sum(len(t) for t in texts)
     images = sum(1 for n in book.names if n.lower().endswith(IMAGE_EXTS))
     bookmate = any(any(m in n.lower() for m in BOOKMATE_MARKERS) for n in book.names)
+
+    # Partial / placeholder export: a known DRM signature anywhere, or the same
+    # short stub repeated across a large fraction of the spine (most chapters
+    # replaced by an identical "content unavailable" notice). Blank docs are
+    # excluded by PLACEHOLDER_STUB_MIN so well-made books full of small section
+    # dividers (each with distinct text) do not trip it.
+    sig = any(_PLACEHOLDER_SIG.search(t) for t in texts)
+    stubs = Counter(
+        t for t in texts if PLACEHOLDER_STUB_MIN <= len(t) <= PLACEHOLDER_STUB_MAX
+    )
+    stub_n = stubs.most_common(1)[0][1] if stubs else 0
+    spine_n = max(1, len(book.spine))
+    repeated = (
+        stub_n >= PLACEHOLDER_MIN_REPEAT and stub_n / spine_n >= PLACEHOLDER_MIN_FRAC
+    )
     return {
         "chars": chars,
         "spine_len": len(book.spine),
         "images": images,
         "bookmate": bookmate,
+        "placeholder": bool(sig or repeated),
+        "placeholder_sig": sig,
+        "stub_docs": stub_n,
     }
 
 
 def classify(r: dict, min_chars: int, thin_chars: int) -> str:
     if r["chars"] <= min_chars:
         return "EMPTY"
+    if r.get("placeholder"):
+        return "PARTIAL"
     if r["chars"] < thin_chars:
         return "THIN"
     return "OK"
@@ -571,6 +612,13 @@ def _empty_detail(r: dict) -> str:
     bits = [f"{r['chars']} chars", f"spine {r['spine_len']}", f"{r['images']} images"]
     if r["bookmate"]:
         bits.append("bookmate")
+    if r.get("placeholder"):
+        if r.get("placeholder_sig"):
+            bits.append("partial: DRM/placeholder signature")
+        else:
+            bits.append(
+                f"partial: {r['stub_docs']}/{r['spine_len']} identical stub docs"
+            )
     return ", ".join(bits)
 
 
@@ -635,10 +683,15 @@ def _pagenum_sections(found) -> int:
     return 0
 
 
-def _empty_sections(empty, thin) -> int:
+def _empty_sections(empty, partial, thin) -> int:
     if empty:
         print(f"{RED}{BOLD}EMPTY / NO TEXT ({len(empty)}){RESET}")
         for book_id, title, tag, r in sorted(empty, key=lambda x: x[3]["chars"]):
+            print(f"  {RED}#{book_id}{RESET} [{tag}] {title}\n    {_empty_detail(r)}")
+        print()
+    if partial:
+        print(f"{RED}{BOLD}PARTIAL / PLACEHOLDER EXPORT ({len(partial)}){RESET}")
+        for book_id, title, tag, r in sorted(partial, key=lambda x: x[3]["chars"]):
             print(f"  {RED}#{book_id}{RESET} [{tag}] {title}\n    {_empty_detail(r)}")
         print()
     if thin:
@@ -650,10 +703,9 @@ def _empty_sections(empty, thin) -> int:
                 f"  {YELLOW}#{book_id}{RESET} [{tag}] {title}\n    {_empty_detail(r)}"
             )
         print()
-    if empty:
-        print(
-            f"{RED}{BOLD}emptytext FOUND{RESET}: {len(empty)} empty file(s) need re-sourcing."
-        )
+    found = len(empty) + len(partial)
+    if found:
+        print(f"{RED}{BOLD}emptytext FOUND{RESET}: {found} file(s) need re-sourcing.")
         return 1
     suffix = f" ({len(thin)} thin, advisory)" if thin else ""
     print(f"{GREEN}{BOLD}emptytext CLEAN{RESET}: every EPUB has body text{suffix}.")
@@ -701,6 +753,7 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
     signature_hits: list[tuple] = []
     pagenum_found: list[tuple] = []
     empty_hits: list[tuple] = []
+    partial_hits: list[tuple] = []
     thin_hits: list[tuple] = []
     errors: list[tuple] = []
     scanned = 0
@@ -745,6 +798,8 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
             verdict = classify(r, min_chars, thin_chars)
             if verdict == "EMPTY":
                 empty_hits.append((book_id, title, tag, r))
+            elif verdict == "PARTIAL":
+                partial_hits.append((book_id, title, tag, r))
             elif verdict == "THIN":
                 thin_hits.append((book_id, title, tag, r))
 
@@ -761,7 +816,7 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
         elif key == "pagenumbers":
             rc |= _pagenum_sections(pagenum_found)
         else:
-            rc |= _empty_sections(empty_hits, thin_hits)
+            rc |= _empty_sections(empty_hits, partial_hits, thin_hits)
         if multi:
             print()
 
@@ -798,7 +853,7 @@ def _empty_dir(r: dict, min_chars: int, thin_chars: int) -> tuple[bool, str, lis
     verdict = classify(r, min_chars, thin_chars)
     if verdict == "OK":
         return False, "OK", []
-    return verdict == "EMPTY", verdict, [_empty_detail(r)]
+    return verdict in ("EMPTY", "PARTIAL"), verdict, [_empty_detail(r)]
 
 
 def run_directory(
