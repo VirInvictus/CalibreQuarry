@@ -3,8 +3,11 @@ and the per-format field diff. No DB or subprocess; the script lives in
 scripts/, so it is imported by path."""
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "reconcile_file_metadata",
@@ -206,6 +209,47 @@ class TestDiff(unittest.TestCase):
         fm = file_meta()
         del fm["series"]
         self.assertIn("series", rfm.diff_fields(db_record(), fm, "EPUB"))
+
+
+class TestPdfRepairCleanup(unittest.TestCase):
+    """embed_pdf must delete the `.~qpdf-orig` backup that `qpdf --replace-input`
+    leaves behind, so these full-size copies do not pile up in the library tree."""
+
+    def _run(self, exiftool_results, qpdf_returncode, make_backup=True):
+        with tempfile.TemporaryDirectory() as d:
+            pdf = Path(d) / "book.pdf"
+            pdf.write_bytes(b"%PDF-1.4\n")
+            backup = pdf.with_name(pdf.name + ".~qpdf-orig")
+            if make_backup:
+                backup.write_bytes(b"old broken copy")
+            with (
+                mock.patch.object(rfm, "_run_exiftool", side_effect=exiftool_results),
+                mock.patch.object(
+                    rfm.subprocess,
+                    "run",
+                    return_value=SimpleNamespace(returncode=qpdf_returncode, stderr=""),
+                ),
+            ):
+                ok = rfm.embed_pdf({"id": 1}, pdf, repair=True)
+            return ok, backup.exists()
+
+    def test_backup_removed_after_successful_repair(self):
+        results = [
+            SimpleNamespace(returncode=1, stderr="Error: Invalid xref table"),
+            SimpleNamespace(returncode=0, stderr=""),  # retry after qpdf succeeds
+        ]
+        ok, backup_exists = self._run(results, qpdf_returncode=0)
+        self.assertTrue(ok)
+        self.assertFalse(backup_exists)
+
+    def test_missing_backup_does_not_raise(self):
+        # qpdf may not leave a backup (or it was already gone); unlink must no-op.
+        results = [
+            SimpleNamespace(returncode=1, stderr="warning: file is damaged"),
+            SimpleNamespace(returncode=0, stderr=""),
+        ]
+        ok, _ = self._run(results, qpdf_returncode=3, make_backup=False)
+        self.assertTrue(ok)
 
 
 if __name__ == "__main__":

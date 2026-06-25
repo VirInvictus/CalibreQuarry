@@ -1,5 +1,11 @@
 # CalibreQuarry — Patch Notes
 
+## v3.2.1 (2026-06-25)
+
+### Fixes
+
+**`reconcile_file_metadata.py --repair-pdf` now deletes the `.~qpdf-orig` backup qpdf leaves behind.** `qpdf --replace-input`, used to rebuild a broken cross-reference table before re-embedding, writes the pre-repair original to `<name>.~qpdf-orig` beside the file and never removes it. Across many reconcile passes these full-size copies accumulated inside the library tree, which is the worst place for them: Calibre scans that tree, and each one is a complete duplicate PDF. A sweep of one library turned up 21 such files totalling 403 MB. `embed_pdf` now unlinks the backup as soon as qpdf reports success (return code 0 or 3), before retrying the embed; a missing backup is a no-op, so the change is safe whether or not qpdf wrote one. Regression tests mock the exiftool/qpdf boundary to assert the backup is removed after a successful repair and that an absent backup does not raise. Pre-existing strays from older runs are not cleaned by the tool; remove them once with `fd -H '\.~qpdf-orig$' "<library>" -X rm`.
+
 ## v3.2.0 (2026-06-23)
 
 ### New Features

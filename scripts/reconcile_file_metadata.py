@@ -29,6 +29,8 @@ With --apply (only the drifted books are touched):
     unchanged; exiftool wrote every PDF tested. A few PDFs have a damaged xref
     table that exiftool refuses; with `--repair-pdf` those are rebuilt in place
     by `qpdf --replace-input` (page count preserved) and the embed is retried.
+    The `.~qpdf-orig` backup qpdf leaves beside the file is deleted on success,
+    so these full-size copies do not accumulate in the (Calibre-scanned) tree.
   * DJVU: `djvused` sets the title and author (all DJVU's flat metadata holds);
     Calibre cannot embed DJVU.
 
@@ -538,7 +540,11 @@ def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
     """exiftool is more reliable than calibredb for PDF (calibredb silently
     leaves some PDFs unchanged). When `repair` is on and the write fails on a
     broken cross-reference table, rebuild it in place with `qpdf --replace-input`
-    (page count preserved) and retry once."""
+    (page count preserved) and retry once.
+
+    `qpdf --replace-input` leaves the pre-repair original beside the file as
+    `<name>.~qpdf-orig`; we delete it once qpdf succeeds, otherwise these
+    full-size copies accumulate in the library tree (Calibre scans that tree)."""
     res = _run_exiftool(db, path)
     if res.returncode == 0:
         return True
@@ -547,6 +553,11 @@ def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
             ["qpdf", "--replace-input", str(path)], capture_output=True, text=True
         )
         if qpdf.returncode in (0, 3):  # 0 = clean, 3 = rebuilt with warnings
+            backup = path.with_name(path.name + ".~qpdf-orig")
+            try:
+                backup.unlink()
+            except OSError:
+                pass
             retry = _run_exiftool(db, path)
             if retry.returncode == 0:
                 print(f"  {YELLOW}repaired xref{RESET} on {path.name} (qpdf), embedded")
