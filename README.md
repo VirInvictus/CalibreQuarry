@@ -449,6 +449,25 @@ python3 audit_epub.py emptytext ~/Downloads --min-chars 1000
 
 Exit codes: `0` clean (THIN is advisory), `1` a real problem (foreign content, baked page numbers, empty book) or a scan error, `2` setup error.
 
+### `audit_drm.py` — flag DRM-locked files across every format (read-only)
+
+Scans ebook files for DRM, which the metadata and structural audits never inspect. A DRM-locked file can pass `epubcheck`, report its page count, and even import, yet silently refuse to let its embedded metadata be rewritten (the case that prompted this tool was a PDF carrying a residual Adobe ADEPT `EBX_HANDLER` dictionary that `qpdf` and `pdfinfo` both called "not encrypted" while `exiftool` choked on it).
+
+The hard part is not detecting encryption; it is not crying wolf. Two benign things look like DRM to a crude check and are explicitly cleared:
+
+- **font obfuscation**: an EPUB may carry `META-INF/encryption.xml` that scrambles only its embedded fonts (the IDPF or Adobe font-mangling algorithms). That is not DRM. Obfuscated fonts are sometimes named `fonts/00001.dat` with no font extension, so an entry is cleared when it uses a font-scrambling algorithm *or* targets a font resource.
+- **permission flags**: a PDF may be "encrypted" with the Standard handler and an empty user password: it opens with no password and is only flagged against printing/copying. That is not a lock.
+
+Detection per format: EPUB (`rights.xml`/`sinf.xml`, or `encryption.xml` that encrypts content), PDF (a non-Standard security handler found by a streaming byte scan, so a residual/inactive dictionary is still caught; active Standard encryption is classed with `qpdf` into password-locked vs permissions-only), Kindle MOBI/AZW3 (the record-0 encryption-type field), DJVU (no DRM scheme, reported N/A). It opens `metadata.db` strictly `mode=ro`.
+
+```bash
+python3 audit_drm.py                  # scan every file in the library (from the library dir)
+python3 audit_drm.py ~/Downloads      # vet loose files before importing them
+python3 audit_drm.py --csv drm.csv    # also write a CSV audit (id,status,kind,detail,path)
+```
+
+Exit codes: `0` clean (no DRM; font obfuscation and permission flags are not DRM), `1` DRM found or a scan error, `2` setup error.
+
 ### `validate_metadata.py` — lint database integrity (read-only)
 
 A linter for `metadata.db` with two layers. It is the database-side companion to `audit_epub.py` (which checks book *content*), and it is strictly `mode=ro`.

@@ -1,5 +1,15 @@
 # CalibreQuarry — Patch Notes
 
+## v3.3.0 (2026-06-30)
+
+### New Features
+
+**`audit_drm.py`: a cross-format DRM scanner (read-only).** The metadata and structural audits never look at encryption, so a DRM-locked file can pass `epubcheck`, report its page count, and even import, yet silently refuse to let its embedded metadata be rewritten. The case that prompted this was a z-library PDF carrying a residual Adobe ADEPT `EBX_HANDLER` dictionary that `qpdf --check` and `pdfinfo` both reported as "not encrypted" while `exiftool` choked on it, failing the reconcile embed. The new script classifies EPUB, PDF, and Kindle (MOBI/AZW3) files; DJVU has no DRM scheme and is reported N/A. It runs in library mode (formats and paths from `metadata.db`, opened strictly `mode=ro`) or directory mode (a recursive scan of loose files before import, for the pre-import battery), with the usual exit codes (0 clean, 1 DRM found or scan error, 2 setup error).
+
+The design priority was not detecting encryption; it was not crying wolf. Two benign things look like DRM to a crude check and are explicitly cleared. Font obfuscation: an EPUB `META-INF/encryption.xml` that scrambles only the embedded fonts (the IDPF or Adobe `#RC` algorithms) is not a content lock; because publishers often name obfuscated fonts `fonts/00001.dat` with no font extension, an entry is cleared when it uses a font-scrambling algorithm OR targets a font resource (extension or a `fonts/` path), which an algorithm-only or extension-only check gets wrong. Permission flags: a PDF "encrypted" with the Standard handler and an empty user password opens with no password and is only flagged against printing or copying, so it is classed with `qpdf` as PERMISSIONS, not a lock. Real DRM is `rights.xml` (Adobe ADEPT) or `sinf.xml` (Apple FairPlay) in an EPUB, a content-encrypting `encryption.xml`, a non-Standard PDF security handler found by a streaming byte scan (so a residual or inactive dictionary is still caught, which is exactly the Irodov case), a password-locked PDF, or a non-zero Mobipocket encryption-type field.
+
+The first whole-library sweep (6,651 files) found 50 DRM-locked files (49 Adobe ADEPT, 1 Apple FairPlay), with 135 benign font-obfuscation/permission cases correctly cleared and one early false positive fixed before release: five EPUBs whose Adobe `#RC` font obfuscation targets `fonts/*.dat` were initially misread as encrypted content, which is what drove the algorithm-or-target rule above. Ships with a unittest suite (`tests/test_audit_drm.py`, 19 cases) building zip, PDF-byte, and PalmDB fixtures for each format and verdict.
+
 ## v3.2.1 (2026-06-25)
 
 ### Fixes
