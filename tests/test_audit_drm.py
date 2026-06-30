@@ -108,15 +108,41 @@ class EpubTests(unittest.TestCase):
         p = _epub(self.tmp, "aes.epub", {"META-INF/encryption.xml": enc})
         self.assertEqual(drm.classify_epub(p).status, drm.DRM)
 
-    def test_rights_xml_is_drm(self):
-        p = _epub(self.tmp, "adept.epub", {"META-INF/rights.xml": "<adept/>"})
+    def test_residual_rights_marker_without_encryption_is_benign(self):
+        # an ADEPT rights token left in an archive whose content is not
+        # encrypted: the book was freed, reads and embeds fine. Not DRM.
+        p = _epub(self.tmp, "adept-residual.epub", {"META-INF/rights.xml": "<adept/>"})
+        v = drm.classify_epub(p)
+        self.assertEqual(v.status, drm.BENIGN)
+        self.assertEqual(v.kind, "residual DRM marker")
+
+    def test_residual_sinf_marker_without_encryption_is_benign(self):
+        # the Helsreach case: a FairPlay sinf with no encryption.xml, content
+        # plain readable XHTML. Residual marker, not a lock.
+        p = _epub(self.tmp, "fairplay-residual.epub", {"META-INF/sinf.xml": "<sinf/>"})
+        self.assertEqual(drm.classify_epub(p).status, drm.BENIGN)
+
+    def test_adept_with_encrypted_content_is_drm(self):
+        enc = _enc_xml("http://www.w3.org/2001/04/xmlenc#aes128-cbc", "OEBPS/ch1.xhtml")
+        p = _epub(
+            self.tmp,
+            "adept.epub",
+            {"META-INF/rights.xml": "<adept/>", "META-INF/encryption.xml": enc},
+        )
         v = drm.classify_epub(p)
         self.assertEqual(v.status, drm.DRM)
         self.assertEqual(v.kind, "Adobe ADEPT")
 
-    def test_sinf_is_drm(self):
-        p = _epub(self.tmp, "fairplay.epub", {"META-INF/sinf.xml": "<sinf/>"})
-        self.assertEqual(drm.classify_epub(p).status, drm.DRM)
+    def test_fairplay_with_encrypted_content_is_drm(self):
+        enc = _enc_xml("http://www.w3.org/2001/04/xmlenc#aes256-cbc", "OEBPS/ch1.xhtml")
+        p = _epub(
+            self.tmp,
+            "fairplay.epub",
+            {"META-INF/sinf.xml": "<sinf/>", "META-INF/encryption.xml": enc},
+        )
+        v = drm.classify_epub(p)
+        self.assertEqual(v.status, drm.DRM)
+        self.assertEqual(v.kind, "Apple FairPlay")
 
     def test_unparseable_encryption_xml_naming_content_is_drm(self):
         p = _epub(

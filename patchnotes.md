@@ -1,5 +1,11 @@
 # CalibreQuarry — Patch Notes
 
+## v3.3.1 (2026-06-30)
+
+### Fixes
+
+**`audit_drm.py` no longer flags a freed EPUB on a leftover marker file.** v3.3.0 treated the mere presence of `META-INF/rights.xml` (Adobe ADEPT) or `sinf.xml` (Apple FairPlay) as DRM. But those are token/voucher files, not the lock itself: the actual lock is content encryption, which a DRM'd EPUB records in `encryption.xml` against its XHTML. When a book is freed, the content is decrypted but the marker can stay behind, so a bare marker with no content encryption is a residual artifact, not a locked book; it reads and embeds fine. The first whole-library sweep surfaced exactly one such case (Warhammer *Helsreach*: a `sinf.xml`, no `encryption.xml`, 37 plain-XHTML chapters), which is the same residual-artifact shape as the PDF that motivated the tool. EPUB classification now keys on actual content encryption (`encryption.xml` with non-font entries) and names the scheme from whichever marker is present; a standalone marker is reported BENIGN as a "residual DRM marker". PDFs are unchanged: a residual handler dictionary there still breaks metadata embedding, so it is still flagged. With this fix the library's real DRM count is 48 (all recoverable PDF ADEPT dictionaries), with the lone FairPlay EPUB correctly cleared. Tests extended to 21 cases (residual markers benign; markers plus encrypted content still DRM).
+
 ## v3.3.0 (2026-06-30)
 
 ### New Features

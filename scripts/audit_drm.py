@@ -139,15 +139,33 @@ def classify_epub(path: Path) -> Verdict:
     try:
         with zipfile.ZipFile(path) as z:
             names = set(z.namelist())
-            # Adobe ADEPT rights token / Apple FairPlay sinf: unambiguous DRM.
-            if "META-INF/rights.xml" in names:
-                return Verdict(DRM, "Adobe ADEPT", "META-INF/rights.xml present")
-            if any(n.lower().endswith("sinf.xml") for n in names):
-                return Verdict(DRM, "Apple FairPlay", "sinf.xml present")
-            if "META-INF/encryption.xml" not in names:
-                return Verdict(CLEAN)
-            raw = z.read("META-INF/encryption.xml")
-            return _classify_encryption_xml(raw)
+            has_rights = "META-INF/rights.xml" in names
+            has_sinf = any(n.lower().endswith("sinf.xml") for n in names)
+            # The lock is content encryption, not the marker files. An ADEPT
+            # rights token or a FairPlay sinf left in an archive whose content
+            # is NOT encrypted is a residual marker (the book was freed); it
+            # reads fine and embeds fine, so it is not DRM. Decide on whether
+            # content is actually encrypted, then name the scheme.
+            enc = None
+            if "META-INF/encryption.xml" in names:
+                enc = _classify_encryption_xml(z.read("META-INF/encryption.xml"))
+            if enc is not None and enc.status == DRM:
+                scheme = (
+                    "Adobe ADEPT"
+                    if has_rights
+                    else ("Apple FairPlay" if has_sinf else enc.kind)
+                )
+                return Verdict(DRM, scheme, enc.detail)
+            if has_rights or has_sinf:
+                marker = "Adobe ADEPT" if has_rights else "Apple FairPlay"
+                return Verdict(
+                    BENIGN,
+                    "residual DRM marker",
+                    f"{marker} marker present, content not encrypted",
+                )
+            if enc is not None:
+                return enc  # font-only obfuscation (benign) or empty
+            return Verdict(CLEAN)
     except zipfile.BadZipFile as e:
         return Verdict(ERROR, "unreadable", f"bad zip: {e}")
     except Exception as e:  # noqa: BLE001 - report, don't crash the scan
