@@ -1,5 +1,41 @@
 # CalibreQuarry — Patch Notes
 
+## v3.5.0 (2026-07-02)
+
+The persistent-curses-screen rework, closing the last item in the roadmap's "Port from the Lattice TUI audit" section (Lattice T7, shipped there as v4.10.0). Purely a lifecycle change; no menu, prompt, or mode behavior differs.
+
+### Changes
+
+**One curses screen per session.** Every menu, prompt, pause, and pager used to be its own `curses.wrapper` init/teardown, so multi-prompt flows visibly flashed to the shell between widgets. `interactive_menu` now opens the screen once and every widget draws into it (`_with_screen`); a widget invoked outside a session still gets its own one-shot wrapper, so nothing changes for direct callers. `_reset_terminal` becomes a no-op while the session screen lives (running `stty sane` under curses would undo `cbreak`/`noecho` beneath it). Measured under a pty: a full menu, prompt, Esc-cancel, mode, pager, quit session enters the terminal's alternate screen exactly once, where the same flow used to enter it once per widget.
+
+**One degradation path.** A curses failure at session startup or mid-session (unknown terminal, capability lost) funnels through `_degrade_to_text`: the screen is suspended once and the rest of the session runs the text fallback. All the v3.3.2 guarantees hold (no stuck terminal, no silent exit 0); a pager that dies mid-display now also degrades and prints the mode's output as plain text instead of eating it. Ctrl-C at the menu (curses or text fallback alike) ends the session cleanly with exit code 130 and the screen restored, while EOF at the text menu stays a quiet Quit.
+
+`tests/test_tui.py` grows to 29 cases; the session lifecycle was additionally verified end-to-end under a pty (alternate-screen count, degraded startup on an unknown `TERM`, and a full cancel-then-run flow against the live library).
+
+## v3.4.0 (2026-07-02)
+
+The rest of the Lattice TUI audit ports (roadmap section "Port from the Lattice TUI audit": T2, T4, T6, and the fallback-menu generation). Lattice shipped all of these in its v4.9.0; this release keeps the two shared curses skeletons aligned.
+
+### Changes
+
+**Esc in a prompt now cancels back to the menu instead of accepting the default (behavior change, port of Lattice T2).** In menus Esc has always meant back; in prompts it meant "accept the default", so mis-selecting a mode and mashing Esc launched it with all defaults. A cancelled prompt now unwinds the whole prompt chain back to the menu with nothing launched; bare Enter still accepts the default, and Ctrl-C or EOF at a prompt cancels the same way (the text-fallback prompts used to exit the whole program on Ctrl-C). The hint bar now reads "Enter Accept, Esc Cancel, Ctrl-U Clear". Cancelling the first-run prompt exits without persisting anything (exit code 1, the CLI's no-database signal, so unattended runs never read as success), and cancelling "Change database path" leaves the saved path untouched.
+
+### Fixes
+
+**Output-file prompts expand `~` (port of Lattice T4).** `~/reports/x.txt` used to create a literal `./~/reports/` directory, since the TUI has no shell to expand it. Every output path the TUI collects now goes through a shared `_prompt_out()` that expands the tilde but does not absolutize, so relative paths keep meaning the current directory. The results pager also gains a footer naming the resolved absolute path, so "where did my report go" answers itself; the footer is suppressed when the mode errored or was cancelled, so it never claims a file that was not written.
+
+**The no-curses fallback menu is generated from the same sections the arrow-key menu renders (port of Lattice's v4.8.1 fix).** The numbered listing and its key map were hand-maintained twins of `_MAIN_SECTIONS`, exactly the pattern that silently desynced in Lattice (fallback keys dispatching the wrong modes). `_build_fallback` now derives both from the sections, the word aliases ("catalog", "stats", ...) stay as an explicit supplemental dict, and tests pin that every entry is reachable with its number matching its label.
+
+**Widget paper cuts (port of Lattice T6).** A bad answer at a number prompt re-asks with a "not a number, try again" note instead of silently using the default. On terminals shorter than the menu, the box shifts so the selected row stays visible instead of clipping blind below the bottom edge. The pager gains horizontal panning (arrow keys or h/l) with ellipsis markers on lines that continue off-screen, computes its width once instead of on every keypress, and keeps the scroll position valid across resizes. Ctrl-U clears a prompt field, so editing a long pre-filled path no longer means backspacing through all of it. And the export format prompt validates its answer against json/csv/ai, re-asking instead of accepting any string.
+
+`tests/test_tui.py` grows from 7 to 24 cases, pinning all of the above.
+
+## v3.3.2 (2026-07-01)
+
+### Fixes
+
+**TUI hardening ported from the Lattice TUI audit (2026-07-01).** `cquarry/tui.py` shares its curses skeleton with Lattice's; the two carry-overs from that audit's high-severity findings land here (roadmap section "Port from the Lattice TUI audit", items H7 and H6's exception-boundary half). First: a curses init failure no longer reads as Quit. On capability-poor terminals (`TERM=vt100`, dumb terminals) the color setup or `curs_set` raised `curses.error`, which the menu loop treated as the user quitting, so the TUI silently exited 0 even though the text fallback menu works. Cosmetic capabilities are now non-fatal (a monochrome TUI beats a dead one), and a real `curses.wrapper` failure flips the session to the text fallback menu instead of exiting. Second: `_run_with_capture` now has an exception boundary. A mode error used to escape as a raw traceback and lose the captured output; it is now paged under an `[Error]` heading with the traceback plus whatever was captured, and Ctrl-C pages a `[Cancelled]` notice the same way. New `tests/test_tui.py` (7 cases) pins both behaviors. The remaining Lattice carry-overs (Esc-cancels-prompt, `~` expansion in output prompts, generated fallback menu) stay on the roadmap until their Lattice counterparts land.
+
 ## v3.3.1 (2026-06-30)
 
 ### Fixes
