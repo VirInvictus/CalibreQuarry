@@ -431,23 +431,24 @@ Exit codes: `0` compressed/verified (or clean inspect), `1` aborted (no shrink, 
 
 ### `audit_epub.py` — flag EPUB content problems (read-only)
 
-Reads the actual body text of EPUBs to catch problems metadata and structural validators cannot see. Three analyzers in one tool, selected by subcommand:
+Reads the actual body text of EPUBs to catch problems metadata and structural validators cannot see. Four analyzers in one tool, selected by subcommand:
 
 - `content` — editions whose body is in the wrong language (declared `eng` but actually Portuguese, Russian, etc.) and an injected foreign-language ad-notice signature. Votes a language across stopword sets and counts non-Latin script.
 - `pagenumbers` — print page numbers (and running headers) a bad PDF/OCR conversion captured as paragraphs instead of real pagination, so they reflow into the middle of a sentence. Flags a number only when it interrupts prose (a lowercase continuation, a word split across it, or a repeated running header beside it), leaving legitimate chapter/section numbers and endnote markers alone. Also surfaces piracy watermarks and bad OCR scans.
 - `emptytext` — content-less stubs (the "Bookmate" export is cover/promo images plus a tiny HTML placeholder, the spine pointing only at the placeholder, the book itself absent). Such a file passes `epubcheck` and a structural repairer because its one referenced doc is valid; only counting rendered characters catches it. EMPTY (`<=2000` chars, `--min-chars`) is a real defect; THIN (`<20000`, `--thin-chars`) is advisory.
-- `all` — runs all three in a single decompression pass per book (the expensive part is decompression, so this is much faster than three separate runs).
+- `ocr` — OCR/conversion-damaged prose: paragraphs split mid-sentence at line-wrap or page-break positions ("could just make out the shape" / "of another boat"). Separates damage from deliberately unpunctuated literary style by *where* the fragment ends (damage lands on function words; style breaks at clause boundaries) and clears legitimate idioms (figure-interrupted paragraphs, display math, rendered indexes, epistolary sign-offs, block quotations). Also reports dictionary-free side signals: en-dashes inside words, doubled opening quotes, and space-stripped proper nouns (`AnkhMorpork` beside `Ankh-Morpork`). Character-substitution errors ("sonic" for "some") are out of scope; catching those needs a wordlist.
+- `all` — runs all four in a single decompression pass per book (the expensive part is decompression, so this is much faster than four separate runs).
 
-It opens `metadata.db` strictly `mode=ro`. (Merged in v3.1.0 from the former `audit_epub_content.py` / `audit_epub_pagenumbers.py` / `audit_epub_emptytext.py`, which shared the same spine resolution, dual-mode, and exit codes.)
+It opens `metadata.db` strictly `mode=ro`. (Merged in v3.1.0 from the former `audit_epub_content.py` / `audit_epub_pagenumbers.py` / `audit_epub_emptytext.py`, which shared the same spine resolution, dual-mode, and exit codes; the `ocr` analyzer was added in v3.6.0.)
 
 ```bash
-python3 audit_epub.py all                 # all three audits, whole library (from the library dir)
+python3 audit_epub.py all                 # all four audits, whole library (from the library dir)
 python3 audit_epub.py content             # one audit, whole library
 python3 audit_epub.py all ~/Downloads     # vet loose .epub files before importing them
 python3 audit_epub.py emptytext ~/Downloads --min-chars 1000
 ```
 
-Exit codes: `0` clean (THIN is advisory), `1` a real problem (foreign content, baked page numbers, empty book) or a scan error, `2` setup error.
+Exit codes: `0` clean (THIN is advisory), `1` a real problem (foreign content, baked page numbers, empty book, OCR-damaged prose) or a scan error, `2` setup error.
 
 ### `audit_drm.py` — flag DRM-locked files across every format (read-only)
 

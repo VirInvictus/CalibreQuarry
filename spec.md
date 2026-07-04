@@ -113,12 +113,15 @@ These guarantees apply to the `cquarry` package only. The companion scripts in Â
 
 ## 5. Companion Scripts
 
-The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry` package and do **not** share its read-only or import guarantees. They are stdlib-only Python but shell out to external tools, and one of them writes. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
+The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry` package and do **not** share its read-only or import guarantees. They are stdlib-only Python but shell out to external tools, and two of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
 
 | Script | What it does | Writes? | External tools |
 |--------|--------------|---------|----------------|
 | `compress_pdf.py` | Shrinks an oversize PDF via Ghostscript with verify-or-rollback; syncs the new size to `data.uncompressed_size` (and the Count Pages `books_pages_link.format_size` if present) so Calibre isn't stale | **Yes** (replaces the PDF; updates `metadata.db`) | `gs`, `pdfinfo`/`pdfimages`/`pdfdetach` (poppler) |
-| `audit_epub_content.py` | Reads EPUB text to flag wrong-language editions and injected foreign-language notices that metadata cannot catch | No (`metadata.db` opened `mode=ro`) | none |
-| `audit_epub_pagenumbers.py` | Reads EPUB text to flag print page numbers baked into the body (bad PDF/OCR conversions) that reflow mid-sentence | No (`metadata.db` opened `mode=ro`) | none |
+| `audit_epub.py` | Reads EPUB body text to flag content problems metadata cannot catch: wrong-language editions and injected foreign notices (`content`), print page numbers baked into the flow (`pagenumbers`), empty/placeholder stubs (`emptytext`), and OCR/conversion-damaged prose (`ocr`); `all` runs the four analyzers in one decompression pass | No (`metadata.db` opened `mode=ro`) | none |
+| `audit_drm.py` | Cross-format DRM scanner (EPUB/PDF/MOBI/AZW3; DJVU N/A) that clears benign look-alikes (font obfuscation, PDF permission flags) and catches residual handler dictionaries by streaming byte scan | No (`metadata.db` opened `mode=ro`) | `qpdf` (optional, to class Standard-encrypted PDFs) |
+| `validate_metadata.py` | Integrity linter for `metadata.db` (missing language, duplicate ISBNs, junk identifiers, orphan links) plus an optional taxonomy-driven opinionated layer | No (`metadata.db` opened `mode=ro`) | none |
+| `spot_check.py` | Randomized metadata + file-integrity audit: samples N random books and checks field quality (title corruption, junk authors, mojibake, stub comments) and file contents (EPUB archive/spine/text, PDF and DJVU page counts) | No (`metadata.db` opened `mode=ro`) | `pdfinfo`, `djvused` (both optional) |
+| `reconcile_file_metadata.py` | Diffs the curated `metadata.db` against each file's embedded metadata; `--apply` embeds the DB values back into drifted files, and `--repair-pdf` rebuilds a broken PDF xref table so the embed can succeed | **Yes** with `--apply` (rewrites book files; never `metadata.db`) | `calibredb`, `exiftool`, `djvused`, `qpdf` (`--repair-pdf`) |
 
-`compress_pdf.py` is the reason these live outside the package: it has write capability, which the `cquarry` core forbids. Keeping it adjacent but separate preserves the toolkit's read-only promise.
+Write capability is the reason these live outside the package: `compress_pdf.py` and `reconcile_file_metadata.py --apply` mutate things, which the `cquarry` core forbids. Keeping them adjacent but separate preserves the toolkit's read-only promise.

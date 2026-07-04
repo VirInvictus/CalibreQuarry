@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 audit_epub.py: read the actual text of every EPUB and flag content problems that
-metadata and structural validators cannot see. Three analyzers, one tool:
+metadata and structural validators cannot see. Four analyzers, one tool:
 
   content      non-English bodies (wrong-language editions) and injected
                foreign-language ad-notices (declared lang=eng, body Portuguese
@@ -13,13 +13,20 @@ metadata and structural validators cannot see. Three analyzers, one tool:
                plus a tiny HTML placeholder, the spine pointing only at the
                placeholder, the book itself absent (passes epubcheck and a
                structural repairer because the one referenced doc is valid)
-  all          run all three in a SINGLE decompression pass per book
+  ocr          OCR/conversion-damaged prose: paragraphs split mid-sentence
+               ("could just make out the shape" / "of another boat"), plus
+               dictionary-free side signals (en-dashes inside words, doubled
+               opening quotes, space-stripped proper nouns recurring alongside
+               their hyphenated form). Character-substitution errors ("sonic"
+               for "some") are OUT OF SCOPE: catching those needs a wordlist,
+               and this tool is stdlib-only by contract.
+  all          run all four in a SINGLE decompression pass per book
 
 This merges the former audit_epub_content.py / audit_epub_pagenumbers.py /
 audit_epub_emptytext.py: they shared the same spine resolution, library/
 directory dual-mode, read-only contract, and exit codes, and differed only in
 the per-book verdict. `all` opens each EPUB once and feeds the decoded spine to
-all three analyzers (the expensive part is decompression, so this is a real
+all four analyzers (the expensive part is decompression, so this is a real
 win at library scale).
 
 Companion to validate_library.py / validate_metadata.py (which audit metadata)
@@ -38,8 +45,8 @@ workflow for checking downloads before they enter the library.
 
 Exit codes:
     0 = clean (THIN empty-text hits are advisory and do not fail the run)
-    1 = a real problem found (foreign content, baked page numbers, empty book)
-        or a scan error
+    1 = a real problem found (foreign content, baked page numbers, empty book,
+        OCR-damaged prose) or a scan error
     2 = setup error (missing DB / library, or no .epub files in directory)
 """
 
@@ -377,7 +384,15 @@ def number_value(text: str) -> int | None:
 
 class _Blocks:
     """Minimal block extractor over html.parser; tracks the innermost block tag
-    so each emitted (tag, text) pair is one rendered block in reading order."""
+    so each emitted (tag, text) pair is one rendered block in reading order.
+
+    img_before[i] is True when an image (img/svg) appeared between the last
+    text before blocks[i] and blocks[i]'s own first text. Used by the ocr
+    analyzer to clear paragraphs interrupted by a rendered figure (an inline
+    formula or card diagram reads as a mid-sentence split otherwise).
+    in_quote[i] is True when blocks[i] was emitted inside a <blockquote>
+    (a display quotation legitimately starts and ends mid-sentence). Both are
+    ocr-only; pagenumbers ignores them."""
 
     def __init__(self):
         from html.parser import HTMLParser
@@ -389,9 +404,14 @@ class _Blocks:
                 super().__init__(convert_charrefs=True)
                 self.stack: list[str] = []
                 self.buf: list[str] = []
+                self.img_gap = False  # image seen since the last text content
+                self.block_img = False  # img_gap captured at this block's first text
+                self.has_text = False
 
             def handle_starttag(self, tag, attrs):
                 del attrs
+                if tag in ("img", "image", "svg"):
+                    self.img_gap = True
                 if tag in BLOCK_TAGS:
                     outer._flush(self)
                     self.stack.append(tag)
@@ -403,9 +423,16 @@ class _Blocks:
                         self.stack.pop()
 
             def handle_data(self, data):
+                if data.strip():
+                    if not self.has_text:
+                        self.block_img = self.img_gap
+                        self.has_text = True
+                    self.img_gap = False
                 self.buf.append(data)
 
         self.blocks: list[tuple[str, str]] = []
+        self.img_before: list[bool] = []
+        self.in_quote: list[bool] = []
         self._parser = _P()
 
     def _flush(self, parser):
@@ -414,6 +441,10 @@ class _Blocks:
         if text:
             tag = parser.stack[-1] if parser.stack else "?"
             self.blocks.append((tag, text))
+            self.img_before.append(parser.block_img)
+            self.in_quote.append("blockquote" in parser.stack)
+        parser.has_text = False
+        parser.block_img = False
 
     def feed(self, html: str):
         self._parser.feed(html)
@@ -627,6 +658,200 @@ def scan_emptytext(path: Path) -> dict:
 
 
 # ----------------------------------------------------------------------------
+# Analyzer: ocr (OCR/conversion-damaged prose)
+# ----------------------------------------------------------------------------
+
+# Tuning, validated by hand against a 4,605-EPUB library: every book passing
+# the joint gate was inspected via its split examples. At these values the
+# detector flagged 105 books; 104 were confirmed damage (line-wrap and
+# page-break splits, double-spaced OCR text, running headers wedged into
+# sentences), with one borderline residue (a book whose display quotes are
+# publisher-styled plain <p>s, indistinguishable from damage without CSS).
+# The motivating case: a damaged Jingo EPUB measured 80 mid-sentence splits
+# where a clean edition of the same text measured 0.
+#
+# Known misses, by design: damage whose signature is word TRUNCATION ("which
+# bel[ong] to western Spain") or whitespace corruption rather than paragraph
+# splitting, and low-grade split damage that lands in the same func_frac band
+# as literary stream-of-consciousness (Gulag Archipelago at 0.243 vs. The
+# Sound and the Fury at 0.242: no threshold separates them).
+OCR_MIN_PARAS = 50  # below this the rate is noise, not a signal
+OCR_MIN_SPLITS = 10  # absolute floor; a handful of splits is coincidence
+OCR_FLAG_RATE = 0.010  # splits per prose paragraph; FLAG at or above
+OCR_FUNC_MIN = 0.25  # see func_frac below
+
+# A split only counts when one side is a substantial prose block (reuses the
+# pagenumbers notion of prose), so verse and dialogue beats -- short lines that
+# legitimately end unpunctuated and start lowercase -- do not accumulate.
+_OCR_PROSE_MIN = PROSE_MIN
+
+# Residual false-positive guards, each from a class found in the validation
+# sweep. A back-of-book index rendered as <p> blocks reads as a wall of
+# unpunctuated lowercase runs ("See also" is its near-universal signature).
+# An epistolary sign-off is a dangling sub-40-char fragment with no terminal
+# punctuation ("in which hope I rest," / "respected sir,"). A display equation
+# set as text is mostly non-alphabetic ("the equation" / "y2 + y = x3 - x ?")
+# and renders fine on its own line.
+_OCR_INDEX_RE = re.compile(r"\bSee also\b")
+_OCR_INDEX_MIN_BLOCKS = 3
+_OCR_TAIL_MIN = 40
+_OCR_TERMINALS = ".!?\"'’”…)"
+_OCR_ALPHA_MIN = 0.5
+
+
+def _alpha_density(text: str) -> float:
+    chars = [c for c in text if not c.isspace()]
+    if not chars:
+        return 0.0
+    return sum(c.isalpha() for c in chars) / len(chars)
+
+
+# The style-vs-damage discriminator. Deliberately unpunctuated literary prose
+# (Fosse's Septology, Evaristo's "Girl, Woman, Other", Kingsnorth's "The Wake")
+# racks up enormous split rates, but its paragraphs end at CLAUSE boundaries;
+# conversion damage splits at line-wrap/page-break positions, so the fragment
+# ends on a function word ("sat the disembodied" / "heads who were..."). On the
+# reference library, style books measured func_frac <= 0.11 and every hand-
+# confirmed damage case >= 0.26, so 0.25 separates cleanly. A small closed
+# function-word set, same spirit as the content analyzer's stopword votes --
+# not a dictionary.
+OCR_FUNC_WORDS = frozenset(
+    "the a an and or but of to in on at by with for from as that this these "
+    "those his her their its my your our was were is are be been being had has "
+    "have he she they it we you i not no so if when than then who whom which "
+    "into onto over under between through during before after above below "
+    "up down out off very more most some any each every either neither".split()
+)
+
+# En-dash embedded inside a word: OCR reads a hyphen as U+2013 ("bottom–feedin'").
+EN_DASH_WORD_RE = re.compile(r"[A-Za-z]–[A-Za-z]")
+# Doubled opening quote: an opening single quote re-recognized before a
+# dialogue contraction ("' 'Course"). Straight or curly. The first quote must
+# follow whitespace: a closing quote hugs the word before it, so this stays
+# blind to legitimate close-then-open sequences ("...said.' 'No...") that
+# single-quote-dialogue books produce constantly.
+DOUBLED_QUOTE_RE = re.compile(r"(?<=\s)['‘]\s+['‘’]\w")
+# A space-stripped proper-noun compound: CamelCase with 2+ humps
+# ("AnkhMorpork"); only damage when the hyphenated form also appears.
+_CAMEL_RE = re.compile(r"\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b")
+_HUMP_RE = re.compile(r"(?<=[a-z])(?=[A-Z])")
+
+
+def analyze_ocr(book: Book) -> dict:
+    """Score OCR/conversion damage over the (pre-read) spine, skipping nav.
+
+    Primary signal: mid-sentence paragraph splits -- a prose block ends without
+    terminal punctuation (last char a lowercase letter or comma) and the next
+    prose block starts lowercase. Splits are only paired within one spine doc;
+    chapter-file boundaries never produce a pair, and a pair interrupted by a
+    rendered image (inline formula, card diagram) is cleared."""
+    paras = 0
+    splits = 0
+    func_splits = 0
+    examples: list[dict] = []
+    for doc in book.spine:
+        if book.nav and doc == book.nav:
+            continue
+        parser = _Blocks()
+        try:
+            parser.feed(book.docs.get(doc, ""))
+        except Exception:
+            continue
+        li = sum(1 for t, _ in parser.blocks if t == "li")
+        # a doc that is mostly <li> is a TOC / page-list, not body text
+        if parser.blocks and li / len(parser.blocks) > 0.5:
+            continue
+        # a back-of-book index rendered as <p> blocks is not body text either
+        if (
+            sum(1 for _, t in parser.blocks if _OCR_INDEX_RE.search(t))
+            >= _OCR_INDEX_MIN_BLOCKS
+        ):
+            continue
+        paras += sum(1 for t, _ in parser.blocks if t in ("p", "div"))
+        # pairs must be adjacent in reading order: an intervening heading /
+        # scene-break block means a boundary, not a mid-sentence split
+        for i in range(len(parser.blocks) - 1):
+            ptag, prev = parser.blocks[i]
+            ntag, nxt = parser.blocks[i + 1]
+            if ptag not in ("p", "div") or ntag not in ("p", "div"):
+                continue
+            if parser.img_before[i + 1]:
+                continue
+            # a display quotation starts (and its resumption ends) mid-sentence
+            # by design; never pair into or out of a <blockquote>
+            if parser.in_quote[i] or parser.in_quote[i + 1]:
+                continue
+            # a dangling short unterminated fragment is a sign-off, not a
+            # sentence remnant; a mostly-non-alphabetic fragment is display math
+            if len(nxt) < _OCR_TAIL_MIN and nxt[-1] not in _OCR_TERMINALS:
+                continue
+            if min(_alpha_density(prev), _alpha_density(nxt)) < _OCR_ALPHA_MIN:
+                continue
+            unfinished = prev[-1].islower() or prev[-1] == ","
+            lower_start = nxt[0].islower()
+            substantial = len(prev) > _OCR_PROSE_MIN or len(nxt) > _OCR_PROSE_MIN
+            if unfinished and lower_start and substantial:
+                words = prev.rstrip(",").split()
+                last = words[-1].lower() if words else ""
+                # "Lordat noticed that" / lowercase block is the block-
+                # quotation idiom of academic prose, not damage: an attribution
+                # ending on "that" introduces a quote set as its own block,
+                # which rightly starts lowercase
+                if last == "that":
+                    continue
+                splits += 1
+                if last in OCR_FUNC_WORDS:
+                    func_splits += 1
+                if len(examples) < 8:
+                    examples.append({"prev": prev[-60:], "next": nxt[:60]})
+
+    # Side signals over the visible text (dictionary-free by design).
+    text = " ".join(_visible_text(book.docs.get(doc, "")) for doc in book.spine)
+    glued: list[str] = []
+    for w in set(_CAMEL_RE.findall(text)):
+        hyphenated = _HUMP_RE.sub("-", w)
+        if hyphenated in text:
+            glued.append(f"{w}~{hyphenated}")
+    return {
+        "paras": paras,
+        "splits": splits,
+        "split_rate": splits / paras if paras else 0.0,
+        "func_frac": func_splits / splits if splits else 0.0,
+        "en_dash_words": len(EN_DASH_WORD_RE.findall(text)),
+        "doubled_quotes": len(DOUBLED_QUOTE_RE.findall(text)),
+        "glued": sorted(glued)[:8],
+        "examples": examples,
+    }
+
+
+def is_ocr_damaged(r: dict) -> bool:
+    return (
+        r["paras"] >= OCR_MIN_PARAS
+        and r["splits"] >= OCR_MIN_SPLITS
+        and r["split_rate"] >= OCR_FLAG_RATE
+        and r["func_frac"] >= OCR_FUNC_MIN
+    )
+
+
+def _ocr_detail(r: dict) -> str:
+    bits = [
+        f"{r['splits']} mid-sentence splits / {r['paras']} paragraphs "
+        f"({r['split_rate'] * 100:.1f}%, {r['func_frac'] * 100:.0f}% on function words)"
+    ]
+    if r["en_dash_words"]:
+        bits.append(f"en-dash-in-word x{r['en_dash_words']}")
+    if r["doubled_quotes"]:
+        bits.append(f"doubled quotes x{r['doubled_quotes']}")
+    if r["glued"]:
+        bits.append("glued nouns: " + ", ".join(r["glued"][:3]))
+    return ", ".join(bits)
+
+
+def scan_ocr(path: Path) -> dict:
+    return analyze_ocr(load_book(path))
+
+
+# ----------------------------------------------------------------------------
 # Per-analyzer reporting (library mode)
 # ----------------------------------------------------------------------------
 
@@ -712,11 +937,28 @@ def _empty_sections(empty, partial, thin) -> int:
     return 0
 
 
+def _ocr_sections(found) -> int:
+    if found:
+        print(f"{RED}{BOLD}OCR-DAMAGED PROSE ({len(found)}){RESET}")
+        for book_id, title, tag, r in sorted(found, key=lambda x: -x[3]["split_rate"]):
+            print(f"  {RED}#{book_id}{RESET} [{tag}] {title}\n    {_ocr_detail(r)}")
+            for ex in r["examples"][:3]:
+                print(f"      ...{ex['prev']}  {BOLD}/{RESET}  {ex['next']}...")
+        print()
+        print(
+            f"{RED}{BOLD}ocr FOUND{RESET}: {len(found)} file(s) need review "
+            f"(re-source and replace damaged conversions)."
+        )
+        return 1
+    print(f"{GREEN}{BOLD}ocr CLEAN{RESET}: no OCR-damaged prose found.")
+    return 0
+
+
 # ----------------------------------------------------------------------------
 # Runner
 # ----------------------------------------------------------------------------
 
-ALL: tuple[str, ...] = ("content", "pagenumbers", "emptytext")
+ALL: tuple[str, ...] = ("content", "pagenumbers", "emptytext", "ocr")
 
 
 def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
@@ -755,6 +997,7 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
     empty_hits: list[tuple] = []
     partial_hits: list[tuple] = []
     thin_hits: list[tuple] = []
+    ocr_found: list[tuple] = []
     errors: list[tuple] = []
     scanned = 0
 
@@ -803,6 +1046,11 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
             elif verdict == "THIN":
                 thin_hits.append((book_id, title, tag, r))
 
+        if "ocr" in selected:
+            r = analyze_ocr(book)
+            if is_ocr_damaged(r):
+                ocr_found.append((book_id, title, tag, r))
+
     print(f"Scanned {scanned} EPUBs in {library_root}\n")
     rc = 0
     multi = len(selected) > 1
@@ -815,8 +1063,10 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
             rc |= _content_sections(nonlatin_hits, latin_foreign, signature_hits)
         elif key == "pagenumbers":
             rc |= _pagenum_sections(pagenum_found)
-        else:
+        elif key == "emptytext":
             rc |= _empty_sections(empty_hits, partial_hits, thin_hits)
+        else:
+            rc |= _ocr_sections(ocr_found)
         if multi:
             print()
 
@@ -856,6 +1106,14 @@ def _empty_dir(r: dict, min_chars: int, thin_chars: int) -> tuple[bool, str, lis
     return verdict in ("EMPTY", "PARTIAL"), verdict, [_empty_detail(r)]
 
 
+def _ocr_dir(r: dict) -> tuple[bool, str, list[str]]:
+    if not is_ocr_damaged(r):
+        return False, "OK", []
+    lines = [_ocr_detail(r)]
+    lines += [f"...{ex['prev']}  /  {ex['next']}..." for ex in r["examples"][:2]]
+    return True, "REVIEW", lines
+
+
 def run_directory(
     directory: Path, selected: list[str], min_chars: int, thin_chars: int
 ) -> int:
@@ -887,10 +1145,12 @@ def run_directory(
                 problem, status, lines = _content_dir(analyze_content(book))
             elif key == "pagenumbers":
                 problem, status, lines = _pagenum_dir(analyze_pagenumbers(book))
-            else:
+            elif key == "emptytext":
                 problem, status, lines = _empty_dir(
                     analyze_emptytext(book), min_chars, thin_chars
                 )
+            else:
+                problem, status, lines = _ocr_dir(analyze_ocr(book))
             if problem:
                 problems += 1
             verdicts.append((key, problem, status, lines))
@@ -923,12 +1183,12 @@ def run_directory(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Audit EPUB body text for non-English content, baked-in page "
-        "numbers, or empty stubs."
+        "numbers, empty stubs, or OCR-damaged prose."
     )
     parser.add_argument(
         "mode",
-        choices=("content", "pagenumbers", "emptytext", "all"),
-        help="which audit to run ('all' runs the three in one decompression pass)",
+        choices=("content", "pagenumbers", "emptytext", "ocr", "all"),
+        help="which audit to run ('all' runs the four in one decompression pass)",
     )
     parser.add_argument(
         "directory",
