@@ -1,5 +1,13 @@
 # CalibreQuarry — Patch Notes
 
+## v3.7.1 (2026-07-31)
+
+**`spot_check.py` reported a complete book as `EPUB_EMPTY_SPINE` when the package used the legacy OEB 1.0 namespace.** `check_epub` resolved the manifest and spine with a hardcoded `{"o": "http://www.idpf.org/2007/opf"}`, so any package declaring `http://openebook.org/namespaces/oeb-package/1.0/` instead (OverDrive-era conversions) matched nothing at all: no manifest, no spine, and therefore a HARD failure and a nonzero exit code on a book that opens perfectly. Found by the first full-library pass, which flagged exactly one hard failure across 7,339 books, #8048 *Dying Inside*: 31 content documents, 446,083 characters of body text, a spine listing every one of them, and a checker that could not see any of it.
+
+Manifest items and spine itemrefs are now matched by local element name through a `_by_local_name` helper, so the package's declared namespace stops mattering. This is the same root cause as the known `audit_epub.py emptytext` false positive on legacy OEB files; that analyzer is untouched here and still carries it.
+
+Tests grow to 64 (an OEB 1.0 package resolves its manifest and spine).
+
 ## v3.7.0 (2026-07-31)
 
 Three `spot_check.py` correctness fixes and one new advisory flag, all found by running the checker against the 7,339-book reference library and then auditing what it did not catch.

@@ -195,6 +195,17 @@ def lint_comment(comment: str | None) -> list[str]:
     return flags
 
 
+def _by_local_name(root, name: str) -> list:
+    """Find elements by local name, ignoring which namespace the package declares.
+
+    An EPUB 2/3 package is in the OPF namespace, but legacy OEB 1.0 packages
+    (OverDrive-era conversions) use http://openebook.org/namespaces/oeb-package/1.0/.
+    Matching the OPF namespace alone finds nothing in those files, so a complete
+    book reads as EPUB_EMPTY_SPINE, a HARD failure.
+    """
+    return [e for e in root.iter() if e.tag.rsplit("}", 1)[-1] == name]
+
+
 def check_epub(path: Path) -> list[str]:
     """Archive integrity, container/OPF sanity, spine completeness, text volume."""
     flags: list[str] = []
@@ -220,7 +231,6 @@ def check_epub(path: Path) -> list[str]:
             opf = ET.fromstring(z.read(opf_path))
         except Exception as e:
             return flags + [f"EPUB_OPF_UNREADABLE:{e.__class__.__name__}"]
-        ns = {"o": "http://www.idpf.org/2007/opf"}
         base = os.path.dirname(opf_path)
         # OPF hrefs are URL-encoded per spec, so a filename with a space arrives as
         # "%20" and would never match the zip namelist: that reads as a missing
@@ -229,9 +239,9 @@ def check_epub(path: Path) -> list[str]:
             i.get("id"): os.path.normpath(
                 os.path.join(base, unquote(i.get("href", "").split("#", 1)[0]))
             )
-            for i in opf.findall(".//o:manifest/o:item", ns)
+            for i in _by_local_name(opf, "item")
         }
-        spine = [i.get("idref") for i in opf.findall(".//o:spine/o:itemref", ns)]
+        spine = [i.get("idref") for i in _by_local_name(opf, "itemref")]
         if not spine:
             flags.append("EPUB_EMPTY_SPINE")
         missing = [s for s in spine if manifest.get(s) not in names]

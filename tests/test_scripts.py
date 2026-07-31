@@ -309,6 +309,18 @@ class TestSpotCheckLint(unittest.TestCase):
         stub = "<p>" + "&amp;" * 40 + "</p>"  # 200 raw chars, 40 real ones
         self.assertTrue(spot_check.lint_comment(stub)[0].startswith("COMMENT_STUB"))
 
+    def test_by_local_name_ignores_package_namespace(self):
+        import xml.etree.ElementTree as ET
+
+        oeb = (
+            '<package xmlns="http://openebook.org/namespaces/oeb-package/1.0/">'
+            '<manifest><item id="c1" href="text.xhtml"/></manifest>'
+            '<spine><itemref idref="c1"/></spine></package>'
+        )
+        root = ET.fromstring(oeb)
+        self.assertEqual(len(spot_check._by_local_name(root, "item")), 1)
+        self.assertEqual(len(spot_check._by_local_name(root, "itemref")), 1)
+
     def test_comment_truncated(self):
         if spot_check._WORDS is None:
             self.skipTest("no system wordlist")
