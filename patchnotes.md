@@ -1,5 +1,27 @@
 # CalibreQuarry — Patch Notes
 
+## v3.7.0 (2026-07-31)
+
+Three `spot_check.py` correctness fixes and one new advisory flag, all found by running the checker against the 7,339-book reference library and then auditing what it did not catch.
+
+### Fixes
+
+**`_MOJIBAKE` missed the commonest lead byte of all, `Ã¢`.** The pattern enumerated individual accented characters (`Ã[©¨¤¶¼£±]`), which covers `Ã©`/`Ã£` but not `Ã¢`, the double-encoded form of a curly apostrophe and by far the most frequent mojibake in scraped blurbs. One live case was missed on the reference library (#2658 *Observability Engineering*, `youÃ¢??re doing`). Replaced with `[ÃÂ]` followed by anything in U+0080-U+00BF: that band is never valid text, because a real Portuguese `Ã` is followed by an ASCII vowel (`Ãvila`) and never by latin-1 supplement punctuation. Verified against ten cases including `São Paulo`, `café society` and `Ãvila`, which must stay clean.
+
+**The comment, title, and author lints read raw markup instead of text.** `lint_comment` stripped tags but never decoded HTML entities, so a description of `&amp;` repeated forty times measured 200 characters and cleared the 120-character stub gate on 40 characters of real content (one live case). The same blindness hid any mojibake stored in entity form. A new `plain_text()` helper strips tags, drops `script`/`style` bodies, decodes entities, and normalizes non-breaking spaces; the lints and the review bundle's blurb excerpt all route through it, so every check now sees what a reader sees.
+
+**OPF hrefs were resolved without URL-decoding.** Manifest hrefs are percent-encoded per the EPUB spec, so a content document whose filename contains a space arrives as `%20` and never matches the zip namelist, which reads as a missing spine item and therefore a HARD failure and a nonzero exit. No book in the reference library trips it (checked all 4,890 EPUBs: zero false positives cleared by decoding), so this is a latent correctness fix rather than an observed one, but the failure mode is silent and severe enough to close. Fragments are stripped before resolution as well.
+
+### New
+
+**Advisory `COMMENT_TRUNCATED`: a description that stops mid-word.** The motivating defect, found 2026-07-30: a metadata download returned four of six Jacqueline Carey blurbs cut off mid-sentence (`Blessed Elua founded Terre d'A`, `Raphael de Mereliot, her manipul`). Nothing caught them, because every existing check passes: the text exists, is well-formed, and is long (977 to 2,265 characters). Only the final word gives it away. A whole-library sweep then found roughly fifteen more.
+
+The check is deliberately gated and deliberately advisory. It needs a wordlist and reads `/usr/share/dict/words` on exactly the terms the PDF and DJVU checks already use for exiftool and djvused: used when the system has it, silently skipped when it does not, never a Python dependency. Descriptions legitimately end without punctuation all the time (blurb attributions, series lists, contents dumps), so the heuristic requires the final word to be lowercase, absent from the wordlist, ASCII, preceded by whitespace, in prose of at least fifteen tokens, and not part of a URL or a numbered contents line.
+
+Measured honestly on the reference library: **22 flagged out of 7,339, of which 6 are confirmed truncations (27% precision, 43% recall against a hand-built set of 14)**. The residual false positives are systematic and worth knowing before trusting a flag: modern technical vocabulary absent from an old wordlist (`microservices`, `autoscaling`, `lifecycle`, `asyncio`), and truncations whose final fragment happens to be a real word (`the co`, `on the st`) are missed entirely. It is a lead generator for the judgment pass, not a verdict, which is why it is not in `HARD` and does not affect the exit code.
+
+Tests grow to 63 in `tests/test_scripts.py` (mojibake lead-byte coverage with the Portuguese and French negatives, entity decoding and the stub-gate skew it caused, and truncation detection with its proper-noun, URL, and complete-prose negatives).
+
 ## v3.6.0 (2026-07-03)
 
 ### New Features

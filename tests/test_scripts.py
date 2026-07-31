@@ -291,6 +291,40 @@ class TestSpotCheckLint(unittest.TestCase):
         )
         self.assertEqual(spot_check.lint_comment("x" * 200), [])
 
+    def test_mojibake_covers_double_encoded_lead_byte(self):
+        # "Ã¢" is the commonest lead byte of all and the old accent enumeration
+        # missed it; a real "Ã" before an ASCII vowel must stay clean.
+        self.assertTrue(spot_check._MOJIBAKE.search("youÃ¢??re"))
+        self.assertTrue(spot_check._MOJIBAKE.search("SÃ£o Paulo"))
+        self.assertTrue(spot_check._MOJIBAKE.search("cafÃ©"))
+        self.assertTrue(spot_check._MOJIBAKE.search("bad � byte"))
+        self.assertFalse(spot_check._MOJIBAKE.search("São Paulo"))
+        self.assertFalse(spot_check._MOJIBAKE.search("café society"))
+        self.assertFalse(spot_check._MOJIBAKE.search("Ãvila"))
+
+    def test_comment_lint_decodes_entities(self):
+        # Entities inflate raw length, so a stub could pass the gate; and mojibake
+        # stored as entities was invisible to the old tag-strip-only path.
+        self.assertEqual(spot_check.plain_text("<p>a&amp;b</p>"), "a&b")
+        stub = "<p>" + "&amp;" * 40 + "</p>"  # 200 raw chars, 40 real ones
+        self.assertTrue(spot_check.lint_comment(stub)[0].startswith("COMMENT_STUB"))
+
+    def test_comment_truncated(self):
+        if spot_check._WORDS is None:
+            self.skipTest("no system wordlist")
+        prose = "She crossed the room and considered the whole miserable business. " * 3
+        self.assertIn(
+            "COMMENT_TRUNCATED", spot_check.lint_comment(prose + "her manipul")
+        )
+        # complete prose, proper-noun attributions, URLs and contents lists are not
+        self.assertNotIn("COMMENT_TRUNCATED", spot_check.lint_comment(prose + "done."))
+        self.assertNotIn(
+            "COMMENT_TRUNCATED", spot_check.lint_comment(prose + "Publishers Weekly")
+        )
+        self.assertNotIn(
+            "COMMENT_TRUNCATED", spot_check.lint_comment(prose + "see example.co.uk")
+        )
+
 
 class TestSpotCheckEpub(unittest.TestCase):
     OPF = (

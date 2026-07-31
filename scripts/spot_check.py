@@ -15,7 +15,9 @@ excerpt per sampled book. Validator-owned checks (tag-in-spec, identifier
 hygiene, coverage) are deliberately not duplicated here.
 
 Read-only against metadata.db (mode=ro). Stdlib only; shells out to exiftool
-(PDF) and djvused (DJVU) when present, and skips those checks when not.
+(PDF) and djvused (DJVU) when present, and skips those checks when not. The
+advisory COMMENT_TRUNCATED check reads /usr/share/dict/words on the same terms:
+used when the system has it, silently skipped when it does not.
 
 Usage:
   python3 spot_check.py [--db PATH] [--n 600] [--seed N]
@@ -26,6 +28,7 @@ missing file), capped at 99.
 """
 
 import argparse
+import html
 import os
 import random
 import re
@@ -36,6 +39,7 @@ import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote
 
 FMT_EXT = {
     "EPUB": ".epub",
@@ -46,7 +50,11 @@ FMT_EXT = {
 }
 
 # Sequences that appear when UTF-8 is decoded as latin-1/cp1252 somewhere upstream.
-_MOJIBAKE = re.compile(r"[�]|â€|Ã[©¨¤¶¼£±]|Â[«»°·]")
+# "Ã" or "Â" followed by anything in the latin-1 supplement punctuation/accent band
+# is never valid text: a real Portuguese "Ã" is followed by an ASCII vowel, never by
+# U+0080-U+00BF. Enumerating individual accents missed the commonest lead byte of
+# all, "Ã¢" (the double-encoded form of a curly apostrophe).
+_MOJIBAKE = re.compile("[\ufffd]|\u00e2\u20ac|[\u00c3\u00c2][\u0080-\u00bf]")
 _AUTHOR_JUNK = re.compile(
     r"\b(press|publishing|publications?|books|classics|editors?|edition|"
     r"library|gmbh|llc|inc)\b",
@@ -70,6 +78,79 @@ _CASE_OK = {
 MIN_COMMENT = 120  # chars; below this a description is a stub
 MIN_EPUB_TEXT = 30_000  # bytes of spine text; below this a "book" is suspect
 MIN_PDF_PAGES = 8
+MIN_TRUNC_COMMENT = 120  # below this the truncation heuristic has too little to go on
+
+# Optional wordlist, used only by the advisory COMMENT_TRUNCATED check. Same
+# contract as exiftool/djvused above: use it when the system has it, skip the
+# check when it does not. Not a Python dependency.
+_WORDLISTS = ("/usr/share/dict/words", "/usr/share/dict/american-english")
+# Sentence-final punctuation, plus the characters a legitimately list-shaped or
+# link-shaped blurb can end on.
+_TERMINAL = ".!?\"'’”)]…:;*-–—•>/"
+_URLISH = re.compile(r"https?://|www\.|\.[a-z]{2,4}(\.[a-z]{2})?$", re.IGNORECASE)
+_TOC_TAIL = re.compile(r"\n\s*\d+\s+[^\n]{0,60}$")
+
+
+def _load_wordlist() -> set[str] | None:
+    for candidate in _WORDLISTS:
+        path = Path(candidate)
+        if path.is_file():
+            with path.open(encoding="utf-8", errors="ignore") as fh:
+                return {line.strip().lower() for line in fh if line.strip()}
+    return None
+
+
+_WORDS = _load_wordlist()
+
+
+def plain_text(markup: str | None) -> str:
+    """Strip tags AND decode entities, so lints see what a reader sees."""
+    text = re.sub(
+        r"<(script|style)[^>]*>.*?</\1>",
+        " ",
+        markup or "",
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    text = re.sub(r"<[^>]+>", " ", text)
+    return html.unescape(text).replace("\xa0", " ").strip()
+
+
+def _is_known_word(word: str) -> bool:
+    base = word.lower().rstrip("'’")
+    if not _WORDS:
+        return True
+    return (
+        base in _WORDS
+        or base.rstrip("s") in _WORDS
+        or (base + "e") in _WORDS
+        or base.replace("-", "") in _WORDS
+        or ("-" in base and all(p in _WORDS for p in base.split("-") if p))
+    )
+
+
+def looks_truncated(text: str) -> bool:
+    """Advisory: a description that stops mid-word, e.g. 'her manipul'.
+
+    Sources truncate blurbs at a length cap, and the result passes every other
+    check because it is long and well-formed; only the final word gives it away.
+    Requires a wordlist. Proper nouns, URLs, contents lists, and non-English
+    tails are excluded because they legitimately end without punctuation.
+    """
+    if _WORDS is None or len(text) < MIN_TRUNC_COMMENT or text[-1] in _TERMINAL:
+        return False
+    if _URLISH.search(text[-40:]) or _TOC_TAIL.search(text):
+        return False
+    # Must be prose. A single long token (an id, a hash, a run of filler) has no
+    # word boundaries and its "final word" is the whole string.
+    if len(text.split()) < 15:
+        return False
+    match = re.search(r"(?<=\s)([A-Za-z][A-Za-z'’-]*)\s*$", text)
+    if not match:
+        return False
+    word = match.group(1)
+    if word[0].isupper() or any(ord(c) > 127 for c in word):
+        return False
+    return len(word) < 3 or not _is_known_word(word)
 
 
 def lint_title(title: str) -> list[str]:
@@ -101,7 +182,7 @@ def lint_authors(authors: list[str]) -> list[str]:
 
 
 def lint_comment(comment: str | None) -> list[str]:
-    text = re.sub(r"<[^>]+>", "", comment or "").strip()
+    text = plain_text(comment)
     if not text:
         return ["COMMENT_MISSING"]
     flags = []
@@ -109,6 +190,8 @@ def lint_comment(comment: str | None) -> list[str]:
         flags.append(f"COMMENT_STUB:{len(text)}")
     if _MOJIBAKE.search(text):
         flags.append("COMMENT_MOJIBAKE")
+    if looks_truncated(text):
+        flags.append("COMMENT_TRUNCATED")
     return flags
 
 
@@ -139,8 +222,13 @@ def check_epub(path: Path) -> list[str]:
             return flags + [f"EPUB_OPF_UNREADABLE:{e.__class__.__name__}"]
         ns = {"o": "http://www.idpf.org/2007/opf"}
         base = os.path.dirname(opf_path)
+        # OPF hrefs are URL-encoded per spec, so a filename with a space arrives as
+        # "%20" and would never match the zip namelist: that reads as a missing
+        # spine item, which is a HARD failure. Decode before resolving.
         manifest = {
-            i.get("id"): os.path.normpath(os.path.join(base, i.get("href", "")))
+            i.get("id"): os.path.normpath(
+                os.path.join(base, unquote(i.get("href", "").split("#", 1)[0]))
+            )
             for i in opf.findall(".//o:manifest/o:item", ns)
         }
         spine = [i.get("idref") for i in opf.findall(".//o:spine/o:itemref", ns)]
@@ -298,7 +386,7 @@ def main() -> int:
                 flagged += 1
                 rep.write(f"{bid}\t{';'.join(flags)}\t{title[:60]}\n")
 
-            blurb = re.sub(r"<[^>]+>", "", comment or "").replace("\n", " ")[:220]
+            blurb = plain_text(comment).replace("\n", " ")[:220]
             ser = f" [{series[0]}]" if series else ""
             fl = f" !!{';'.join(flags)}" if flags else ""
             bun.write(
