@@ -43,6 +43,7 @@ scripts/            standalone tools OUTSIDE the package contract (run with pyth
   audit_epub_content.py  read-only EPUB content/language auditor
   validate_metadata.py   read-only metadata.db integrity + optional taxonomy linter
   reconcile_file_metadata.py  DB-vs-embedded metadata diff; --apply embeds via calibredb (epub/mobi/azw3), exiftool (pdf), djvused (djvu)
+  fetch_library_codes.py      LoC SRU (bath.isbn) -> lcc/ddc identifiers; --apply writes, dry-run default, disk-cached/resumable
 run_tests.sh      smoke-runs every CLI mode against the live library at $DB_PATH
 test_queries.sh   smoke-runs --search with representative queries
 ```

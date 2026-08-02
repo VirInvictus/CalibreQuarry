@@ -85,6 +85,26 @@ class TestParsing(unittest.TestCase):
         )
         self.assertEqual(rfm.parse_identifiers(None), {})
 
+    def test_parse_identifiers_keeps_spaces_inside_a_value(self):
+        # A Library of Congress call number contains spaces. Splitting on
+        # whitespace truncated it at the first space, so the file never matched
+        # the database and the book stayed permanently "drifted".
+        self.assertEqual(
+            rfm.parse_identifiers(
+                "google:95-xBXd4vn8C, isbn:9781591841661, lcc:BF637.S4 G63 2007"
+            ),
+            {
+                "google": "95-xbxd4vn8c",
+                "isbn": "9781591841661",
+                "lcc": "bf637.s4 g63 2007",
+            },
+        )
+        # A lone trailing value with no colon must not become a bogus entry.
+        self.assertEqual(
+            rfm.parse_identifiers("lcc:QA76.6 .C662 2009"),
+            {"lcc": "qa76.6 .c662 2009"},
+        )
+
     def test_djvused_unescape(self):
         # djvused prints non-ASCII as octal byte escapes; decode to UTF-8.
         self.assertEqual(rfm.djvused_unescape("Gr\\303\\266tschel"), "Grötschel")

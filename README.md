@@ -409,7 +409,7 @@ options:
 
 ## Companion scripts
 
-The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and one of them writes. They are stdlib-only Python; some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
+The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are stdlib-only Python; some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
 
 ### `compress_pdf.py` — shrink oversize PDFs (writes)
 
@@ -552,6 +552,70 @@ Run again with --apply to embed the database metadata into the drifted files.
 ```
 
 Exit codes: `0` no drift (or `--apply` finished cleanly), `1` drift found (dry run) or an apply/embed step failed, `2` setup error (no `metadata.db`, or a missing external tool).
+
+### `fetch_library_codes.py` — derive LCC/DDC codes from the Library of Congress (writes with `--apply`)
+
+Fills in Library of Congress Classification (and optionally Dewey) codes for books that already carry an ISBN, by querying the Library of Congress SRU catalogue at `lx2.loc.gov:210` and storing what comes back as Calibre identifiers (`lcc`, and with `--write-ddc` also `ddc`). Storing them as identifiers rather than as a column value keeps one canonical home for the data: a composite custom column with the template `{identifiers:select(lcc)}` displays the value without a second copy, and `reconcile_file_metadata.py` carries identifiers into embedded file metadata.
+
+This exists because the "Library Codes - SRU" Calibre plugin cannot do the job. It rejects composite custom columns outright (`library_codes_dialog.py` requires datatype `text`), and its ISBN lookup queries the LCDB index `dc.identifier`, which the server refuses with SRU diagnostic 1/16 "Unsupported index". The index that actually resolves an ISBN is `bath.isbn`.
+
+Two things govern how you run it. First, the Library of Congress rate-limits hard: at 0.6s between requests it starts resetting connections after roughly twenty queries, so the default pacing is 2.0s with exponential backoff, and a run over several thousand ISBNs takes hours. Every result including a miss is cached to `~/.cache/cquarry/library_codes.json`, so an interrupted run resumes for free and a repeat run is instant. Second, coverage is partial and very uneven by subject: academic, technical and canonical titles resolve well, while genre fiction, indie and small-press releases, translations and tabletop material frequently have no record at all. Default is a dry run that reports the hit rate per tag branch, which is the number to look at before committing to a full pass.
+
+```bash
+python3 scripts/fetch_library_codes.py                  # dry run over the whole library
+python3 scripts/fetch_library_codes.py --sample 200     # dry run, random sample
+python3 scripts/fetch_library_codes.py --tag NonFic     # scope by tag prefix (anchored)
+python3 scripts/fetch_library_codes.py --id 8541,8542   # specific books
+python3 scripts/fetch_library_codes.py --apply          # write the identifiers
+python3 scripts/fetch_library_codes.py --apply --write-ddc   # also store ddc
+```
+
+Books that already have an `lcc` identifier are skipped unless you pass `--refresh`, so the tool is naturally incremental: run it again after an import and it only queries the new books. `--apply` backs up `metadata.db` to the sibling `.backups` directory first and refuses to run while Calibre is open. Sample output:
+
+```
+DRY RUN: 12 book(s) with an ISBN and no LCC
+pacing 2.0s between requests; cached results reused
+
+  [1/12] HIT  PS3561.I483 Y68 2024     #299 You Like It Darker
+  [2/12] --                            #1009 Cat's Cradle
+  [3/12] HIT  PL992.26.K36 C4313 2016  #1089 The Vegetarian
+
+queried 12 book(s); LCC found for 8 (67%)
+
+hit rate by tag branch:
+  Fic.Fantasy                       2/4    ##########
+  NonFic.Tech                       3/4    ###############
+```
+
+Exit codes: `0` completed, `1` aborted after repeated network failure or a write error, `2` setup error (no `metadata.db`, Calibre running under `--apply`, or bad arguments).
+
+### `spot_check.py` — randomized quality audit, with a judgement mode (read-only)
+
+Samples N random books and checks what pattern sweeps miss: metadata field quality (title corruption, junk author entries, mojibake, stub descriptions) and the actual file contents (EPUB archive integrity, spine completeness, text volume; PDF header and page count; DJVU page count). Random sampling is the point. Every record has equal odds of inspection, so the result estimates whole-library quality instead of re-confirming whatever curation already looked at. The exit code is the number of books with hard failures.
+
+```bash
+python3 scripts/spot_check.py --n 600 --seed 101      # mechanical pass
+```
+
+**Review mode (`--review`) exists because the mechanical checks can only judge shape.** Whether a title is the *right* title, whether an author field holds the person who actually wrote the book, and whether a description describes *this* book are judgements no regular expression can make. Review mode emits full title, author, context, and complete description in numbered chunks, takes back a verdict file, and keeps the answers in a ledger so reviewed books drop out of later samples and the judging accumulates across sessions instead of being redone.
+
+```bash
+python3 scripts/spot_check.py --n 200 --review --batch 100    # emit chunks + .ids
+python3 scripts/spot_check.py --record verdicts.tsv --against spot_review.001.ids
+python3 scripts/spot_check.py --worklist                      # the BAD punch list
+```
+
+Verdicts are three per book, `OK` or `BAD` for title, author, and comment, plus an optional note. **Recording refuses to write unless the verdict ids reconcile exactly with the ids emitted**, in either direction:
+
+```
+REFUSED: 1 of 3 emitted id(s) have no verdict: [5315]
+REFUSED: 1 id(s) not in r.001.ids: [9999]
+REFUSED: 1 malformed line(s): line 1: author is 'YES', want OK or BAD
+```
+
+That check is the load-bearing part. A reviewer working through hundreds of records silently drops some, and a short list is indistinguishable from a complete one; this has bitten repeatedly on real work. Nothing enters the ledger unless the ids agree.
+
+Exit codes: `0` clean, N = number of books with hard failures (capped at 99), `1` from `--record` if the verdicts are malformed or the ids do not reconcile (and nothing is written), `99` setup error.
 
 ## Support
 

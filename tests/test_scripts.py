@@ -7,6 +7,7 @@ metadata.db.
 """
 
 import contextlib
+import io
 import importlib.util
 import os
 import pathlib
@@ -818,3 +819,100 @@ class TestAllIncludesOcr(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("ocr", out)
         self.assertIn("REVIEW", out)
+
+
+class TestSpotCheckReview(unittest.TestCase):
+    """Review mode: the id reconciliation is the part that must not fail open."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.ids = self.tmp / "chunk.ids"
+        self.ids.write_text("10\n20\n30\n")
+        self.ledger = self.tmp / "ledger.tsv"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _verdicts(self, body):
+        p = self.tmp / "v.tsv"
+        p.write_text(body)
+        return p
+
+    def _record(self, body, against=True):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = spot_check.record_verdicts(
+                self._verdicts(body),
+                self.ids if against else None,
+                self.ledger,
+                "2026-01-01",
+            )
+        return rc, buf.getvalue()
+
+    def test_complete_verdicts_are_recorded(self):
+        rc, _ = self._record(
+            "10\tOK\tOK\tOK\t\n20\tOK\tBAD\tOK\tpublisher\n30\tOK\tOK\tOK\t\n"
+        )
+        self.assertEqual(rc, 0)
+        led = spot_check.load_ledger(self.ledger)
+        self.assertEqual(set(led), {10, 20, 30})
+        self.assertEqual(led[20]["author"], "BAD")
+        self.assertEqual(led[20]["note"], "publisher")
+
+    def test_a_dropped_id_is_refused(self):
+        # The failure that has bitten repeatedly: a short list looks complete.
+        rc, out = self._record("10\tOK\tOK\tOK\t\n20\tOK\tOK\tOK\t\n")
+        self.assertEqual(rc, 1)
+        self.assertIn("30", out)
+        self.assertFalse(self.ledger.exists())
+
+    def test_an_invented_id_is_refused(self):
+        rc, out = self._record(
+            "10\tOK\tOK\tOK\t\n20\tOK\tOK\tOK\t\n30\tOK\tOK\tOK\t\n99\tOK\tOK\tOK\t\n"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("99", out)
+        self.assertFalse(self.ledger.exists())
+
+    def test_an_unknown_verdict_word_is_refused(self):
+        rc, out = self._record(
+            "10\tOK\tMAYBE\tOK\t\n20\tOK\tOK\tOK\t\n30\tOK\tOK\tOK\t\n"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("MAYBE", out.upper())
+
+    def test_ledger_roundtrips_and_worklist_lists_only_bad(self):
+        self._record(
+            "10\tOK\tOK\tOK\t\n20\tBAD\tOK\tOK\twrong book\n30\tOK\tOK\tOK\t\n"
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            spot_check.emit_worklist(self.ledger)
+        out = buf.getvalue()
+        self.assertIn("#20", out)
+        self.assertIn("wrong book", out)
+        self.assertNotIn("#10", out)
+
+    def test_chunking_writes_matching_ids_files(self):
+        rows = [
+            {
+                "id": i,
+                "title": f"T{i}",
+                "authors": "A",
+                "tag": "x",
+                "publisher": "p",
+                "year": "2000",
+                "formats": "EPUB",
+                "series": "-",
+                "comment": "c",
+                "flags": "",
+            }
+            for i in range(1, 6)
+        ]
+        written = spot_check.write_review_chunks(rows, self.tmp / "r", 2)
+        self.assertEqual(len(written), 3)
+        seen = []
+        for p in written:
+            seen += [int(x) for x in p.with_suffix(".ids").read_text().split()]
+        self.assertEqual(sorted(seen), [1, 2, 3, 4, 5])
+        self.assertIn("##### 1", written[0].read_text())

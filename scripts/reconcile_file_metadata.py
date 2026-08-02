@@ -166,12 +166,23 @@ def parse_series(value: str | None) -> tuple[str, str]:
 
 
 def parse_identifiers(value: str | None) -> dict[str, str]:
-    """'isbn:9780..., amazon:B0..' -> {'isbn': '9780...', 'amazon': 'b0..'}."""
+    """'isbn:9780..., amazon:B0..' -> {'isbn': '9780...', 'amazon': 'b0..'}.
+
+    Split on COMMAS ONLY. ebook-meta separates identifiers with ", ", and an
+    identifier value may itself contain spaces: a Library of Congress call
+    number is "BF637.S4 G63 2007". Splitting on whitespace as well truncated
+    such a value at its first space, so the file was read as holding
+    "bf637.s4", never matched the database, and the book was reported as
+    permanently drifted no matter how many times it was re-embedded. Every
+    other identifier type in use (isbn, goodreads, asin, google, oclc) is
+    space-free, which is why this went unnoticed until lcc identifiers existed.
+    """
     out: dict[str, str] = {}
-    for part in re.split(r"[,\s]+", norm_text(value)):
+    for part in norm_text(value).split(","):
+        part = part.strip()
         if ":" in part:
             k, _, v = part.partition(":")
-            if k and v:
+            if k.strip() and v.strip():
                 out[k.strip().lower()] = v.strip().lower()
     return out
 
