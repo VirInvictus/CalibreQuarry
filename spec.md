@@ -1,6 +1,6 @@
 # CalibreQuarry â€” Application Specification
 
-**Version:** 3.5.0  
+**Version:** 3.8.1  
 **Language:** Python 3.14+  
 **Dependencies:** None (stdlib only: sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -62,7 +62,7 @@ from there. The temp files are cleaned up on exit.
 
 If `--db` is omitted, the database is resolved in order:
 1. Saved config (`~/.config/cquarry/config.json`)
-2. Default paths (`./metadata.db`, `~/Calibre Library/metadata.db`)
+2. Default paths (`./metadata.db`, `~/Calibre Library/metadata.db`, `~/calibre/metadata.db`)
 3. Interactive prompt (if running in a TTY)
 
 The path is saved to config on first successful resolution.
@@ -113,7 +113,7 @@ These guarantees apply to the `cquarry` package only. The companion scripts in Â
 
 ## 5. Companion Scripts
 
-The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry` package and do **not** share its read-only or import guarantees. They are stdlib-only Python but shell out to external tools, and two of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
+The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry` package and do **not** share its read-only or import guarantees. They are stdlib-only Python but shell out to external tools, and three of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
 
 | Script | What it does | Writes? | External tools |
 |--------|--------------|---------|----------------|
@@ -121,7 +121,8 @@ The `scripts/` directory holds standalone maintenance tools that are **not** par
 | `audit_epub.py` | Reads EPUB body text to flag content problems metadata cannot catch: wrong-language editions and injected foreign notices (`content`), print page numbers baked into the flow (`pagenumbers`), empty/placeholder stubs (`emptytext`), and OCR/conversion-damaged prose (`ocr`); `all` runs the four analyzers in one decompression pass | No (`metadata.db` opened `mode=ro`) | none |
 | `audit_drm.py` | Cross-format DRM scanner (EPUB/PDF/MOBI/AZW3; DJVU N/A) that clears benign look-alikes (font obfuscation, PDF permission flags) and catches residual handler dictionaries by streaming byte scan | No (`metadata.db` opened `mode=ro`) | `qpdf` (optional, to class Standard-encrypted PDFs) |
 | `validate_metadata.py` | Integrity linter for `metadata.db` (missing language, duplicate ISBNs, junk identifiers, orphan links) plus an optional taxonomy-driven opinionated layer | No (`metadata.db` opened `mode=ro`) | none |
-| `spot_check.py` | Randomized metadata + file-integrity audit: samples N random books and checks field quality (title corruption, junk authors, mojibake, stub comments) and file contents (EPUB archive/spine/text, PDF and DJVU page counts) | No (`metadata.db` opened `mode=ro`) | `pdfinfo`, `djvused` (both optional) |
+| `spot_check.py` | Randomized metadata + file-integrity audit: samples N random books and checks field quality (title corruption, junk authors, mojibake, stub comments) and file contents (EPUB archive/spine/text, PDF and DJVU page counts); `--review` emits judgement bundles for the checks no pattern can make (right title? right author? right description?), records verdicts to a ledger with exact id reconciliation, and excludes reviewed books from later samples | No (`metadata.db` opened `mode=ro`; the review ledger lives beside the reports, never in the DB) | `pdfinfo`, `djvused` (both optional) |
 | `reconcile_file_metadata.py` | Diffs the curated `metadata.db` against each file's embedded metadata; `--apply` embeds the DB values back into drifted files, and `--repair-pdf` rebuilds a broken PDF xref table so the embed can succeed | **Yes** with `--apply` (rewrites book files; never `metadata.db`) | `calibredb`, `exiftool`, `djvused`, `qpdf` (`--repair-pdf`) |
+| `fetch_library_codes.py` | Queries the LoC SRU catalogue (`bath.isbn`) for Library of Congress Classification codes and stores them as `lcc` (optionally `ddc`) identifiers; dry-run by default, disk-cached and resumable, rate-limited with backoff | **Yes** with `--apply` (inserts identifiers; backs up `metadata.db` first, refuses while Calibre is open) | none (plain-HTTP SRU endpoint) |
 
-Write capability is the reason these live outside the package: `compress_pdf.py` and `reconcile_file_metadata.py --apply` mutate things, which the `cquarry` core forbids. Keeping them adjacent but separate preserves the toolkit's read-only promise.
+Write capability is the reason these live outside the package: `compress_pdf.py`, `reconcile_file_metadata.py --apply`, and `fetch_library_codes.py --apply` mutate things, which the `cquarry` core forbids. Keeping them adjacent but separate preserves the toolkit's read-only promise.

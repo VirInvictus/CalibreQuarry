@@ -396,7 +396,11 @@ def diff_fields(db: dict, fm: dict[str, str], fmt: str) -> list[str]:
         elif field == "authors":
             file_auth = fm.get("author(s)") or fm.get("author") or ""
             file_auth = re.sub(r"\s*\[[^\]]*\]", "", file_auth)  # drop "[sort]"
-            fset = norm_set(re.split(r"\s*[&;]\s*|,\s*", file_auth))
+            # Split on the joiners ebook-meta/exiftool actually emit (" & ",
+            # ";"), never on commas: a comma belongs to the name itself
+            # ("Martin Luther King, Jr."), and splitting on it reported such
+            # books as drifted forever, even after a successful re-embed.
+            fset = norm_set(re.split(r"\s*[&;]\s*", file_auth))
             if norm_set(db["authors"]) != fset:
                 drift.append("authors")
         elif field == "series":

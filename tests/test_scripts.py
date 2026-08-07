@@ -859,6 +859,31 @@ class TestSpotCheckReview(unittest.TestCase):
         self.assertEqual(led[20]["author"], "BAD")
         self.assertEqual(led[20]["note"], "publisher")
 
+    def test_comma_delimited_note_keeps_its_commas(self):
+        # Regression: comma-mode parsing dropped everything after the first
+        # comma inside a free-text note, silently.
+        rc, _ = self._record(
+            "10,OK,OK,OK,\n20,OK,BAD,OK,wrong author, should be Jane Doe\n30,OK,OK,OK,\n"
+        )
+        self.assertEqual(rc, 0)
+        led = spot_check.load_ledger(self.ledger)
+        self.assertEqual(led[20]["note"], "wrong author, should be Jane Doe")
+
+    def test_record_without_against_is_refused(self):
+        # Regression: --record without --against skipped the id reconciliation
+        # entirely, accepting exactly the short verdict lists it exists to catch.
+        import sys
+        from unittest import mock
+
+        buf = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["spot_check.py", "--record", "v.tsv"]),
+            contextlib.redirect_stderr(buf),
+        ):
+            rc = spot_check.main()
+        self.assertEqual(rc, 2)
+        self.assertIn("--against", buf.getvalue())
+
     def test_a_dropped_id_is_refused(self):
         # The failure that has bitten repeatedly: a short list looks complete.
         rc, out = self._record("10\tOK\tOK\tOK\t\n20\tOK\tOK\tOK\t\n")
@@ -916,3 +941,126 @@ class TestSpotCheckReview(unittest.TestCase):
             seen += [int(x) for x in p.with_suffix(".ids").read_text().split()]
         self.assertEqual(sorted(seen), [1, 2, 3, 4, 5])
         self.assertIn("##### 1", written[0].read_text())
+
+
+class TestContentSections(unittest.TestCase):
+    """An injection signature is a defect regardless of the expected-foreign
+    flag (regression: a signature hit on a declared-foreign book printed
+    "(expected-foreign)" and "0 file(s) need review" while still failing the
+    run with exit code 1)."""
+
+    def test_signature_on_expected_foreign_book_counts(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = audit_epub._content_sections(
+                [],
+                [],
+                [(101, "Some Foreign Book", "fiction", True, "importknig signature")],
+            )
+        out = buf.getvalue()
+        self.assertEqual(rc, 1)
+        self.assertNotIn("expected-foreign", out)
+        self.assertIn("1 file(s) need review", out)
+
+
+class TestLoadBookCorruptEntry(unittest.TestCase):
+    """A spine document with a corrupted archive entry (bad CRC) reads as
+    empty text instead of crashing the whole book."""
+
+    CONTAINER = TestEmptyTextScan.CONTAINER
+    OPF = TestEmptyTextScan.OPF
+
+    def test_bad_crc_entry_reads_empty(self):
+        import struct
+        import zipfile as zf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            p = pathlib.Path(tmp) / "t.epub"
+            with zf.ZipFile(p, "w") as z:
+                z.writestr("mimetype", "application/epub+zip")
+                z.writestr("META-INF/container.xml", self.CONTAINER)
+                z.writestr("content.opf", self.OPF)
+                z.writestr("text.xhtml", "<html><body><p>real prose</p></body></html>")
+            with zf.ZipFile(p) as z:
+                offset = z.getinfo("text.xhtml").header_offset
+            with open(p, "r+b") as f:
+                f.seek(offset + 26)
+                nlen, elen = struct.unpack("<HH", f.read(4))
+                f.seek(offset + 30 + nlen + elen + 10)
+                byte = f.read(1)
+                f.seek(-1, os.SEEK_CUR)
+                f.write(bytes([byte[0] ^ 0xFF]))
+            book = audit_epub.load_book(p)
+        self.assertEqual(book.spine, ["text.xhtml"])
+        self.assertEqual(book.docs["text.xhtml"], "")
+
+
+validate_metadata = _load("validate_metadata")
+
+
+class TestFormatFictionPdf(unittest.TestCase):
+    """One FORMAT_FICTION_PDF warning per book (regression: a crossover book
+    carrying two fiction tags was warned about twice, inflating the count)."""
+
+    def test_crossover_book_reported_once(self):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.executescript("""
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT);
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_tags_link (book INT, tag INT);
+            CREATE TABLE data (book INT, format TEXT);
+            INSERT INTO books VALUES (1, 'Crossover');
+            INSERT INTO tags VALUES (1, 'Fic.Fantasy'), (2, 'Fic.Horror');
+            INSERT INTO books_tags_link VALUES (1, 1), (1, 2);
+            INSERT INTO data VALUES (1, 'PDF');
+        """)
+        report = validate_metadata.Reporter()
+        validate_metadata.check_format_fiction_pdf(cur, report, ["Fic"])
+        codes = [c for c, _ in report.warnings]
+        self.assertEqual(codes.count("FORMAT_FICTION_PDF"), 1)
+        msg = report.warnings[0][1]
+        self.assertIn("Fic.Fantasy", msg)
+        self.assertIn("Fic.Horror", msg)
+
+
+fetch_library_codes = _load("fetch_library_codes")
+
+
+class TestFetchLibraryCodesBackup(unittest.TestCase):
+    """backup_db never overwrites an earlier restore point (regression: the
+    date-only stamp clobbered the first backup on a same-day second run)."""
+
+    def test_second_backup_gets_its_own_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = pathlib.Path(tmp) / "Library"
+            lib.mkdir()
+            db = lib / "metadata.db"
+            db.write_bytes(b"before first run")
+            first = fetch_library_codes.backup_db(str(db))
+            db.write_bytes(b"after first run")
+            second = fetch_library_codes.backup_db(str(db))
+            self.assertNotEqual(first, second)
+            self.assertEqual(pathlib.Path(first).read_bytes(), b"before first run")
+            self.assertEqual(pathlib.Path(second).read_bytes(), b"after first run")
+
+
+class TestFetchLibraryCodesFindDb(unittest.TestCase):
+    def test_missing_db_is_a_setup_error_exit_2(self):
+        # Regression: sys.exit(<string>) exited 1, contradicting the documented
+        # "2 = setup error" contract every other setup path follows.
+        buf = io.StringIO()
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with (
+                    self.assertRaises(SystemExit) as cm,
+                    contextlib.redirect_stderr(buf),
+                ):
+                    fetch_library_codes.find_db(None)
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("metadata.db", buf.getvalue())

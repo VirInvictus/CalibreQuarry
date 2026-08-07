@@ -318,14 +318,17 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 ### Automated Test Suite
 
-`tests/test_search.py` and `tests/test_helpers.py` run without a Calibre library (stdlib `unittest`):
+The whole suite runs without a Calibre library (stdlib `unittest`, ~195 tests):
 
 - **Grammar** (`tests/test_search.py`): parser AST cases adapted from Calibre's own `search_query_parser_test.py`, covering quotes, escapes, colon handling in values, implicit `AND`, `OR`/`NOT`, and grouping.
-- **Matching**: a battery against an in-memory provider, covering hierarchical tags, `=` exact, numeric/date relational, booleans, identifiers, `vl:` recursion, accent folding, and empty-query-is-all.
-- **Integration**: a temporary SQLite fixture shaped like a Calibre `metadata.db`, exercising the full `CalibreDB` stack (search, `resolve_vl`, the Python-side series rollup).
+- **Matching** (`tests/test_search.py`): a battery against an in-memory provider, covering hierarchical tags, `=` exact, numeric/date relational, booleans, identifiers, `vl:` recursion, accent folding, and empty-query-is-all.
+- **Integration** (`tests/test_search.py`): a temporary SQLite fixture shaped like a Calibre `metadata.db`, exercising the full `CalibreDB` stack (search, `resolve_vl`, the Python-side series rollup).
 - **Helpers** (`tests/test_helpers.py`): rating-to-stars and the half-star glyph, series-gap detection, and the JPEG/PNG cover sizers (including a JPEG whose SOF sits past the first 1 KB).
+- **Modes** (`tests/test_modes.py`): catalog-mode cache isolation against a temporary database.
+- **TUI** (`tests/test_tui.py`): fallback-menu generation, prompt/cancel semantics, and the persistent-screen session lifecycle.
+- **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`): `compress_pdf.py` size-sync and backup guards, the `audit_epub.py` analyzers, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, and DRM classification.
 
-Run them with `PYTHONPATH=src python -m unittest tests.test_search tests.test_helpers`. The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
+Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same command CI runs). The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
 
 ## Troubleshooting
 

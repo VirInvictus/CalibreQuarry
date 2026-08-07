@@ -448,6 +448,14 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
     print(f"  saved:  {fmt_size(saved)}  ({pct:.1f}%)")
     print(f"  pages:  {new_pages} (was {orig_pages})")
 
+    if orig_pages is not None and new_pages is None:
+        # pdfinfo parsed the original but not the output: the conversion is
+        # unreadable, which must fail verification, not skip it.
+        print(
+            f"\n{RED}ABORT{RESET}: pdfinfo cannot read the converted output. Original untouched; temp dropped."
+        )
+        out_tmp.unlink(missing_ok=True)
+        return 1
     if orig_pages is not None and new_pages is not None and orig_pages != new_pages:
         print(
             f"\n{RED}ABORT{RESET}: page count changed ({orig_pages} -> {new_pages}). Original untouched; temp dropped."

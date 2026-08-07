@@ -4,8 +4,8 @@ The script is standalone (not part of the cquarry package), so it is loaded by
 path the same way test_scripts.py loads its siblings. Fixtures are built in a
 temp dir with stdlib only: zip archives for EPUB, raw bytes for PDF, and a
 hand-assembled PalmDB container for MOBI. The qpdf-backed Standard-encryption
-branch is not exercised (it shells out); every case here is decided by the
-pure-Python logic.
+branch is exercised against faked subprocess results (qpdf itself is never
+invoked); every other case here is decided by the pure-Python logic.
 """
 
 import importlib.util
@@ -14,6 +14,7 @@ import struct
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 _SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 
@@ -226,3 +227,57 @@ class DispatchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeProc:
+    def __init__(self, returncode):
+        self.returncode = returncode
+
+
+class QpdfStandardTests(unittest.TestCase):
+    """The qpdf Standard-encryption branch, driven by faked subprocess exit
+    codes; qpdf itself is never invoked."""
+
+    def _classify(self, codes):
+        seq = iter(codes)
+        with (
+            mock.patch.object(drm.shutil, "which", return_value="/usr/bin/qpdf"),
+            mock.patch.object(
+                drm.subprocess,
+                "run",
+                side_effect=lambda *a, **k: _FakeProc(next(seq)),
+            ),
+        ):
+            return drm._qpdf_classify_standard(pathlib.Path("x.pdf"))
+
+    def test_not_encrypted_is_clean(self):
+        self.assertEqual(self._classify([2]).status, drm.CLEAN)
+
+    def test_unparseable_defers_to_fallback(self):
+        # Regression: exit 3 (not a pdf / qpdf error) used to read as CLEAN,
+        # skipping the trailer /Encrypt fallback built for exactly this case.
+        self.assertIsNone(self._classify([3]))
+
+    def test_password_locked_is_drm(self):
+        self.assertEqual(self._classify([0, 0]).status, drm.DRM)
+
+    def test_permission_flags_are_benign(self):
+        self.assertEqual(self._classify([0, 3]).status, drm.BENIGN)
+
+    def test_unparseable_with_encrypt_dict_is_not_clean(self):
+        # End-to-end: qpdf can't parse the file, but the trailer holds
+        # /Encrypt; classify_pdf must report it, not claim CLEAN.
+        with tempfile.TemporaryDirectory() as tmp:
+            p = pathlib.Path(tmp) / "broken.pdf"
+            p.write_bytes(
+                b"%PDF-1.4\ngarbage\ntrailer\n<< /Encrypt 5 0 R >>\nstartxref\n%%EOF\n"
+            )
+            with (
+                mock.patch.object(drm.shutil, "which", return_value="/usr/bin/qpdf"),
+                mock.patch.object(
+                    drm.subprocess, "run", side_effect=lambda *a, **k: _FakeProc(3)
+                ),
+            ):
+                verdict = drm.classify_pdf(p)
+        self.assertEqual(verdict.status, drm.BENIGN)
+        self.assertEqual(verdict.kind, "encrypted-unclassified")

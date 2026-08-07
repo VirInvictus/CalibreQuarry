@@ -395,7 +395,10 @@ def parse_verdicts(path: Path) -> tuple[dict[int, dict[str, str]], list[str]]:
             line = raw.rstrip("\n")
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
-            parts = line.split("\t") if "\t" in line else line.split(",")
+            # maxsplit keeps a free-text note intact even when it contains the
+            # delimiter ("wrong author, should be Jane Doe" is one note, not
+            # a note plus a silently dropped tail).
+            parts = line.split("\t", 4) if "\t" in line else line.split(",", 4)
             parts = [p.strip() for p in parts]
             if parts and parts[0].lower() == "id":
                 continue
@@ -576,11 +579,17 @@ def main() -> int:
     if args.worklist:
         return emit_worklist(ledger_path)
     if args.record:
+        if not args.against:
+            # The id reconciliation is the load-bearing part of review mode;
+            # recording without it would accept exactly the short-but-plausible
+            # verdict lists it exists to refuse.
+            print("ERROR: --record requires --against <ids file>", file=sys.stderr)
+            return 2
         import datetime
 
         return record_verdicts(
             Path(args.record).expanduser(),
-            Path(args.against).expanduser() if args.against else None,
+            Path(args.against).expanduser(),
             ledger_path,
             datetime.date.today().isoformat(),
         )

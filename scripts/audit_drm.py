@@ -257,8 +257,12 @@ def _qpdf_classify_standard(path: Path) -> Verdict | None:
     except OSError, subprocess.TimeoutExpired:
         return None
     # --is-encrypted: 0 encrypted, 2 not encrypted, 3 not a pdf / error.
-    if enc.returncode != 0:
+    if enc.returncode == 2:
         return Verdict(CLEAN)
+    if enc.returncode != 0:
+        # qpdf could not parse the file at all: report "can't classify" so the
+        # caller falls back to the trailer /Encrypt scan instead of a false CLEAN.
+        return None
     try:
         needs = subprocess.run(
             [qpdf, "--requires-password", str(path)], capture_output=True, timeout=60
@@ -287,8 +291,9 @@ def classify_pdf(path: Path) -> Verdict:
     verdict = _qpdf_classify_standard(path)
     if verdict is not None:
         return verdict
-    # qpdf unavailable: fall back to a trailer /Encrypt check so we don't claim
-    # clean on a standard-encrypted file we couldn't classify.
+    # qpdf unavailable (or unable to parse the file): fall back to a trailer
+    # /Encrypt check so we don't claim clean on a standard-encrypted file we
+    # couldn't classify.
     if _pdf_has_encrypt_dict(path):
         return Verdict(
             BENIGN,

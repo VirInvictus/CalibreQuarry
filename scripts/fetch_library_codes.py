@@ -148,10 +148,12 @@ def fetch_codes(
     returned a record on the very next try. Aborting the whole pass on one of
     those throws away hours of work for a server hiccup.
 
-    `strict` is set for the first query of a run, when nothing has succeeded yet.
-    There a diagnostic is far more likely to mean the query form itself is wrong
-    (the plugin's dead `dc.identifier` index answers this way every single time),
-    which is worth failing loudly and immediately instead of retrying 2,900 times.
+    `strict` is set for the very first query of a run. There a diagnostic is far
+    more likely to mean the query form itself is wrong (the plugin's dead
+    `dc.identifier` index answers this way every single time), which is worth
+    failing loudly and immediately instead of retrying 2,900 times. Later
+    queries are never strict, even if nothing has succeeded yet; the
+    consecutive-failure abort catches a systemically broken run instead.
     """
     delay = 5.0
     for attempt in range(retries):
@@ -185,7 +187,11 @@ def find_db(explicit: str | None) -> str:
     local = os.path.join(os.getcwd(), "metadata.db")
     if os.path.exists(local):
         return local
-    sys.exit("setup error: no metadata.db here; run from the library dir or pass --db")
+    print(
+        "setup error: no metadata.db here; run from the library dir or pass --db",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def load_targets(
@@ -243,8 +249,14 @@ def backup_db(db_path: str) -> str:
     lib = os.path.dirname(os.path.abspath(db_path))
     backups = os.path.join(os.path.dirname(lib), os.path.basename(lib) + ".backups")
     os.makedirs(backups, exist_ok=True)
-    stamp = time.strftime("%Y-%m-%d")
+    # Seconds in the stamp plus a collision counter so a second --apply run
+    # gets its own file instead of clobbering the earlier restore point.
+    stamp = time.strftime("%Y-%m-%d-%H%M%S")
     dest = os.path.join(backups, f".bak-{stamp}-library-codes-metadata.db")
+    n = 1
+    while os.path.exists(dest):
+        n += 1
+        dest = os.path.join(backups, f".bak-{stamp}-{n}-library-codes-metadata.db")
     shutil.copy2(db_path, dest)
     return dest
 

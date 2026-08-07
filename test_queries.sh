@@ -13,7 +13,7 @@ queries=(
   "tags:Fic OR tags:NonFic"
   "NOT tags:Fic"
   "(tags:Fic OR tags:NonFic) AND NOT tags:Gaming"
-  "vl:\"The Tabletop\""
+  "vl:\"Fantasy Wing\""
   "tags:Fic and (not tags:Horror) and tags:\"=Fic.SciFi.Cyberpunk\""
   "author:Sanderson"
   "series:Mistborn"

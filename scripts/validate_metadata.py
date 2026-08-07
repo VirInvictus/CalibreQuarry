@@ -360,13 +360,18 @@ def check_format_fiction_pdf(cur, report: Reporter, fiction_roots: list[str]) ->
         WHERE d.format = 'PDF'
           AND NOT EXISTS (SELECT 1 FROM data d2 WHERE d2.book = b.id AND d2.format = 'EPUB')
     """)
+    # One warning per book, not per (book, tag) row: a crossover book carrying
+    # two fiction tags used to be reported twice, inflating the check's count.
+    matched: dict[int, tuple[str, list[str]]] = {}
     for r in cur.fetchall():
         tag = r["tag"]
         if any(tag == root or tag.startswith(root + ".") for root in fiction_roots):
-            report.warning(
-                "FORMAT_FICTION_PDF",
-                f"#{r['id']} '{r['title']}' (tag '{tag}') is PDF-only; fiction prefers EPUB",
-            )
+            matched.setdefault(r["id"], (r["title"], []))[1].append(tag)
+    for book_id, (title, tags) in matched.items():
+        report.warning(
+            "FORMAT_FICTION_PDF",
+            f"#{book_id} '{title}' (tag '{', '.join(tags)}') is PDF-only; fiction prefers EPUB",
+        )
 
 
 # --- Resolution & driver ----------------------------------------------------

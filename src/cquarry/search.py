@@ -364,15 +364,15 @@ _SIZE_MULT = {"k": 1024.0, "m": 1024.0**2, "g": 1024.0**3}
 
 
 def _num_predicate(query: str, datatype: str):
-    """Return (predicate, want_present) for a numeric query.
+    """Return a value predicate for a numeric query.
 
     ``true``/``false`` test value presence/absence; otherwise a relational
     comparison against the parsed number.
     """
     if query == "true":
-        return (lambda v: v is not None and (datatype != DT_RATING or v > 0)), None
+        return lambda v: v is not None and (datatype != DT_RATING or v > 0)
     if query == "false":
-        return (lambda v: v is None or (datatype == DT_RATING and not v)), None
+        return lambda v: v is None or (datatype == DT_RATING and not v)
 
     op = _NUM_RELOPS[3][1]  # '='
     for k, f in _NUM_RELOPS:
@@ -391,7 +391,7 @@ def _num_predicate(query: str, datatype: str):
         q = cast(query) * mult
     except (ValueError, TypeError) as e:
         raise ParseException(f"Non-numeric value in query: {query!r}") from e
-    return (lambda v: v is not None and op(v, q)), q
+    return lambda v: v is not None and op(v, q)
 
 
 class _DateQuery:
@@ -602,7 +602,7 @@ class SearchEngine:
         return {b for b in candidates if matcher(q, self._values(b, location), kind)}
 
     def _match_numeric(self, location, datatype, query, candidates) -> set[int]:
-        pred, _ = _num_predicate(query.lower().strip(), datatype)
+        pred = _num_predicate(query.lower().strip(), datatype)
         out = set()
         for b in candidates:
             val = self.provider.field(b, location)

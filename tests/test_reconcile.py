@@ -141,10 +141,19 @@ class TestDiff(unittest.TestCase):
         )
 
     def test_author_sort_suffix_and_separators_ignored(self):
-        # "[sort]" stripped, "&"/comma split: still a match -> no drift.
+        # "[sort]" stripped, "&" split: still a match -> no drift.
         db = db_record(authors=["Neil Gaiman", "Terry Pratchett"])
         fm = file_meta(author_s="Neil Gaiman & Terry Pratchett [Gaiman, Neil]")
         fm["author(s)"] = fm.pop("author_s")
+        self.assertNotIn("authors", rfm.diff_fields(db, fm, "EPUB"))
+
+    def test_author_comma_is_part_of_the_name(self):
+        # Regression: splitting on commas turned "Martin Luther King, Jr."
+        # into two bogus authors, so the book reported as drifted forever,
+        # even immediately after a successful re-embed.
+        db = db_record(authors=["Martin Luther King, Jr."])
+        fm = file_meta()
+        fm["author(s)"] = "Martin Luther King, Jr."
         self.assertNotIn("authors", rfm.diff_fields(db, fm, "EPUB"))
 
     def test_author_semicolon_separator(self):

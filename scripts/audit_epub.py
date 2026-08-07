@@ -116,8 +116,9 @@ class Book:
 
 def load_book(path: Path) -> Book:
     """Open an EPUB once: resolve spine + nav + declared language, and read
-    every spine document's HTML. utf-8 with replacement (never raises), falling
-    back to latin-1 only if utf-8 decode itself fails."""
+    every spine document's HTML. Decoded utf-8 with replacement (never raises);
+    a corrupted archive entry (bad CRC, truncated stream) reads as empty text
+    rather than failing the whole book."""
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
         nameset = set(names)
@@ -166,12 +167,11 @@ def load_book(path: Path) -> Book:
         docs: dict[str, str] = {}
         for doc in spine:
             try:
-                docs[doc] = z.read(doc).decode("utf-8", "replace")
+                raw = z.read(doc)
             except Exception:
-                try:
-                    docs[doc] = z.read(doc).decode("latin-1", "replace")
-                except Exception:
-                    docs[doc] = ""
+                docs[doc] = ""
+                continue
+            docs[doc] = raw.decode("utf-8", "replace")
     return Book(spine, nav, lang, docs, names)
 
 
@@ -876,6 +876,11 @@ def _content_sections(nonlatin_hits, latin_foreign, signature_hits) -> int:
     unexpected = 0
     unexpected += show("NON-LATIN SCRIPT", nonlatin_hits, RED)
     unexpected += show("LATIN-SCRIPT FOREIGN (stopword vote)", latin_foreign, RED)
+    # An injected piracy/ad notice is a defect no matter what language the book
+    # is declared in, so the expected-foreign flag never applies here: without
+    # this, a signature hit on a declared-foreign book printed "(expected-
+    # foreign)" and "0 file(s) need review" while still failing the run.
+    signature_hits = [(b, t, g, False, d) for b, t, g, _e, d in signature_hits]
     unexpected += show("INJECTION SIGNATURE", signature_hits, YELLOW)
     if unexpected == 0 and not signature_hits:
         print(f"{GREEN}{BOLD}content CLEAN{RESET}: no unexpected foreign content.")

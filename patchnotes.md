@@ -1,5 +1,35 @@
 # CalibreQuarry — Patch Notes
 
+## v3.8.1 (2026-08-07)
+
+A full-repository bug, maintenance, and documentation sweep: the package, all seven companion scripts, the tests, and every doc. The package core came out clean (one micro-refactor: `_num_predicate` in `search.py` returned a two-tuple whose second element nothing read; it now returns just the predicate). The scripts yielded nine real fixes, every one now pinned by a regression test. The suite grows from 195 to 208 tests, and `fetch_library_codes.py` and `validate_metadata.py` gain their first tests.
+
+### Fixes
+
+**`audit_drm.py` reported an unparseable PDF as CLEAN.** `qpdf --is-encrypted` exits 0 for encrypted, 2 for not encrypted, and 3 for a file it cannot parse; the code collapsed 2 and 3 into "clean". A corrupted or truncated PDF (exactly the kind of loose file the tool exists to vet) therefore skipped the trailer `/Encrypt` fallback that was built for the couldn't-classify case, and a Standard-encrypted broken file read as definitively DRM-free. Exit 3 now defers to the fallback and reports `BENIGN encrypted-unclassified` when an `/Encrypt` dictionary is present.
+
+**`audit_epub.py content` contradicted itself on an injected signature in a declared-foreign book.** The expected-foreign flag (declared language / `NonFic.Language.*` tags) was applied to injection-signature hits too, so a piracy notice in a legitimately-French book printed under a green "(expected-foreign)" label, reported "0 file(s) need review", and still exited 1. A signature is a defect regardless of language; it is now always counted and listed as needing review.
+
+**`compress_pdf.py` skipped verification when it mattered most.** `page_count()` returns None both when pdfinfo is missing and when pdfinfo cannot parse the file, and the page-count comparison only ran when both counts were known. A Ghostscript output so broken pdfinfo could not read it (the strongest possible bad-conversion signal) therefore passed "verification" and replaced the original. When the original's page count is known and the output's is not, the run now aborts with the original untouched.
+
+**`reconcile_file_metadata.py` split author names on commas.** The file-side author string was split on `&`, `;`, and `,`, but `ebook-meta` only ever joins authors with `&`; a comma belongs to the name itself. "Martin Luther King, Jr." parsed as two bogus authors, never matched the database, and the book reported as drifted forever, surviving every re-embed. Same shape as the v3.8.0 identifier-space bug, one field over. The split now uses `&` and `;` only.
+
+**`spot_check.py --record` silently truncated comma-delimited notes.** A verdict line's note field was `parts[4]` of an unbounded split, so a comma-mode note of "wrong author, should be Jane Doe" recorded as "wrong author" with the rest dropped and no error. The split now caps at five fields, keeping free-text notes intact.
+
+**`spot_check.py --record` no longer runs without `--against`.** The id reconciliation is documented as the load-bearing part of review mode ("nothing is written unless the ids reconcile"), but `--against` was optional, and omitting it skipped the check entirely, accepting exactly the short-but-plausible verdict lists it exists to refuse. Recording without an ids file is now a setup error (exit 2).
+
+**`fetch_library_codes.py` clobbered its own backup.** The pre-`--apply` backup was stamped with the date only, so a second run the same day overwrote the first run's restore point, the copy that actually holds the pre-change database. The stamp now carries seconds plus a collision counter; no backup is ever overwritten. Also fixed: a missing `metadata.db` exited 1 via `sys.exit(str)` while the documented contract (and every other setup-error path) says 2.
+
+**`validate_metadata.py` inflated FORMAT_FICTION_PDF counts.** The check joined through the tags table before filtering, producing one warning per (book, tag) pair; a crossover book tagged `Fic.Fantasy` and `Fic.Horror` was reported twice. Now one warning per book, listing every matching tag.
+
+**`audit_epub.py`'s latin-1 decode fallback was dead code.** `bytes.decode("utf-8", "replace")` can never raise, so the documented fallback was unreachable and the except path re-read the same corrupt entry just to fail again. A corrupted spine entry now reads as empty text through one honest path, and the docstring says so.
+
+### Maintenance
+
+- `test_queries.sh` exercised `vl:"The Tabletop"`, a wing that no longer exists (split into the two "Tabletop:" wings in the live library), so the VL-resolution smoke was silently testing the unknown-VL path. It now targets `Fantasy Wing`.
+- All seven scripts are executable now (five carried a shebang without the bit; the documented `python3 scripts/...` invocation is unchanged).
+- Docs drift closed across the board: `spec.md` §5 gains the missing `fetch_library_codes.py` row and the `--review` half of `spot_check.py` (and now says three scripts write, not two); `roadmap.md` gains Phase 7 recording the v3.7.0–v3.8.0 companion work; the README's test-suite section describes all seven test files instead of the original two; `CLAUDE.md`'s architecture tree adds `audit_drm.py`, `spot_check.py`, `modes/tags.py`, and the five test files it didn't list, and renames the long-gone `audit_epub_content.py` to `audit_epub.py`.
+
 ## v3.8.0 (2026-08-02)
 
 **New companion script `fetch_library_codes.py`: derive Library of Congress Classification codes from the LoC SRU catalogue and store them as identifiers.** Written after the existing Calibre plugin for this job, "Library Codes - SRU", was diagnosed as unable to do it at all.

@@ -35,12 +35,20 @@ src/cquarry/
     audit.py      run_audit
     display.py    show_recent, show_series, show_wings
     export.py     run_export (json/csv/ai), run_search_export (file or stdout)
+    tags.py       show_tag_dump
 tests/
-  test_search.py   unittest: parser AST, matcher (in-memory), DB integration (temp sqlite)
-  test_helpers.py  unittest: rating/star, series gaps, JPEG/PNG sizing
+  test_search.py     unittest: parser AST, matcher (in-memory), DB integration (temp sqlite)
+  test_helpers.py    unittest: rating/star, series gaps, JPEG/PNG sizing
+  test_modes.py      unittest: catalog-mode cache isolation against a temp DB
+  test_tui.py        unittest: fallback menu generation, prompt/cancel semantics, session lifecycle
+  test_scripts.py    unittest: compress_pdf sync/guards, audit_epub analyzers, spot_check lints/review
+  test_reconcile.py  unittest: reconcile_file_metadata diff/parse paths
+  test_audit_drm.py  unittest: audit_drm classification
 scripts/            standalone tools OUTSIDE the package contract (run with python3)
   compress_pdf.py        write-capable PDF shrinker (Ghostscript); updates metadata.db
-  audit_epub_content.py  read-only EPUB content/language auditor
+  audit_epub.py          read-only EPUB body-text auditor (content|pagenumbers|emptytext|ocr|all)
+  audit_drm.py           read-only cross-format DRM scanner (EPUB/PDF/MOBI/AZW3)
+  spot_check.py          read-only randomized metadata+file audit; ledger-backed --review judgement mode
   validate_metadata.py   read-only metadata.db integrity + optional taxonomy linter
   reconcile_file_metadata.py  DB-vs-embedded metadata diff; --apply embeds via calibredb (epub/mobi/azw3), exiftool (pdf), djvused (djvu)
   fetch_library_codes.py      LoC SRU (bath.isbn) -> lcc/ddc identifiers; --apply writes, dry-run default, disk-cached/resumable
@@ -63,8 +71,8 @@ pipx install .
 # Run without installing (Brandon's local pattern)
 PYTHONPATH=src python -m cquarry --stats
 
-# Unit tests (fast, no live library needed)
-PYTHONPATH=src python -m unittest tests.test_search tests.test_helpers -v
+# Unit tests (fast, no live library needed; CI runs the same discover)
+PYTHONPATH=src python -m unittest discover -s tests -v
 
 # Run a single test method
 PYTHONPATH=src python -m unittest tests.test_search.TestParser.test_grouping -v

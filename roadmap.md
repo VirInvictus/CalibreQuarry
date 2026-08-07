@@ -1,6 +1,6 @@
 # CalibreQuarry — Roadmap
 
-What's done, what's next. Updated as of v3.6.0.
+What's done, what's next. Updated as of v3.8.1.
 
 ---
 
@@ -75,6 +75,26 @@ What's done, what's next. Updated as of v3.6.0.
 - [x] **`audit_epub_pagenumbers.py`** — reads EPUB body text to flag print page numbers (and running headers) baked into the flow by bad PDF/OCR conversions, which reflow mid-sentence. Flags only genuine prose interruptions (lowercase continuation, word split, running-header abutment); leaves chapter/section numbers and endnotes alone. Hand-validated against the full reference library: 21 true positives, no false positives.
 - [x] **`audit_drm.py`** (v3.3.0): cross-format DRM scanner (EPUB/PDF/MOBI/AZW3; DJVU is N/A), library or loose-directory mode, read-only. Clears the two benign cases a crude check trips on (font obfuscation, including `fonts/*.dat` named fonts; PDF permission flags) and catches residual/inactive handler dictionaries by streaming byte scan. Built after a residual Adobe ADEPT dictionary in a z-library PDF (#7893) slipped the pre-import battery and broke its reconcile embed. First whole-library sweep flagged 48 live DRM files (all recoverable Adobe ADEPT PDF dictionaries; v3.3.1 reclassified a lone residual FairPlay EPUB marker as benign once it was clear the marker, not content encryption, was all that remained).
 - [x] **`audit_epub.py ocr` analyzer** (v3.6.0) — a fourth body-text analyzer (`content|pagenumbers|emptytext|ocr|all`) flagging OCR/conversion-damaged prose, the defect class none of the existing three catches. Primary signal: mid-sentence paragraph splits, where a paragraph ends without terminal punctuation (lowercase letter or comma) and the next paragraph starts lowercase. Motivating case (2026-07-03): a damaged Jingo EPUB measured 80 such splits ("could just make out the shape" / "of another boat"); a clean edition of the same text measured 0. The planned rate-only threshold turned out not to separate style from damage (deliberately unpunctuated literary prose — Fosse, Evaristo, Kingsnorth, Faulkner — posts higher split rates than damaged books); the shipped gate adds a function-word-fraction discriminator (damage splits at line-wrap positions, so fragments end on function words; style splits at clause boundaries) plus guards for five legitimate idioms found during validation (figure-interrupted paragraphs, display math as text, rendered indexes, epistolary sign-offs, block quotations). Secondary signals, all dictionary-free to keep the stdlib-only contract, are reported but never gate: en-dashes embedded inside words (`bottom–feedin'`), doubled opening quotes (`' 'Course`), and space-stripped proper nouns recurring alongside their hyphenated form (`AnkhMorpork` vs `Ankh-Morpork` in the same book). Hand-validated against the full 4,605-EPUB reference library, every flagged book inspected: 105 flagged, 104 confirmed damage, 1 borderline residue (publisher-styled display quotes, indistinguishable without CSS). Out of scope, documented in the script header: character-substitution errors ("sonic" for "some") need a wordlist; word-truncation and whitespace-corruption damage carry different signatures. `all` gained the fourth analyzer inside the same single decompression pass. Tests grew to 60: split detection (true mid-sentence split; dialogue fragment and scene break as non-splits), image-interrupted pairs, style-vs-damage discrimination, threshold boundaries, and an `all` run that includes the new analyzer.
+
+## Phase 7: Judgement & External-Catalogue Companions (v3.7.0–v3.8.0)
+*Companion evolution continues: quality checks that need a human verdict, and the first external-catalogue integration. All in `scripts/`, outside the package contract.*
+
+- [x] **`spot_check.py` correctness pass** (v3.7.0/v3.7.1): mojibake lead-byte coverage (`Ã¢`, the commonest form, via a `[ÃÂ]` + U+0080–U+00BF band match), entity decoding through a shared `plain_text()` so lints see what a reader sees, URL-decoded OPF href resolution, OPF manifest/spine matching by local element name (fixes the OEB 1.0 false `EPUB_EMPTY_SPINE`), and the advisory `COMMENT_TRUNCATED` flag (wordlist-gated, never affects exit code).
+- [x] **`spot_check.py --review`** (v3.8.0): judgement mode for the checks no pattern can make (right title? right author? right description?): numbered review bundles with matching `.ids` files, verdict recording that refuses unless the ids reconcile exactly in both directions, a ledger that drops reviewed books from later samples, and `--worklist` as the BAD punch list. Nothing is ever written to `metadata.db`.
+- [x] **`fetch_library_codes.py`** (v3.8.0): derive LoC Classification codes from the LoC SRU catalogue (`bath.isbn`, the index that actually works, unlike the existing Calibre plugin's dead `dc.identifier` path) and store them as `lcc`/`ddc` identifiers. Dry-run default with per-branch hit rates, disk-cached and resumable, 2.0s pacing with backoff and an eight-failure abort; `--apply` backs up `metadata.db` and refuses while Calibre runs.
+- [x] **`reconcile_file_metadata.py` identifier-space fix** (v3.8.0): `parse_identifiers` split on commas *or whitespace*, so any identifier value containing a space (`lcc:BF637.S4 G63 2007`) was truncated and the book reported drifted forever; now splits on commas alone, the format `ebook-meta` actually emits.
+
+## Maintenance (full-repo bug sweep, 2026-08-07, shipped as v3.8.1)
+*Package, all seven companion scripts, tests, and docs. The package core was clean; the scripts yielded nine fixes, each pinned by a regression test (suite: 195 to 208). Full detail in `patchnotes.md` v3.8.1.*
+
+- [x] `audit_drm.py`: qpdf exit 3 (unparseable) no longer reads as CLEAN; falls back to the trailer `/Encrypt` scan
+- [x] `audit_epub.py`: injection signatures never count as expected-foreign; dead latin-1 decode fallback removed
+- [x] `compress_pdf.py`: an output pdfinfo cannot read fails verification instead of skipping it
+- [x] `reconcile_file_metadata.py`: commas are part of an author's name, not a separator (the "drifted forever" class, again)
+- [x] `spot_check.py`: notes keep their commas; `--record` requires `--against`
+- [x] `fetch_library_codes.py`: backups never clobbered; missing-DB exit code is 2 as documented; first tests
+- [x] `validate_metadata.py`: one FORMAT_FICTION_PDF warning per book; first tests
+- [x] Docs drift closed (spec §5, roadmap Phase 7, README test section, CLAUDE.md architecture tree); `test_queries.sh` VL query points at a live wing
 
 ## Maintenance (workspace sweep, 2026-06-09)
 *Small behaviour-neutral pass; everything else was clean (42 tests green, default ruff rule set clean).*
