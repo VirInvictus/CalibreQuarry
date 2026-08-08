@@ -44,6 +44,7 @@ tests/
   test_scripts.py    unittest: compress_pdf sync/guards, audit_epub analyzers, spot_check lints/review
   test_reconcile.py  unittest: reconcile_file_metadata diff/parse paths
   test_audit_drm.py  unittest: audit_drm classification
+  test_audit_isbns.py unittest: audit_isbns ISBN arithmetic, extraction, verdicts, scoping
 scripts/            standalone tools OUTSIDE the package contract (run with python3)
   compress_pdf.py        write-capable PDF shrinker (Ghostscript); updates metadata.db
   audit_epub.py          read-only EPUB body-text auditor (content|pagenumbers|emptytext|ocr|all)
@@ -52,6 +53,7 @@ scripts/            standalone tools OUTSIDE the package contract (run with pyth
   validate_metadata.py   read-only metadata.db integrity + optional taxonomy linter
   reconcile_file_metadata.py  DB-vs-embedded metadata diff; --apply embeds via calibredb (epub/mobi/azw3), exiftool (pdf), djvused (djvu)
   fetch_library_codes.py      LoC SRU (bath.isbn) -> lcc/ddc identifiers; --apply writes, dry-run default, disk-cached/resumable
+  audit_isbns.py         read-only; stored ISBN vs the one the book prints (body text ONLY, never embedded metadata: reconcile writes the DB's values there, so that comparison would be circular). No --apply, by design
 run_tests.sh      smoke-runs every CLI mode against the live library at $DB_PATH
 test_queries.sh   smoke-runs --search with representative queries
 ```
