@@ -68,21 +68,71 @@ class TestIsbnArithmetic(unittest.TestCase):
 class TestPrintedIsbnExtraction(unittest.TestCase):
     def test_requires_the_isbn_label(self):
         """Bare digit runs are everywhere in books; only labelled ones count."""
-        self.assertEqual(isbns.printed_isbns("call 9780201183993 today"), [])
         self.assertEqual(
-            isbns.printed_isbns("ISBN: 978-0-201-18399-3"), ["9780201183993"]
+            isbns.printed_isbns("call 9780201183993 today. All rights reserved."), []
+        )
+        self.assertEqual(
+            isbns.printed_isbns("All rights reserved. ISBN: 978-0-201-18399-3"),
+            ["9780201183993"],
         )
 
     def test_tolerates_label_variants_and_separators(self):
         for text in (
-            "ISBN 9780201183993",
-            "isbn-13: 978 0 201 18399 3",
+            "All rights reserved. ISBN 9780201183993",
+            "Copyright © 2018. isbn-13: 978 0 201 18399 3",
             "ISBN (paperback): 0201183994",
         ):
             self.assertEqual(isbns.printed_isbns(text), ["9780201183993"], text)
 
+    def test_ignores_an_isbn_a_book_cites_rather_than_claims(self):
+        """The Atrocity Archives names The New Hacker's Dictionary's ISBN in a
+        glossary entry. One citation is indistinguishable from a
+        self-identification by count alone, so counting is not the test."""
+        text = (
+            "LART Luser Attitude Readjustment Tool—see The New Hacker's "
+            "Dictionary, edited by Eric S. Raymond, MIT Press, "
+            "ISBN 0-262680-92-0 [All] THE LAUNDRY"
+        )
+        self.assertEqual(isbns.self_identified_isbns(text), [])
+
+    def test_ignores_a_joke_isbn_in_running_text(self):
+        """Metamagical Themas lists one among self-referential book titles."""
+        text = (
+            "I Never Can Remember What It's Called The Great American Novel "
+            "ISBN 0-943568-01-3 Self Referential Book Title"
+        )
+        self.assertEqual(isbns.self_identified_isbns(text), [])
+
+    def test_ignores_a_publishers_advertisement(self):
+        """C++ Primer Plus advertises six other Sams books in its back matter."""
+        text = (
+            "ESSENTIAL REFERENCES FOR PROGRAMMERS PHP & MySQL Web Development "
+            "Luke Welling & Laura Thomson ISBN-13: 978-0-672-32916-6"
+        )
+        self.assertEqual(isbns.self_identified_isbns(text), [])
+
+    def test_counts_an_isbn_beside_copyright_furniture(self):
+        spelunky = (
+            "Copyright © 2016 Derek Yu All rights reserved. "
+            "ISBN 13: 978-1-940535-13-5 (paperback) First Printing: 2016"
+        )
+        cip = (
+            "Cataloging-in-Publication Data Hopcroft, John E. 2nd ed. "
+            "ISBN 0-201-44124-1 1. Machine theory"
+        )
+        tsr = (
+            "prohibited without the express written permission of TSR, Inc. "
+            "ISBN 1-56076-605-0"
+        )
+        norton = "Production manager: Julia Druskin ISBN 978-0-393-24482-3 (e-book)"
+        pan = "www.panmacmillan.com ISBN 978-0-330-48053-6 in Adobe Reader format"
+        for text in (spelunky, cip, tsr, norton, pan):
+            self.assertTrue(isbns.self_identified_isbns(text), text[:48])
+
     def test_drops_bad_checksums_and_deduplicates(self):
-        text = "ISBN 9780201183994 ISBN 9780201183993 ISBN 0201183994"
+        text = (
+            "All rights reserved. ISBN 9780201183994 ISBN 9780201183993 ISBN 0201183994"
+        )
         self.assertEqual(isbns.printed_isbns(text), ["9780201183993"])
 
 
@@ -128,6 +178,31 @@ class TestVerdicts(unittest.TestCase):
         many = [i for i in many if len(i) == 13]
         self.assertEqual(
             isbns.classify("9781039260719", many, self.MAX), "NO_ISBN_PRINTED"
+        )
+
+    def test_a_match_confirms_even_from_unclaimed_text(self):
+        """The two directions take different evidence. A book printing the SAME
+        number we store is conclusive whatever the surrounding text says: a
+        citation coinciding with our own value does not happen. Requiring
+        self-identification in BOTH directions cost 639 confirmations on a real
+        library while removing only 25 false findings."""
+        self.assertEqual(
+            isbns.classify("9780201183993", ["9780201183993"], self.MAX, []),
+            "CONFIRMED",
+        )
+
+    def test_a_difference_counts_only_when_the_book_claimed_it(self):
+        """Same inputs, no match: with nothing self-identified there is no
+        evidence either way, so it is not a finding."""
+        self.assertEqual(
+            isbns.classify("9782147483649", ["9780262680929"], self.MAX, []),
+            "NO_ISBN_PRINTED",
+        )
+        self.assertEqual(
+            isbns.classify(
+                "9782147483649", ["9780262680929"], self.MAX, ["9780262680929"]
+            ),
+            "MISMATCH",
         )
 
     def test_bibliography_still_confirms_a_hit(self):
@@ -246,7 +321,10 @@ class TestEpubExtraction(unittest.TestCase):
             path = self._epub(
                 tmp,
                 "b.epub",
-                {"OEBPS/copyright.xhtml": "<p>ISBN: <b>978-0-201-18399-3</b></p>"},
+                {
+                    "OEBPS/copyright.xhtml": "<p>All rights reserved.</p>"
+                    "<p>ISBN: <b>978-0-201-18399-3</b></p>"
+                },
             )
             text = isbns.epub_text(path)
             self.assertIsNotNone(text)
@@ -261,7 +339,7 @@ class TestEpubExtraction(unittest.TestCase):
                 "b.epub",
                 {
                     "OEBPS/content.opf": "<dc:identifier>ISBN 9780201183993"
-                    "</dc:identifier>",
+                    "</dc:identifier><meta>All rights reserved.</meta>",
                     "OEBPS/text.xhtml": "<p>no number here</p>",
                 },
             )
