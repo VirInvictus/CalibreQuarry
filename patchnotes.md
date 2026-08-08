@@ -10,13 +10,23 @@ This release ships the offline half: verification against the ISBN each book pri
 
 **It reads body text only, never embedded metadata.** `reconcile_file_metadata.py` writes the database's values into those metadata blocks, so comparing against them would be comparing the database with itself and would cheerfully confirm every error the tool exists to find. A test pins this: an OPF carrying a matching identifier must not produce a confirmation.
 
-Not crying wolf is most of the work. Three benign things resemble a mismatch and are classified apart. A **bibliography** prints other books' ISBNs (*The Art of UNIX Programming* prints 49), so above `--max-printed` distinct numbers a file is read as a citing work. A **bundle or series volume** legitimately prints several ISBNs, reported `AMBIGUOUS` for a human to resolve rather than guessed at. A **format variant** (print versus ebook) differs only in its final digits, so a printed number sharing the stored one's registrant prefix is reported `VARIANT` rather than `SUSPECT`; a genuinely wrong ISBN almost always comes from a different publisher block entirely.
+Not crying wolf is most of the work. Three benign things resemble a mismatch and are classified apart. A **bibliography** prints other books' ISBNs (*The Art of UNIX Programming* prints 49), so above `--max-printed` distinct numbers a file is read as a citing work. A **bundle or series volume** legitimately prints several ISBNs, reported `AMBIGUOUS` for a human to resolve rather than guessed at. A **format variant** (print versus ebook) differs only in its final digits, so a printed number sharing the stored one's registrant prefix is reported `VARIANT` rather than `MISMATCH`; a genuinely wrong ISBN almost always comes from a different publisher block entirely.
 
 There is deliberately **no `--apply`**, and there will not be one. Single-source verdicts proved wrong often enough during the motivating sweep that an auto-fixer would have "corrected" *Curse of Strahd*, *Cold Mountain*, *Kitchen* and *The Master and Margarita*, every one of which was already right.
 
 Scoping reuses `fetch_library_codes.py`'s anchored-hierarchical `--tag` rule rather than inventing a virtual-library flag: a comma-separated prefix list covers a multi-root wing without coupling a standalone script to the package's VL resolver. Text extraction is stdlib `zipfile` for EPUB and optional `pdftotext`/`djvutxt` for PDF and DJVU, whose absence is reported rather than fatal. MOBI/AZW3 are skipped.
 
-Pilot run: 121 books across one wing in 15 seconds, 87 confirmed, 31 printing no ISBN, two format variants and one ambiguous bundle, zero false positives. The suite grows from 208 to 232 tests; the new cases carry the real-world classifications so a future refactor that silently reclassifies them fails loudly.
+Three things were corrected before merge, all found by running it against a whole 6,783-ISBN library rather than a single wing.
+
+**The severe verdict was renamed `SUSPECT` to `MISMATCH`, because the old name overclaimed.** On a real library the commonest reason a book prints a different ISBN than the catalogue holds is that the *file is a different edition*, which is worth knowing but is not a wrong book. An ISBN alone cannot separate the two, and a report that says "suspect" 100 times about mostly-benign edition drift trains its reader to ignore it.
+
+**The publisher-prefix comparison was too long.** Registrant lengths run 2 to 7 digits and are *inversely* proportional to publisher size, so a nine-digit prefix (right for a one-book press) split HarperCollins from itself: *Sabriel*'s stored `978-0-06-447183-1` and printed `978-0-06-000548-1` are one publisher and were being reported as rivals. Six digits reclassified 28 findings from the severe bucket to `VARIANT`.
+
+**`UNREADABLE` conflated two opposite things.** Half of those books were MOBI/AZW3, which this tool skips by design; the rest were supported formats that yielded nothing, which may be damaged files. They are now `SKIPPED` and `UNREADABLE` respectively.
+
+Also documented: **the printed ISBN can itself be wrong**, which is the limit of the whole premise. The TSR *Forgotten Realms Campaign Setting* prints a number belonging to *The Jungles of Chult* (a permanent typo), and *Night Witches* prints *Durance*'s because a small press reused its previous copyright page. Both surfaced as `VARIANT` and both resolved in favour of the database, which is exactly why nothing is ever written automatically.
+
+Runs: 121 books in 15s on one wing and 468 in 63s on another, both with zero severe findings; 6,783 in about 15 minutes across the library. The suite grows from 208 to 237 tests, with the real-world classifications pinned so a future refactor that silently reclassifies them fails loudly.
 
 ## v3.8.1 (2026-08-07)
 

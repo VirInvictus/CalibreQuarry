@@ -39,11 +39,33 @@ things look like a mismatch to a crude check and are classified apart here:
                      printed ISBNs, none of them the stored one, is reported
                      AMBIGUOUS: a human picks, the script does not guess.
   * format variants  Print and ebook editions of one book get different ISBNs
-                     that differ only in the last digits. When the printed and
-                     stored numbers share a registrant prefix they are reported
-                     VARIANT (same publisher, probably another binding) rather
-                     than SUSPECT (a different publisher entirely, which is the
-                     shape an actually-wrong ISBN takes).
+                     that differ only in the last digits. Sharing a publisher
+                     prefix makes a disagreement a VARIANT (probably another
+                     binding) rather than a MISMATCH (a different publisher
+                     block, which is where a genuinely wrong ISBN sits).
+
+A MISMATCH is NOT a claim that the ISBN is wrong. On a real library the
+commonest cause by far is that the FILE is a different edition than the
+catalogue records, which is worth knowing but is a different problem from a
+wrong book; an ISBN alone cannot tell the two apart, and saying otherwise would
+be crying exactly the wolf this tool is careful about. Deciding needs a
+bibliographic lookup, or a human.
+
+THE PRINTED ISBN CAN ITSELF BE WRONG, which is the limit of this tool's whole
+premise and the reason it only ever reports. Two real cases, both caught by a
+VARIANT verdict and both resolved in favour of the DATABASE:
+
+  * publisher misprint  The TSR Forgotten Realms Campaign Setting boxed set
+                        prints 1-56076-605-0, which belongs to The Jungles of
+                        Chult. A documented typo, in the book, forever.
+  * copied front matter A small press reusing its last book's copyright page.
+                        Night Witches (Bully Pulpit, 2014) prints Durance's
+                        ISBN because the template was not updated.
+
+Both are same-publisher cases, so both land as VARIANT. That is exactly why
+VARIANT exists: the shape "same publisher block, different number" covers
+innocent format variants AND publisher mistakes, and no rule separates them
+without a human.
 
 Nothing is written, ever, and there is deliberately no --apply. Across the
 sweep that motivated this tool, single-source verdicts were wrong often enough
@@ -64,7 +86,7 @@ Run from the library directory:
 
 Exit codes:
     0 = no disagreement found
-    1 = at least one SUSPECT/VARIANT/AMBIGUOUS finding, or a read error
+    1 = at least one MISMATCH/VARIANT/AMBIGUOUS finding, or an unreadable file
     2 = setup error (missing DB, bad arguments)
 """
 
@@ -101,19 +123,26 @@ SUBPROCESS_TIMEOUT = 90
 # Above this many distinct printed ISBNs, treat the file as citing other works.
 DEFAULT_MAX_PRINTED = 6
 
-# Shared leading digits that imply one publisher (EAN prefix + group + a
-# registrant of typical length). Deliberately coarse: it only downgrades a
-# finding's severity, it never suppresses one.
-REGISTRANT_PREFIX_LEN = 9
+# Shared leading digits that imply one publisher: EAN prefix + group + the
+# first two registrant digits. A registrant is 2-7 digits and INVERSELY sized
+# with the publisher (Penguin is 0-14, a one-book press is 0-9883909), so no
+# fixed length is right for everyone; six is chosen to catch the big houses,
+# whose short registrants otherwise made two HarperCollins ISBNs look like
+# rival publishers. Deliberately coarse: it only downgrades a finding's
+# severity, never suppresses one.
+REGISTRANT_PREFIX_LEN = 6
 
 VERDICT_ORDER = [
-    "SUSPECT",
+    "MISMATCH",
     "AMBIGUOUS",
     "VARIANT",
     "CONFIRMED",
     "NO_ISBN_PRINTED",
     "UNREADABLE",
+    "SKIPPED",
 ]
+
+FINDINGS = ("MISMATCH", "AMBIGUOUS", "VARIANT")
 
 
 # --------------------------------------------------------------------------- #
@@ -229,20 +258,28 @@ EXTRACTORS = {".epub": epub_text, ".pdf": pdf_text, ".djvu": djvu_text}
 
 
 def book_text(book_dir: str) -> tuple[str | None, str | None]:
-    """Body text of the first readable file, with the format that supplied it."""
+    """Body text of the first readable file, with the format that supplied it.
+
+    The returned format distinguishes two failures that look alike in a report
+    but mean opposite things: a book held only as MOBI/AZW3 was SKIPPED by
+    design (no extractor exists here), while a supported format that yielded
+    nothing is genuinely UNREADABLE and may be a damaged file.
+    """
     try:
         entries = sorted(os.listdir(book_dir))
     except OSError:
         return None, None
+    attempted: str | None = None
     for entry in entries:
         ext = os.path.splitext(entry)[1].lower()
         extractor = EXTRACTORS.get(ext)
         if not extractor:
             continue
+        attempted = ext.lstrip(".")
         text = extractor(os.path.join(book_dir, entry))
         if text:
-            return text, ext.lstrip(".")
-    return None, None
+            return text, attempted
+    return None, attempted
 
 
 # --------------------------------------------------------------------------- #
@@ -260,7 +297,7 @@ def classify(stored: str, printed: list[str], max_printed: int) -> str:
         return "AMBIGUOUS"
     if same_registrant(stored, printed[0]):
         return "VARIANT"
-    return "SUSPECT"
+    return "MISMATCH"
 
 
 # --------------------------------------------------------------------------- #
@@ -332,9 +369,7 @@ def report_text(results: list[dict], quiet: bool) -> None:
 
     # --quiet drops the decoration (headers, the summary table), never the
     # findings: they are the whole point of running this.
-    findings = [
-        r for r in results if r["verdict"] in ("SUSPECT", "AMBIGUOUS", "VARIANT")
-    ]
+    findings = [r for r in results if r["verdict"] in FINDINGS]
     if findings:
         if not quiet:
             print("Disagreements between the catalogue and the books themselves:\n")
@@ -435,7 +470,9 @@ def main() -> int:
     for target in targets:
         text, fmt = book_text(os.path.join(library_root, target["path"]))
         if text is None:
-            verdict, printed = "UNREADABLE", []
+            # no supported format present at all vs one that yielded nothing
+            verdict = "SKIPPED" if fmt is None else "UNREADABLE"
+            printed = []
         else:
             printed = printed_isbns(text)
             verdict = classify(target["isbn"], printed, args.max_printed)
@@ -451,10 +488,7 @@ def main() -> int:
     else:
         report_text(results, args.quiet)
 
-    flagged = any(
-        r["verdict"] in ("SUSPECT", "AMBIGUOUS", "VARIANT", "UNREADABLE")
-        for r in results
-    )
+    flagged = any(r["verdict"] in (*FINDINGS, "UNREADABLE") for r in results)
     return 1 if flagged else 0
 
 

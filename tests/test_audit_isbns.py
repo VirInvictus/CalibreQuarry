@@ -58,6 +58,12 @@ class TestIsbnArithmetic(unittest.TestCase):
         # the real A Book on C pair: unrelated publishers
         self.assertFalse(isbns.same_registrant("9782147483649", "9780201183993"))
 
+    def test_same_registrant_catches_short_registrants(self):
+        """Big houses have SHORT registrants, so a prefix long enough for a
+        one-book press splits HarperCollins from itself. The real Sabriel pair
+        (978-0-06-447183-1 stored, 978-0-06-000548-1 printed) is one publisher."""
+        self.assertTrue(isbns.same_registrant("9780064471831", "9780060005481"))
+
 
 class TestPrintedIsbnExtraction(unittest.TestCase):
     def test_requires_the_isbn_label(self):
@@ -93,10 +99,10 @@ class TestVerdicts(unittest.TestCase):
             isbns.classify("9780201183993", [], self.MAX), "NO_ISBN_PRINTED"
         )
 
-    def test_suspect_when_a_different_publisher_is_printed(self):
+    def test_mismatch_when_a_different_publisher_is_printed(self):
         """A Book on C: stored value was the 2147483649 overflow constant."""
         self.assertEqual(
-            isbns.classify("9782147483649", ["9780201183993"], self.MAX), "SUSPECT"
+            isbns.classify("9782147483649", ["9780201183993"], self.MAX), "MISMATCH"
         )
 
     def test_variant_when_same_publisher_block(self):
@@ -151,7 +157,7 @@ class TestReporting(unittest.TestCase):
                 "isbn": "9782147483649",
                 "printed": ["9780201183993"],
                 "format": "pdf",
-                "verdict": "SUSPECT",
+                "verdict": "MISMATCH",
             },
             {
                 "id": 2,
@@ -172,13 +178,13 @@ class TestReporting(unittest.TestCase):
     def test_quiet_keeps_findings_and_drops_decoration(self):
         """--quiet suppresses decorative output, never the findings."""
         out = self._capture(quiet=True)
-        self.assertIn("SUSPECT", out)
+        self.assertIn("MISMATCH", out)
         self.assertIn("#1", out)
         self.assertNotIn("Summary", out)
 
     def test_verbose_includes_the_summary(self):
         out = self._capture(quiet=False)
-        self.assertIn("SUSPECT", out)
+        self.assertIn("MISMATCH", out)
         self.assertIn("Summary", out)
         self.assertIn("CONFIRMED", out)
 
@@ -266,6 +272,24 @@ class TestEpubExtraction(unittest.TestCase):
             path = pathlib.Path(tmp) / "broken.epub"
             path.write_bytes(b"not a zip")
             self.assertIsNone(isbns.epub_text(str(path)))
+
+
+class TestSkippedVsUnreadable(unittest.TestCase):
+    """A format we never read is not the same finding as a file we could not."""
+
+    def test_no_supported_format_reports_no_attempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "book.azw3").write_bytes(b"kindle")
+            text, fmt = isbns.book_text(tmp)
+            self.assertIsNone(text)
+            self.assertIsNone(fmt, "MOBI/AZW3 are skipped by design, not unreadable")
+
+    def test_supported_format_that_yields_nothing_names_the_format(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "book.epub").write_bytes(b"not a zip")
+            text, fmt = isbns.book_text(tmp)
+            self.assertIsNone(text)
+            self.assertEqual(fmt, "epub")
 
 
 if __name__ == "__main__":

@@ -486,7 +486,9 @@ The hard part is not finding printed ISBNs; it is not crying wolf. Three benign 
 
 - **bibliographies**: a book that cites other books prints their ISBNs (*The Art of UNIX Programming* prints 49). Above `--max-printed` distinct ISBNs a file is read as a citing work and its numbers are not treated as evidence about itself.
 - **bundles and series**: a boxed set prints each component's ISBN and a series volume may print its siblings'. Several printed ISBNs with no match is reported `AMBIGUOUS`; a human picks, the tool does not guess.
-- **format variants**: print and ebook editions differ only in the last digits. When the printed and stored numbers share a registrant prefix the finding is `VARIANT` (same publisher, probably another binding) rather than `SUSPECT` (a different publisher entirely, which is the shape a genuinely wrong ISBN takes).
+- **format variants**: print and ebook editions differ only in the last digits. When the printed and stored numbers share a registrant prefix the finding is `VARIANT` (same publisher, probably another binding) rather than `MISMATCH` (a different publisher block, where a genuinely wrong ISBN sits).
+
+**The printed ISBN can itself be wrong.** That is the limit of this tool's premise, and the reason it only ever reports. Two real cases, both flagged `VARIANT` and both resolved in favour of the database: the TSR *Forgotten Realms Campaign Setting* boxed set prints `1-56076-605-0`, which actually belongs to *The Jungles of Chult* (a documented typo, in the book, permanently); and *Night Witches* (Bully Pulpit, 2014) prints *Durance*'s ISBN, because a small press reused its previous title's copyright page without updating it. Both are same-publisher cases, which is precisely why `VARIANT` exists: that shape covers innocent format variants *and* publisher mistakes, and no rule separates them without a human.
 
 There is deliberately **no `--apply`**. Across the sweep that motivated this tool, single-source verdicts were wrong often enough to matter: an auto-fixer would have "corrected" *Curse of Strahd*, *Cold Mountain*, *Kitchen* and *The Master and Margarita*, all of which were right. Findings are for a human to judge.
 
@@ -499,7 +501,7 @@ python3 audit_isbns.py --format tsv > out.tsv # machine-readable
 
 Scoping uses the same anchored-hierarchical `--tag` rule as `fetch_library_codes.py` and cquarry's `tags:` search, and takes a comma-separated list, so a virtual library that spans several roots is covered without a separate flag.
 
-Exit codes: `0` no disagreement, `1` at least one `SUSPECT`/`VARIANT`/`AMBIGUOUS` finding or a read error, `2` setup error.
+Exit codes: `0` no disagreement, `1` at least one `MISMATCH`/`VARIANT`/`AMBIGUOUS` finding or an unreadable file, `2` setup error.
 
 ### `validate_metadata.py` — lint database integrity (read-only)
 
