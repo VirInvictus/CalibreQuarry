@@ -326,7 +326,7 @@ The whole suite runs without a Calibre library (stdlib `unittest`, ~195 tests):
 - **Helpers** (`tests/test_helpers.py`): rating-to-stars and the half-star glyph, series-gap detection, and the JPEG/PNG cover sizers (including a JPEG whose SOF sits past the first 1 KB).
 - **Modes** (`tests/test_modes.py`): catalog-mode cache isolation against a temporary database.
 - **TUI** (`tests/test_tui.py`): fallback-menu generation, prompt/cancel semantics, and the persistent-screen session lifecycle.
-- **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`): `compress_pdf.py` size-sync and backup guards, the `audit_epub.py` analyzers, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, and DRM classification.
+- **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`, `tests/test_audit_isbns.py`): `compress_pdf.py` size-sync and backup guards, the `audit_epub.py` analyzers, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, DRM classification, and the ISBN arithmetic, printed-ISBN extraction, and verdict rules behind `audit_isbns.py`.
 
 Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same command CI runs). The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
 
@@ -471,6 +471,37 @@ python3 audit_drm.py --csv drm.csv    # also write a CSV audit (id,status,kind,d
 ```
 
 Exit codes: `0` clean (no DRM; font obfuscation and permission flags are not DRM), `1` DRM found or a scan error, `2` setup error.
+
+### `audit_isbns.py` — check stored ISBNs against the books themselves (read-only)
+
+Every other audit here asks whether the catalogue is internally consistent. This one asks what nothing in the Calibre ecosystem asks: does the ISBN recorded against a book actually identify *that* book? Calibre downloads metadata but never re-examines what it stored, so a wrong ISBN is invisible forever, and it matters because an ISBN is what other systems key on. Hand a catalogue to a library service and the ISBN, not the title, decides which book you get.
+
+The failure is real and quiet. A sweep of a 6,786-ISBN library that was already validator-clean found 51 identifiers pointing at something else, most often a **sibling** of the right book: the same publisher's next title, so the number looks plausible and the checksum passes. *Programming Clojure* carried *tmux 2*'s ISBN; *Spelunky* carried *Super Mario Bros. 3*'s; *A Book on C* carried `9782147483649`, which is the 2147483649 integer-overflow constant wearing an ISBN's clothes.
+
+For books no bibliographic database has heard of (small-press RPGs, indie ebooks, print-on-demand reprints) the publisher's own copyright page is the best authority there is, and it is already on disk.
+
+**It reads body text only, never a file's embedded metadata.** `reconcile_file_metadata.py` exists to write the database's values *into* those metadata blocks, so comparing against them would be comparing the database with itself and would confirm every error this tool was built to find.
+
+The hard part is not finding printed ISBNs; it is not crying wolf. Three benign things look like a mismatch and are classified apart:
+
+- **bibliographies**: a book that cites other books prints their ISBNs (*The Art of UNIX Programming* prints 49). Above `--max-printed` distinct ISBNs a file is read as a citing work and its numbers are not treated as evidence about itself.
+- **bundles and series**: a boxed set prints each component's ISBN and a series volume may print its siblings'. Several printed ISBNs with no match is reported `AMBIGUOUS`; a human picks, the tool does not guess.
+- **format variants**: print and ebook editions differ only in the last digits. When the printed and stored numbers share a registrant prefix the finding is `VARIANT` (same publisher, probably another binding) rather than `MISMATCH` (a different publisher block, where a genuinely wrong ISBN sits).
+
+**The printed ISBN can itself be wrong.** That is the limit of this tool's premise, and the reason it only ever reports. Two real cases, both flagged `VARIANT` and both resolved in favour of the database: the TSR *Forgotten Realms Campaign Setting* boxed set prints `1-56076-605-0`, which actually belongs to *The Jungles of Chult* (a documented typo, in the book, permanently); and *Night Witches* (Bully Pulpit, 2014) prints *Durance*'s ISBN, because a small press reused its previous title's copyright page without updating it. Both are same-publisher cases, which is precisely why `VARIANT` exists: that shape covers innocent format variants *and* publisher mistakes, and no rule separates them without a human.
+
+There is deliberately **no `--apply`**. Across the sweep that motivated this tool, single-source verdicts were wrong often enough to matter: an auto-fixer would have "corrected" *Curse of Strahd*, *Cold Mountain*, *Kitchen* and *The Master and Margarita*, all of which were right. Findings are for a human to judge.
+
+```bash
+python3 audit_isbns.py                        # every book with an ISBN
+python3 audit_isbns.py --tag NonFic.Tech      # one branch of the taxonomy
+python3 audit_isbns.py --id 1969,3189         # specific books
+python3 audit_isbns.py --format tsv > out.tsv # machine-readable
+```
+
+Scoping uses the same anchored-hierarchical `--tag` rule as `fetch_library_codes.py` and cquarry's `tags:` search, and takes a comma-separated list, so a virtual library that spans several roots is covered without a separate flag.
+
+Exit codes: `0` no disagreement, `1` at least one `MISMATCH`/`VARIANT`/`AMBIGUOUS` finding or an unreadable file, `2` setup error.
 
 ### `validate_metadata.py` — lint database integrity (read-only)
 
