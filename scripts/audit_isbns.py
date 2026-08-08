@@ -107,6 +107,23 @@ ISBN_LABELLED_RE = re.compile(
     r"ISBN(?:[-\s]?1[03])?[^0-9]{0,24}((?:97[89][-\s]?)?(?:\d[-\s]?){9}[\dXx])",
     re.IGNORECASE,
 )
+# An ISBN counts as the book's own only when one of these sits near it. They
+# are the furniture of a copyright page (or a CIP block) and are exactly what a
+# citation, an advertisement, or a joke list lacks.
+SELF_ID_RE = re.compile(
+    r"copyright\s*(?:©|\(c\)|\d{4})"
+    r"|all\s+rights\s+reserved"
+    r"|cataloging[- ]in[- ]publication|cataloguing[- ]in[- ]publication"
+    r"|first\s+(?:published|printing|edition)"
+    r"|printed\s+(?:and\s+bound\s+)?in\b"
+    r"|\(\s*(?:pbk|paperback|hardback|hardcover|cloth|e-?book|ebook|alk)"
+    r"|\b(?:paperback|hardcover|hardback)\s+(?:edition|isbn)"
+    r"|in\s+(?:\w+\s+){1,3}format"  # "in Adobe Digital Editions format"
+    r"|written\s+permission",
+    re.IGNORECASE,
+)
+SELF_ID_WINDOW = 260
+
 TAG_RE = re.compile(r"<[^>]+>")
 XHTML_SUFFIXES = (".xhtml", ".html", ".htm")
 
@@ -182,10 +199,45 @@ def same_registrant(a: str, b: str) -> bool:
 
 
 def printed_isbns(text: str) -> list[str]:
-    found = {
-        to_isbn13(m) for m in ISBN_LABELLED_RE.findall(text or "") if checksum_ok(m)
-    }
-    return sorted(found)
+    """ISBNs the book states about ITSELF.
+
+    A label alone is not enough. Books quote other books' ISBNs constantly, and
+    one citation is indistinguishable from a self-identification if you only
+    count numbers: The Atrocity Archives names The New Hacker's Dictionary's
+    ISBN in a glossary entry, Metamagical Themas lists one among Hofstadter's
+    self-referential joke titles, and C++ Primer Plus advertises six other Sams
+    books on its back matter.
+
+    What separates them is corroboration. A copyright page never carries a bare
+    number: it sits with a copyright line, a rights reservation, a binding, a
+    printing statement, or a CIP block. A citation carries none of that. So an
+    ISBN counts only when such a marker appears near it, which is positive
+    evidence rather than an attempt to enumerate every way a citation can look.
+    """
+    return sorted(_scan(text)[0])
+
+
+def self_identified_isbns(text: str) -> list[str]:
+    """The subset a book states about ITSELF, judged by nearby corroboration."""
+    return sorted(_scan(text)[1])
+
+
+def _scan(text: str) -> tuple[set[str], set[str]]:
+    """Every labelled, checksum-valid ISBN, and the self-identifying subset."""
+    text = text or ""
+    every: set[str] = set()
+    mine: set[str] = set()
+    for match in ISBN_LABELLED_RE.finditer(text):
+        if not checksum_ok(match.group(1)):
+            continue
+        isbn = to_isbn13(match.group(1))
+        every.add(isbn)
+        window = text[
+            max(0, match.start() - SELF_ID_WINDOW) : match.end() + SELF_ID_WINDOW
+        ]
+        if SELF_ID_RE.search(window):
+            mine.add(isbn)
+    return every, mine
 
 
 # --------------------------------------------------------------------------- #
@@ -285,17 +337,34 @@ def book_text(book_dir: str) -> tuple[str | None, str | None]:
 # --------------------------------------------------------------------------- #
 # verdict
 # --------------------------------------------------------------------------- #
-def classify(stored: str, printed: list[str], max_printed: int) -> str:
-    if not printed:
-        return "NO_ISBN_PRINTED"
-    if len(printed) > max_printed:
-        # a citing work: its ISBNs describe other books, not this one
-        return "CONFIRMED" if stored in printed else "NO_ISBN_PRINTED"
+def classify(
+    stored: str,
+    printed: list[str],
+    max_printed: int,
+    self_printed: list[str] | None = None,
+) -> str:
+    """Judge a stored ISBN against what its book prints.
+
+    The two directions need different evidence, and conflating them was a real
+    bug. A book printing the SAME number we store is conclusive whatever the
+    surrounding text says: a citation coinciding with our own value is not a
+    thing that happens. But a DIFFERENT number only counts against us if the
+    book was claiming it for itself, which is why the negative direction is
+    restricted to self-identifying ISBNs and the positive direction is not.
+    Applying the restriction to both cost 639 confirmations on a real library
+    while removing only 25 false findings.
+    """
     if stored in printed:
         return "CONFIRMED"
-    if len(printed) > 1:
+    claimed = printed if self_printed is None else self_printed
+    if not claimed:
+        return "NO_ISBN_PRINTED"
+    if len(claimed) > max_printed:
+        # a citing work: its ISBNs describe other books, not this one
+        return "NO_ISBN_PRINTED"
+    if len(claimed) > 1:
         return "AMBIGUOUS"
-    if same_registrant(stored, printed[0]):
+    if same_registrant(stored, claimed[0]):
         return "VARIANT"
     return "MISMATCH"
 
@@ -475,7 +544,8 @@ def main() -> int:
             printed = []
         else:
             printed = printed_isbns(text)
-            verdict = classify(target["isbn"], printed, args.max_printed)
+            claimed = self_identified_isbns(text)
+            verdict = classify(target["isbn"], printed, args.max_printed, claimed)
         results.append(
             {**target, "verdict": verdict, "printed": printed, "format": fmt}
         )

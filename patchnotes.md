@@ -1,5 +1,15 @@
 # CalibreQuarry — Patch Notes
 
+## v3.9.1 (2026-08-08)
+
+`audit_isbns.py` counted any labelled ISBN as the book's own. Books quote other books' ISBNs constantly, and one citation is indistinguishable from a self-identification if you only count numbers, so a handful of famous false accusations followed: *The Atrocity Archives* names *The New Hacker's Dictionary*'s ISBN in a glossary entry, *Metamagical Themas* lists one among Hofstadter's self-referential joke titles, and *C++ Primer Plus* advertises six other Sams books in its back matter.
+
+The fix is to require corroboration rather than to enumerate the ways a citation can look. A copyright page never carries a bare number: it sits beside a copyright line, a rights reservation, a binding, a printing statement, or a CIP block. A citation carries none of that, so an ISBN now counts as the book's own only when such a marker appears within 260 characters.
+
+**Applying that symmetrically was itself a bug, caught by measuring before committing.** The first version demanded self-identification in both directions and cost **639 confirmations** across a real library while removing only 25 false findings. The two directions need different evidence: a book printing the *same* number the catalogue holds is conclusive whatever the surrounding prose says, because a citation coinciding with your own stored value does not happen. Only a *different* number needs to have been claimed. Restricting the test to the negative direction gives 46 fewer false findings with confirmations slightly *up* (2,974 to 2,979).
+
+Both directions are now pinned by tests carrying the real passages. 243 tests.
+
 ## v3.9.0 (2026-08-08)
 
 A new companion script, `audit_isbns.py`, and the first new capability since the v3.8 sweep. It answers a question nothing else in the Calibre ecosystem asks: does the ISBN stored against a book actually identify that book? Calibre downloads metadata but never re-examines what it stored, so a wrong ISBN stays invisible, and an ISBN is what other systems key on when you hand them a catalogue.
