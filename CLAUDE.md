@@ -27,7 +27,7 @@ src/cquarry/
   db.py         CalibreDB: all SQL + caching; also the search MetadataProvider
   search.py     Calibre-parity search engine (_Parser grammar + SearchEngine)
   config.py     ~/.config/cquarry/config.json (db_path persistence), VERSION
-  helpers.py    find_db(), ANSI color, JPEG/PNG sizing, rating/series helpers
+  helpers.py    find_db(), db_uri_ro(), ANSI color, JPEG/PNG sizing, rating/series helpers
   modes/        one file per mode; each exposes a top-level function called from cli.py
     catalog.py    write_catalog, write_all_wings
     stats.py      show_stats
@@ -38,7 +38,7 @@ src/cquarry/
     tags.py       show_tag_dump
 tests/
   test_search.py     unittest: parser AST, matcher (in-memory), DB integration (temp sqlite)
-  test_helpers.py    unittest: rating/star, series gaps, JPEG/PNG sizing
+  test_helpers.py    unittest: rating/star, series gaps, JPEG/PNG sizing, read-only URI building
   test_modes.py      unittest: catalog-mode cache isolation against a temp DB
   test_tui.py        unittest: fallback menu generation, prompt/cancel semantics, session lifecycle
   test_scripts.py    unittest: compress_pdf sync/guards, audit_epub analyzers, spot_check lints/review

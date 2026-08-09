@@ -61,7 +61,12 @@ def write_catalog(
             print(f"ERROR: {e}", file=sys.stderr)
             return
 
-    with open(output, "w", encoding="utf-8") as f:
+    # Create the parent directory the way run_audit/run_export already do, so
+    # --output reports/catalog.txt writes instead of exiting 1.
+    out_path = os.path.abspath(output)
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+
+    with open(out_path, "w", encoding="utf-8") as f:
         header = (
             f"Calibre Library Export \u2014 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         )
@@ -144,8 +149,21 @@ def write_all_wings(
 
     os.makedirs(outdir, exist_ok=True)
 
-    for name in sorted(vls.keys()):
+    used: set[str] = set()
+    for i, name in enumerate(sorted(vls.keys())):
         safe_name = re.sub(r"[^\w\s-]", "", name).strip().replace(" ", "_")
+        # Sanitizing is lossy: "Tabletop: RPG" and "Tabletop RPG" both reduce to
+        # Tabletop_RPG, and a punctuation-only name reduces to nothing at all.
+        # Without a uniqueness pass one wing's catalog silently overwrote
+        # another's, so both files claimed to be a wing that only one of them was.
+        if not safe_name:
+            safe_name = f"wing_{i + 1}"
+        base = safe_name
+        n = 1
+        while safe_name.lower() in used:
+            n += 1
+            safe_name = f"{base}_{n}"
+        used.add(safe_name.lower())
         output = os.path.join(outdir, f"{safe_name}_Library.txt")
         if not quiet:
             print(f"\u2192 {color(name, C_HEADER)}")

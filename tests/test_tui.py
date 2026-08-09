@@ -425,6 +425,79 @@ class PromptHelperTests(unittest.TestCase):
         self.assertEqual(tui._out_note(None), "")
 
 
+class _KeyScreen:
+    """A stand-in curses screen that replays a scripted key sequence.
+
+    get_wch returns a str for a character and an int for a key code, which is
+    exactly the distinction _tui_prompt_str has to handle.
+    """
+
+    def __init__(self, keys):
+        self._keys = list(keys)
+
+    def get_wch(self):
+        if not self._keys:
+            raise AssertionError("prompt asked for more input than the test scripted")
+        return self._keys.pop(0)
+
+    def erase(self):
+        pass
+
+    def getmaxyx(self):
+        return 24, 80
+
+    def addstr(self, *a, **kw):
+        pass
+
+    def move(self, *a):
+        pass
+
+    def refresh(self):
+        pass
+
+
+class PromptInputTests(unittest.TestCase):
+    """The curses prompt reads whole characters, not bytes: a Calibre library
+    is full of titles and authors that cannot be typed in ASCII."""
+
+    def setUp(self):
+        self._screen = tui._SCREEN
+        # color_pair needs a real initscr'd terminal; the drawing is not what
+        # these tests are about, so neutralize it.
+        self._color_pair = tui.curses.color_pair
+        tui.curses.color_pair = lambda _n: 0
+
+    def tearDown(self):
+        tui._SCREEN = self._screen
+        tui.curses.color_pair = self._color_pair
+
+    def _prompt(self, keys, default=""):
+        tui._SCREEN = _KeyScreen(keys)
+        return tui._tui_prompt_str("Query", default)
+
+    def test_accepts_non_ascii_characters(self):
+        # getch handed back one byte at a time, so 'ë' arrived as two
+        # out-of-range values and was dropped silently.
+        self.assertEqual(self._prompt(["B", "r", "o", "n", "t", "ë", "\n"]), "Brontë")
+
+    def test_accepts_ascii_and_int_key_codes_alike(self):
+        self.assertEqual(self._prompt(["a", ord("b"), "\n"]), "ab")
+
+    def test_backspace_and_ctrl_u_still_edit(self):
+        self.assertEqual(self._prompt(["a", "b", "\x7f", "c", "\n"]), "ac")
+        self.assertEqual(self._prompt(["a", "b", "\x15", "z", "\n"]), "z")
+
+    def test_escape_still_cancels(self):
+        self.assertIsNone(self._prompt(["a", "\x1b"], default="d.txt"))
+
+    def test_bare_enter_still_takes_the_default(self):
+        self.assertEqual(self._prompt(["\n"], default="catalog.txt"), "catalog.txt")
+
+    def test_control_characters_are_not_inserted(self):
+        # a stray unhandled control char must not land in the buffer
+        self.assertEqual(self._prompt(["a", "\x07", "b", "\n"]), "ab")
+
+
 class PersistentScreenTests(unittest.TestCase):
     """T7: one curses screen per session. Widgets run against the session's
     screen when one is active; a mid-session curses failure degrades the

@@ -76,6 +76,9 @@ ABORT_AFTER_CONSECUTIVE_FAILURES = 8
 # answer and far below anything that hurts.
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
+# Seconds the "is Calibre running" probe gets before it is treated as hung.
+PGREP_TIMEOUT = 10
+
 
 # --------------------------------------------------------------------------
 # cache
@@ -202,9 +205,6 @@ def load_targets(
         rows = con.execute(
             """
             SELECT b.id, b.title, i.val,
-                   (SELECT t.name FROM tags t
-                      JOIN books_tags_link l ON l.tag = t.id
-                     WHERE l.book = b.id LIMIT 1),
                    EXISTS(SELECT 1 FROM identifiers x
                            WHERE x.book = b.id AND x.type = 'lcc')
               FROM books b
@@ -212,36 +212,70 @@ def load_targets(
              ORDER BY b.id
             """
         ).fetchall()
+        booktags: dict[int, list[str]] = {}
+        for bid, tname in con.execute(
+            "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"
+        ):
+            booktags.setdefault(bid, []).append(tname)
     finally:
         con.close()
 
     wanted = set(ids) if ids else None
-    out = [
-        {
-            "id": r[0],
-            "title": r[1],
-            "isbn": r[2],
-            "tag": r[3] or "",
-            "has_lcc": bool(r[4]),
-        }
-        for r in rows
-        if wanted is None or r[0] in wanted
-    ]
-    if prefixes:
-        out = [t for t in out if tag_matches(t["tag"], prefixes)]
+    out = []
+    for r in rows:
+        if wanted is not None and r[0] not in wanted:
+            continue
+        tags = sorted(booktags.get(r[0], []))
+        if prefixes and not tag_matches(tags, prefixes):
+            continue
+        out.append(
+            {
+                "id": r[0],
+                "title": r[1],
+                "isbn": r[2],
+                "tag": display_tag(tags, prefixes),
+                "tags": tags,
+                "has_lcc": bool(r[3]),
+            }
+        )
     return out
 
 
-def tag_matches(tag: str, prefixes: list[str]) -> bool:
-    """Anchored-hierarchical match, the same rule cquarry's `tags:` search uses:
-    'NonFic' matches 'NonFic' and anything under 'NonFic.', but never 'NonFiction'."""
-    return any(tag == p or tag.startswith(p + ".") for p in prefixes)
+def tag_matches(tags: list[str], prefixes: list[str]) -> bool:
+    """Anchored-hierarchical match over ALL of a book's tags, the same rule
+    cquarry's `tags:` search uses: 'NonFic' matches 'NonFic' and anything under
+    'NonFic.', but never 'NonFiction'.
+
+    Matching every tag is the point. This used to read a single tag pulled by a
+    `LIMIT 1` subquery with no ORDER BY, so a book carrying two tags was scoped
+    (and reported under a branch) by whichever one SQLite happened to return.
+    """
+    return any(t == p or t.startswith(p + ".") for t in tags for p in prefixes)
+
+
+def display_tag(tags: list[str], prefixes: list[str] | None) -> str:
+    """The tag a book is reported under. Under a --tag filter, prefer one the
+    filter actually selected on, so the per-branch hit rate agrees with the
+    scoping."""
+    if prefixes:
+        for t in tags:
+            if tag_matches([t], prefixes):
+                return t
+    return tags[0] if tags else ""
 
 
 def calibre_running() -> bool:
-    return (
-        subprocess.run(["pgrep", "-x", "calibre"], capture_output=True).returncode == 0
-    )
+    try:
+        return (
+            subprocess.run(
+                ["pgrep", "-x", "calibre"], capture_output=True, timeout=PGREP_TIMEOUT
+            ).returncode
+            == 0
+        )
+    except subprocess.TimeoutExpired:
+        # Can't tell. This gates --apply, so the safe answer is "assume yes":
+        # refusing costs a re-run, guessing wrong writes to a live database.
+        return True
 
 
 def backup_db(db_path: str) -> str:
@@ -511,7 +545,7 @@ def main() -> int:
         print(f"write error: {e}", file=sys.stderr)
         return 1
     print(f"wrote {n} identifier(s).")
-    print("Next: run validate_library.py, then reconcile_file_metadata.py --apply")
+    print("Next: run validate_metadata.py, then reconcile_file_metadata.py --apply")
     if aborted:
         print("NOTE: the pass stopped early; re-run to cover the remaining books.")
         return 1

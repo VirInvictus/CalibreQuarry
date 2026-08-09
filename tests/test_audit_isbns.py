@@ -13,6 +13,7 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -212,15 +213,30 @@ class TestVerdicts(unittest.TestCase):
 
 class TestScoping(unittest.TestCase):
     def test_tag_matches_is_anchored_hierarchical(self):
-        self.assertTrue(isbns.tag_matches("NonFic", ["NonFic"]))
-        self.assertTrue(isbns.tag_matches("NonFic.Tech.AI", ["NonFic"]))
-        self.assertFalse(isbns.tag_matches("NonFiction", ["NonFic"]))
-        self.assertFalse(isbns.tag_matches("Fic.SciFi", ["NonFic"]))
+        self.assertTrue(isbns.tag_matches(["NonFic"], ["NonFic"]))
+        self.assertTrue(isbns.tag_matches(["NonFic.Tech.AI"], ["NonFic"]))
+        self.assertFalse(isbns.tag_matches(["NonFiction"], ["NonFic"]))
+        self.assertFalse(isbns.tag_matches(["Fic.SciFi"], ["NonFic"]))
 
     def test_tag_matches_accepts_several_prefixes(self):
         prefixes = ["NonFic.Philosophy", "NonFic.Religion"]
-        self.assertTrue(isbns.tag_matches("NonFic.Religion.Islam", prefixes))
-        self.assertFalse(isbns.tag_matches("NonFic.Tech", prefixes))
+        self.assertTrue(isbns.tag_matches(["NonFic.Religion.Islam"], prefixes))
+        self.assertFalse(isbns.tag_matches(["NonFic.Tech"], prefixes))
+
+    def test_tag_matches_considers_every_tag_not_just_the_first(self):
+        # The bug this pins: scoping used one tag pulled by a LIMIT 1 subquery
+        # with no ORDER BY, so a book carrying two tags was filtered on whichever
+        # one SQLite happened to return and went missing about half the time.
+        self.assertTrue(isbns.tag_matches(["Fic.Fantasy", "NonFic.Tech"], ["NonFic"]))
+        self.assertTrue(isbns.tag_matches(["NonFic.Tech", "Fic.Fantasy"], ["NonFic"]))
+        self.assertFalse(isbns.tag_matches(["Fic.Fantasy", "Fic.SciFi"], ["NonFic"]))
+        self.assertFalse(isbns.tag_matches([], ["NonFic"]))
+
+    def test_display_tag_prefers_a_tag_the_filter_selected_on(self):
+        tags = ["Fic.Fantasy", "NonFic.Tech"]
+        self.assertEqual(isbns.display_tag(tags, ["NonFic"]), "NonFic.Tech")
+        self.assertEqual(isbns.display_tag(tags, None), "Fic.Fantasy")
+        self.assertEqual(isbns.display_tag([], ["NonFic"]), "")
 
 
 class TestReporting(unittest.TestCase):
@@ -282,6 +298,10 @@ class TestLoadTargets(unittest.TestCase):
             INSERT INTO identifiers VALUES (3, 'goodreads', '12345');
             INSERT INTO tags VALUES (10, 'NonFic.Tech.AI');
             INSERT INTO tags VALUES (11, 'Fic.SciFi');
+            INSERT INTO tags VALUES (12, 'Ref.Manual');
+            -- book 1 carries two tags, the one no filter here matches linked
+            -- FIRST: a LIMIT 1 subquery would scope book 1 on 'Ref.Manual'.
+            INSERT INTO books_tags_link VALUES (1, 12);
             INSERT INTO books_tags_link VALUES (1, 10);
             INSERT INTO books_tags_link VALUES (2, 11);
             """
@@ -305,6 +325,27 @@ class TestLoadTargets(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             targets = isbns.load_targets(self._library(tmp), [2], None)
             self.assertEqual([t["id"] for t in targets], [2])
+
+    def test_scope_finds_a_book_by_a_tag_that_is_not_its_first(self):
+        # book 1's first-linked tag is Ref.Manual; scoping used to read exactly
+        # one arbitrary tag, so filtering on its OTHER tag lost the book.
+        with tempfile.TemporaryDirectory() as tmp:
+            targets = isbns.load_targets(self._library(tmp), None, ["NonFic.Tech"])
+            self.assertEqual([t["id"] for t in targets], [1])
+            # reported under the tag the filter selected on, not the first one
+            self.assertEqual(targets[0]["tag"], "NonFic.Tech.AI")
+            self.assertEqual(targets[0]["tags"], ["NonFic.Tech.AI", "Ref.Manual"])
+
+    def test_db_path_containing_uri_syntax_still_opens(self):
+        # '#' starts a URI fragment: interpolated raw into the file: URI, this
+        # opened some other database and failed with "no such table: books".
+        with tempfile.TemporaryDirectory() as tmp:
+            src = self._library(tmp)
+            odd = pathlib.Path(tmp) / "Books #2"
+            odd.mkdir()
+            shutil.copy2(src, odd / "metadata.db")
+            targets = isbns.load_targets(str(odd / "metadata.db"), None, None)
+            self.assertEqual([t["id"] for t in targets], [1, 2])
 
 
 class TestEpubExtraction(unittest.TestCase):

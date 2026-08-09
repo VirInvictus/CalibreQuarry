@@ -364,21 +364,33 @@ def _tui_prompt_str(label: str, default: str | None) -> str | None:
                 pass
             stdscr.refresh()
 
-            key = stdscr.getch()
-            if key in (curses.KEY_ENTER, 10, 13):
+            # get_wch, not getch: getch yields one byte at a time, so a typed
+            # 'ë' arrived as two out-of-range bytes and was dropped. A library
+            # of translated fiction is full of names that cannot be typed that
+            # way. get_wch hands back a str for a character and an int for a
+            # key code, so both shapes are handled below.
+            # A curses.error here is deliberately NOT caught: the screen is
+            # blocking, so a failure is a real one, and the outer handler
+            # degrades the session to the text prompt rather than spinning.
+            key = stdscr.get_wch()
+            # Every curses KEY_* constant is above 255, so a small int is a
+            # plain character and folds into the str path.
+            if isinstance(key, int) and key < 256:
+                key = chr(key)
+            if key in (curses.KEY_ENTER, "\n", "\r"):
                 result = "".join(buf).strip()
                 return result if result else (default or "")
-            elif key == 27:
+            elif key == "\x1b":
                 return None  # Esc cancels; it must never launch with defaults
-            elif key in (curses.KEY_BACKSPACE, 127, 8):
+            elif key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
                 if buf:
                     buf.pop()
-            elif key == 21:  # Ctrl-U: clear the field (pre-filled defaults)
+            elif key == "\x15":  # Ctrl-U: clear the field (pre-filled defaults)
                 buf.clear()
             elif key == curses.KEY_RESIZE:
                 pass
-            elif 32 <= key <= 126:
-                buf.append(chr(key))
+            elif isinstance(key, str) and key.isprintable():
+                buf.append(key)
 
     try:
         return _with_screen(_run)

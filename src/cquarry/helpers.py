@@ -1,6 +1,7 @@
 import os
 import struct
 import sys
+from urllib.parse import quote
 
 from cquarry.config import (
     CALIBRE_RATING_SCALE,
@@ -14,6 +15,17 @@ C_TITLE = "1;36"  # Bold Cyan
 C_ERR = "1;31"  # Bold Red
 C_WARN = "1;35"  # Bold Magenta
 C_DIM = "2"  # Dim
+
+
+def db_uri_ro(path: str) -> str:
+    """Build the read-only SQLite ``file:`` URI for a database path.
+
+    The path must be percent-encoded: '?' and '#' are URI syntax, so a library
+    at "Books #2/metadata.db" interpolated raw opens some other file entirely
+    and fails later with "no such table: books". quote() leaves '/' alone, so
+    path separators survive.
+    """
+    return f"file:{quote(path)}?mode=ro"
 
 
 def color(text: str, code: str) -> str:

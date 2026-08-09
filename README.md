@@ -41,7 +41,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Catalog** | `--catalog` | Formatted text catalog grouped by author, with ratings and series info |
 | **All wings** | `--all-wings` | Generate a separate catalog file for every virtual library |
 | **Statistics** | `--stats` | Format breakdown, rating distribution, tag taxonomy, publisher counts |
-| **Audit** | `--audit` | Report untagged, unrated, coverless, and low-resolution-cover books; deprecated-format-only and duplicate books; detect series gaps |
+| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
 | **Analytics** | `--analytics {author,pace,tags,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, Wing-overlap analysis |
@@ -153,7 +153,8 @@ cquarry --search 'tags:Fic.Fantasy and rating:false'
 
 # Books with no cover, or a cover so small it should be replaced
 cquarry --search 'cover:false'
-cquarry --audit                       # the low_res_cover rows in the report
+cquarry --audit                       # low_res_cover rows, plus cover_file_missing
+                                      # where the database claims a cover the disk lacks
 
 # Books I have only as PDF (conversion / re-acquisition candidates)
 cquarry --search 'formats:PDF and not formats:EPUB'
@@ -322,14 +323,14 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 ### Automated Test Suite
 
-The whole suite runs without a Calibre library (stdlib `unittest`, ~195 tests):
+The whole suite runs without a Calibre library (stdlib `unittest`, ~273 tests):
 
 - **Grammar** (`tests/test_search.py`): parser AST cases adapted from Calibre's own `search_query_parser_test.py`, covering quotes, escapes, colon handling in values, implicit `AND`, `OR`/`NOT`, and grouping.
 - **Matching** (`tests/test_search.py`): a battery against an in-memory provider, covering hierarchical tags, `=` exact, numeric/date relational, booleans, identifiers, `vl:` recursion, accent folding, and empty-query-is-all.
 - **Integration** (`tests/test_search.py`): a temporary SQLite fixture shaped like a Calibre `metadata.db`, exercising the full `CalibreDB` stack (search, `resolve_vl`, the Python-side series rollup).
-- **Helpers** (`tests/test_helpers.py`): rating-to-stars and the half-star glyph, series-gap detection, and the JPEG/PNG cover sizers (including a JPEG whose SOF sits past the first 1 KB).
-- **Modes** (`tests/test_modes.py`): catalog-mode cache isolation against a temporary database.
-- **TUI** (`tests/test_tui.py`): fallback-menu generation, prompt/cancel semantics, and the persistent-screen session lifecycle.
+- **Helpers** (`tests/test_helpers.py`): rating-to-stars and the half-star glyph, series-gap detection, the read-only URI builder (a library path containing `?` or `#`), and the JPEG/PNG cover sizers (including a JPEG whose SOF sits past the first 1 KB).
+- **Modes** (`tests/test_modes.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, and the audit's cover checks, all against a temporary database.
+- **TUI** (`tests/test_tui.py`): fallback-menu generation, prompt/cancel semantics, non-ASCII prompt input, and the persistent-screen session lifecycle.
 - **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`, `tests/test_audit_isbns.py`): `compress_pdf.py` size-sync and backup guards, the `audit_epub.py` analyzers, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, DRM classification, and the ISBN arithmetic, printed-ISBN extraction, and verdict rules behind `audit_isbns.py`.
 
 Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same command CI runs). The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.

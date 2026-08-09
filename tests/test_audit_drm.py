@@ -10,6 +10,8 @@ invoked); every other case here is decided by the pure-Python logic.
 
 import importlib.util
 import pathlib
+import shutil
+import sqlite3
 import struct
 import tempfile
 import unittest
@@ -281,3 +283,78 @@ class QpdfStandardTests(unittest.TestCase):
                 verdict = drm.classify_pdf(p)
         self.assertEqual(verdict.status, drm.BENIGN)
         self.assertEqual(verdict.kind, "encrypted-unclassified")
+
+
+class ConnectRoTests(unittest.TestCase):
+    """Library mode reads metadata.db. Every other reader in this repo copies
+    to a temp snapshot when Calibre holds the lock; audit_drm used to let the
+    OperationalError escape as a traceback instead."""
+
+    def _library(self, tmp, name="metadata.db"):
+        path = pathlib.Path(tmp) / name
+        con = sqlite3.connect(path)
+        con.executescript(
+            "CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, path TEXT);"
+            "INSERT INTO books VALUES (1, 'T', 'A/T (1)');"
+        )
+        con.commit()
+        con.close()
+        return path
+
+    def test_unlocked_db_is_read_directly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            con, tmpdir = drm.connect_ro(self._library(tmp))
+            try:
+                self.assertIsNone(tmpdir)  # no snapshot needed
+                self.assertEqual(con.execute("SELECT id FROM books").fetchone()[0], 1)
+            finally:
+                con.close()
+
+    def test_a_locked_db_falls_back_to_a_snapshot(self):
+        # A real exclusive lock, which is what a running Calibre produces: a
+        # read-only reader gets "database is locked" on its first statement.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._library(tmp)
+            locker = sqlite3.connect(path)
+            locker.execute("BEGIN EXCLUSIVE")
+            locker.execute("INSERT INTO books VALUES (2, 'T2', 'A/T2 (2)')")
+
+            # bound before patching: drm.sqlite3 IS the sqlite3 module, so
+            # calling through the patched name would recurse
+            real_connect = sqlite3.connect
+
+            def quick_connect(*a, **kw):
+                # SQLite waits 5s on a busy lock by default; the fallback path
+                # is what is under test, not the wait.
+                kw.setdefault("timeout", 0.1)
+                return real_connect(*a, **kw)
+
+            try:
+                with mock.patch.object(
+                    drm.sqlite3, "connect", side_effect=quick_connect
+                ):
+                    con, tmpdir = drm.connect_ro(path)
+                try:
+                    self.assertIsNotNone(tmpdir)  # read from the copy instead
+                    self.assertEqual(
+                        con.execute("SELECT id FROM books").fetchone()[0], 1
+                    )
+                finally:
+                    con.close()
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+            finally:
+                locker.rollback()
+                locker.close()
+
+    def test_a_path_with_uri_syntax_still_opens(self):
+        # '#' starts a URI fragment: raw interpolation opened another file.
+        with tempfile.TemporaryDirectory() as tmp:
+            odd = pathlib.Path(tmp) / "Books #2"
+            odd.mkdir()
+            con, tmpdir = drm.connect_ro(self._library(odd))
+            try:
+                self.assertEqual(con.execute("SELECT id FROM books").fetchone()[0], 1)
+            finally:
+                con.close()
+                if tmpdir:
+                    shutil.rmtree(tmpdir, ignore_errors=True)

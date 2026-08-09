@@ -6,7 +6,7 @@ import sys
 import tempfile
 from typing import Any
 
-from cquarry.helpers import calibre_rating_to_stars
+from cquarry.helpers import calibre_rating_to_stars, db_uri_ro
 from cquarry.search import (
     DT_BOOL,
     DT_DATE,
@@ -49,7 +49,7 @@ class CalibreDB:
 
     def _open(self, db_path: str) -> sqlite3.Connection:
         """Open the database read-only; fall back to a temp copy if locked."""
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(db_uri_ro(db_path), uri=True)
         try:
             conn.execute("SELECT 1 FROM books LIMIT 1")
             return conn
@@ -72,7 +72,7 @@ class CalibreDB:
             if os.path.exists(src):
                 shutil.copy2(src, tmp + suffix)
         self._tmp_path = tmp
-        return sqlite3.connect(f"file:{tmp}?mode=ro", uri=True)
+        return sqlite3.connect(db_uri_ro(tmp), uri=True)
 
     def close(self):
         self.conn.close()
