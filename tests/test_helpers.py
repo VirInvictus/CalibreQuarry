@@ -1,18 +1,55 @@
 """Tests for pure helpers: rating display, series-gap detection, image sizing."""
 
 import os
+import sqlite3
 import struct
 import tempfile
 import unittest
 
 from cquarry.helpers import (
     calibre_rating_to_stars,
+    db_uri_ro,
     detect_series_gaps,
     format_stars,
     get_image_size,
     get_jpeg_size,
     get_png_size,
 )
+
+
+class TestDbUri(unittest.TestCase):
+    def test_plain_path_keeps_its_separators(self):
+        self.assertEqual(
+            db_uri_ro("/home/x/Calibre Library/metadata.db"),
+            "file:/home/x/Calibre%20Library/metadata.db?mode=ro",
+        )
+
+    def test_uri_syntax_in_the_path_is_escaped(self):
+        # '#' starts a fragment and '?' starts a query: unescaped, SQLite opens
+        # a different file than the one asked for.
+        self.assertEqual(
+            db_uri_ro("/lib/Books #2/m.db"), "file:/lib/Books%20%232/m.db?mode=ro"
+        )
+        self.assertIn("%3F", db_uri_ro("/lib/what?ever/m.db"))
+
+    def test_it_is_always_read_only(self):
+        self.assertTrue(db_uri_ro("/x/m.db").endswith("?mode=ro"))
+
+    def test_a_database_under_such_a_path_actually_opens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            odd = os.path.join(tmp, "Books #2")
+            os.makedirs(odd)
+            path = os.path.join(odd, "metadata.db")
+            con = sqlite3.connect(path)
+            con.execute("CREATE TABLE books (id INTEGER)")
+            con.execute("INSERT INTO books VALUES (7)")
+            con.commit()
+            con.close()
+            ro = sqlite3.connect(db_uri_ro(path), uri=True)
+            try:
+                self.assertEqual(ro.execute("SELECT id FROM books").fetchone()[0], 7)
+            finally:
+                ro.close()
 
 
 class TestRatings(unittest.TestCase):

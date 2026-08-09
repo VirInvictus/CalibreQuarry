@@ -55,7 +55,7 @@ import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 FMT_EXT = {
     "EPUB": ".epub",
@@ -90,6 +90,10 @@ _CASE_OK = {
     "OCaml",
     "NCurses",
 }
+
+# Seconds any single external reader (exiftool, djvused) gets before it is
+# treated as hung. Generous for a page-count read on a large file.
+TOOL_TIMEOUT = 60
 
 MIN_COMMENT = 120  # chars; below this a description is a stub
 MIN_EPUB_TEXT = 30_000  # bytes of spine text; below this a "book" is suspect
@@ -280,11 +284,18 @@ def check_pdf(path: Path) -> list[str]:
         if b"%%EOF" not in f.read():
             flags.append("PDF_NO_EOF")
     if shutil.which("exiftool"):
-        r = subprocess.run(
-            ["exiftool", "-m", "-s3", "-PageCount", str(path)],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            r = subprocess.run(
+                ["exiftool", "-m", "-s3", "-PageCount", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=TOOL_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            # A malformed PDF can wedge exiftool indefinitely. Untimed, one such
+            # file stalls a whole-library sample with no output at all; a flag
+            # says which book to look at and the run continues.
+            return flags + ["PDF_TOOL_TIMEOUT"]
         pages = r.stdout.strip()
         if not pages.isdigit():
             flags.append("PDF_UNREADABLE_PAGECOUNT")
@@ -296,9 +307,15 @@ def check_pdf(path: Path) -> list[str]:
 def check_djvu(path: Path) -> list[str]:
     if not shutil.which("djvused"):
         return []
-    r = subprocess.run(
-        ["djvused", str(path), "-e", "n"], capture_output=True, text=True
-    )
+    try:
+        r = subprocess.run(
+            ["djvused", str(path), "-e", "n"],
+            capture_output=True,
+            text=True,
+            timeout=TOOL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return ["DJVU_TOOL_TIMEOUT"]
     pages = r.stdout.strip()
     if not pages.isdigit() or int(pages) < 2:
         return [f"DJVU_SUSPECT_PAGES:{pages or 'unreadable'}"]
@@ -514,7 +531,7 @@ def write_review_chunks(
             )
             fh.write("\n".join(format_review_block(r) for r in chunk))
         path.with_suffix(".ids").write_text(
-            "\n".join(str(r["id"]) for r in chunk) + "\n"
+            "\n".join(str(r["id"]) for r in chunk) + "\n", encoding="utf-8"
         )
         written.append(path)
     return written
@@ -601,7 +618,9 @@ def main() -> int:
         print(f"ERROR: {db} not found", file=sys.stderr)
         return 99
     library = db.parent
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    # quote(): '?' and '#' are URI syntax, so a library path containing either
+    # would open some other file and fail with "no such table: books".
+    con = sqlite3.connect(f"file:{quote(str(db))}?mode=ro", uri=True)
     cur = con.cursor()
 
     all_ids = [r[0] for r in cur.execute("SELECT id FROM books")]
@@ -626,7 +645,13 @@ def main() -> int:
     hard_failures = 0
     flagged = 0
     review_rows: list[dict[str, str]] = []
-    with open(args.report, "w") as rep, open(args.bundle, "w") as bun:
+    # encoding="utf-8" explicitly: titles and blurbs are full of non-ASCII, and
+    # under a non-UTF-8 locale (cron, LANG=C) the default encoding raises
+    # UnicodeEncodeError partway through a long run.
+    with (
+        open(args.report, "w", encoding="utf-8") as rep,
+        open(args.bundle, "w", encoding="utf-8") as bun,
+    ):
         rep.write("id\tflags\ttitle\n")
         for bid in sample:
             title, path = cur.execute(
@@ -711,11 +736,17 @@ def main() -> int:
         print(f"\nreview: {len(review_rows)} book(s) in {len(written)} chunk(s)")
         for p in written:
             print(f"  {p}  (+ {p.with_suffix('.ids').name})")
-        print(
-            "\nJudge each block on three axes and write a verdict file with rows\n"
-            "  <id>\\t<title OK|BAD>\\t<author OK|BAD>\\t<comment OK|BAD>\\t<note>\n"
-            f"then: spot_check.py --record verdicts.tsv --against {written[0].with_suffix('.ids').name}"
-        )
+        if not written:
+            # An empty sample (--n 0, or a --limit that selects nothing) wrote
+            # no chunks, and the instructions below name the first one.
+            print("nothing to review: the sample selected no books.")
+        else:
+            print(
+                "\nJudge each block on three axes and write a verdict file with rows\n"
+                "  <id>\\t<title OK|BAD>\\t<author OK|BAD>\\t<comment OK|BAD>\\t<note>\n"
+                f"then: spot_check.py --record verdicts.tsv --against "
+                f"{written[0].with_suffix('.ids').name}"
+            )
 
     print(f"flagged: {flagged}/{n} ({hard_failures} hard failures)")
     print(f"report: {args.report}\nbundle: {args.bundle}")

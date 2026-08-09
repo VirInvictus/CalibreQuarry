@@ -56,6 +56,11 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                     w, h = size
                     if max(w, h) < 500:
                         problems.append(f"low_res_cover({w}x{h})")
+            else:
+                # has_cover says yes but the file is gone: the DB and the disk
+                # disagree, which every cover consumer (Calibre's own grid, the
+                # exporters) will hit. Previously this was silently clean.
+                problems.append("cover_file_missing")
 
         if problems:
             issues.append(

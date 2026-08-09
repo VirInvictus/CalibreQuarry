@@ -1,5 +1,39 @@
 # CalibreQuarry — Patch Notes
 
+## v3.9.2 (2026-08-09)
+
+A bug, maintenance and improvement sweep across the package and all seven companion scripts. Eight fixes, three additions, four cleanups, every one pinned by a regression test. The suite grows from 243 to 273 tests.
+
+### Fixes
+
+**Every database opener built its `file:` URI by raw interpolation.** `?` and `#` are URI syntax, so a library at `Books #2/metadata.db` resolved to a different path entirely and failed with the thoroughly unhelpful "no such table: books". This affected `db.py` and six of the seven scripts; `fetch_library_codes.py` already percent-encoded its path, which is the form the rest have adopted via a shared `db_uri_ro` helper. The package's helper is in `helpers.py`; the standalone scripts each carry their own copy, as they carry everything else.
+
+**`--tag` scoping in `audit_isbns.py` and `fetch_library_codes.py` matched one arbitrary tag per book.** Both pulled a single tag through a `LIMIT 1` subquery with no `ORDER BY`, so a book carrying two tags was filtered on whichever one SQLite happened to return: a book tagged both `Fic.Fantasy` and `NonFic.Tech` was invisible to `--tag NonFic.Tech` roughly half the time, and `fetch_library_codes.py`'s per-branch hit-rate report was attributing books to a branch at random. Scoping now considers every tag, and a book is reported under a tag the filter actually selected on. **This is latent on the reference library**, where all 7,439 books carry exactly one tag; it was found by reading the query, reproduced with a two-tag fixture, and fixed as insurance rather than to change any result observed so far.
+
+**`compress_pdf.py --out-dir` pointed at the PDF's own directory destroyed the original.** The output lands at `out_dir/<same name>`, which in that case *is* the source path, so the mode documented as leaving the original untouched moved the compressed temp over it, left no `.pre-compress.pdf` rollback, and then printed "Original untouched at:" followed by the path of the file it had just replaced. It is now refused (exit 2), with the comparison resolving both sides so a symlinked directory cannot slip past.
+
+**`write_all_wings` silently overwrote colliding wing catalogs.** Sanitizing a wing name to a filename is lossy: "Tabletop: RPG" and "Tabletop RPG" both reduce to `Tabletop_RPG`, and a punctuation-only name reduces to nothing, yielding `_Library.txt`. One wing's catalog replaced another's with no warning, leaving a file that claimed to be a wing it was not. Names are now de-duplicated with a numeric suffix, and a name that sanitizes away gets a positional fallback.
+
+**`write_catalog` could not write into a directory that did not exist yet.** `run_audit` and `run_export` both create the parent first; `write_catalog` opened directly, so `--catalog --output reports/catalog.txt` exited 1 on a `FileNotFoundError`. It now matches its siblings.
+
+**`spot_check.py --review` crashed on an empty sample.** With no books selected (`--n 0`, or a `--limit` that selects nothing) no chunk files were written, and the closing instructions indexed `written[0]`. It now reports an empty sample.
+
+**`audit_drm.py` and `audit_epub.py` had no locked-database fallback.** The package, `validate_metadata.py` and `reconcile_file_metadata.py` all read from a temporary snapshot when Calibre holds the lock; these two let the `OperationalError` escape as a traceback, so a library-mode run while Calibre was open simply crashed. Both now degrade the same way, pinned by tests that take a real `BEGIN EXCLUSIVE` lock rather than faking the error.
+
+**Two writers used the locale's encoding instead of UTF-8.** `spot_check.py`'s report and bundle, and `audit_drm.py`'s CSV, were the only file writes in the repository without an explicit `encoding=`; a title outside the locale's character set raises `UnicodeEncodeError` partway through a long run. Reachable only under a genuinely non-UTF-8 locale (`en_US.ISO-8859-1` and the like) rather than the far commoner `LANG=C`, which auto-enables Python's UTF-8 mode: this is consistency with the rest of the repository more than a crash anyone was hitting.
+
+### Additions
+
+**`--audit` reports `cover_file_missing`.** A book whose database row says `has_cover` but whose cover file is gone from disk was silently clean: the audit flagged a missing cover record and a low-resolution cover, but not the case where the two sources of truth disagree. Every cover consumer hits that, Calibre's own grid included.
+
+**The curses prompt accepts non-ASCII input.** It read one byte at a time and discarded anything outside 32-126, so `Brontë` could not be typed into a search query or an output path. It now reads whole characters (`get_wch`), which for a library full of translated fiction is the difference between the TUI being usable for search and not.
+
+**Every external tool call is bounded by a timeout.** `spot_check.py` (exiftool, djvused), `reconcile_file_metadata.py` (calibredb, exiftool, qpdf, djvused, pgrep), `fetch_library_codes.py` (pgrep) and `compress_pdf.py`'s inspection probes previously had none, so a single wedged tool on a single damaged file hung a whole-library run with no indication of which book it stopped on. Each failure path is handled rather than merely raised: a hung reader flags that book and the run continues. **Ghostscript itself is deliberately left unbounded** in `compress_pdf.py`, because a legitimate 1 GB sourcebook takes many minutes and killing that mid-convert would be the wrong answer.
+
+### Maintenance
+
+`audit_epub.py` extracted each book's rendered text twice under `all`: `emptytext` built it per spine document and `ocr` rebuilt the same string, which is the expensive half of a pass whose entire purpose is touching each EPUB once. It is now computed once per book and shared. Two stale documentation references to `validate_library.py`, a script that is not in this repository, now point at `validate_metadata.py`; `audit_epub.py`'s usage line said "all three audits" when there have been four since v3.6.0. `audit_drm.py` imported `sqlite3` inside a function while importing everything else at module scope, and `stats.py` carried a conditional whose two branches computed the same value.
+
 ## v3.9.1 (2026-08-08)
 
 `audit_isbns.py` counted any labelled ISBN as the book's own. Books quote other books' ISBNs constantly, and one citation is indistinguishable from a self-identification if you only count numbers, so a handful of famous false accusations followed: *The Atrocity Archives* names *The New Hacker's Dictionary*'s ISBN in a glossary entry, *Metamagical Themas* lists one among Hofstadter's self-referential joke titles, and *C++ Primer Plus* advertises six other Sams books in its back matter.

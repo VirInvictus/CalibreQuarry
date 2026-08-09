@@ -236,6 +236,43 @@ class TestBackupGuard(unittest.TestCase):
         self.assertEqual(src.read_bytes(), b"%PDF-1.4 fake")
 
 
+class TestOutDirGuard(unittest.TestCase):
+    """--out-dir promises the original is untouched, and lands the result at
+    out_dir/<same name>. Pointed at the file's own directory those are the same
+    path, so the safe mode used to replace the original with no rollback."""
+
+    def test_out_dir_equal_to_the_source_dir_is_refused(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="cq_outdir_"))
+        try:
+            src = tmp / "book.pdf"
+            src.write_bytes(b"%PDF-1.4 original")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = compress_pdf.compress(src, "ebook", dry_run=False, out_dir=tmp)
+            self.assertEqual(rc, 2)
+            self.assertEqual(src.read_bytes(), b"%PDF-1.4 original")
+            self.assertIn("overwrite the original", buf.getvalue())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_a_symlinked_out_dir_is_still_caught(self):
+        # The comparison resolves both sides, so aiming at a symlink to the
+        # source directory does not sneak past it.
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="cq_outdir_"))
+        try:
+            src = tmp / "book.pdf"
+            src.write_bytes(b"%PDF-1.4 original")
+            link = tmp / "alias"
+            link.symlink_to(tmp)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = compress_pdf.compress(src, "ebook", dry_run=False, out_dir=link)
+            self.assertEqual(rc, 2)
+            self.assertEqual(src.read_bytes(), b"%PDF-1.4 original")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class TestResolveLibraryRoot(unittest.TestCase):
     """audit_epub_content finds the library next to the script or in the cwd."""
 
@@ -821,6 +858,102 @@ class TestAllIncludesOcr(unittest.TestCase):
         self.assertIn("REVIEW", out)
 
 
+class TestVisibleTextCache(unittest.TestCase):
+    """emptytext and ocr both need the book's rendered text. Under `all` they
+    each used to strip tags over the whole book independently, which is the
+    expensive half of a pass whose whole point is touching each EPUB once."""
+
+    def _book(self, tmp):
+        import zipfile
+
+        p = pathlib.Path(tmp) / "t.epub"
+        body = "<p>" + ("Some ordinary prose here. " * 40) + "</p>"
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", TestEmptyTextScan.CONTAINER)
+            z.writestr("content.opf", TestEmptyTextScan.OPF)
+            z.writestr("text.xhtml", f"<html><body>{body}</body></html>")
+        return audit_epub.load_book(p)
+
+    def test_text_is_extracted_once_and_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = self._book(tmp)
+            calls = []
+            real = audit_epub._visible_text
+            audit_epub._visible_text = lambda html: (calls.append(1), real(html))[1]
+            try:
+                audit_epub.analyze_emptytext(book)
+                after_first = len(calls)
+                audit_epub.analyze_ocr(book)
+                self.assertEqual(len(calls), after_first)  # ocr reused the cache
+            finally:
+                audit_epub._visible_text = real
+
+    def test_cached_text_matches_a_direct_extraction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = self._book(tmp)
+            direct = [
+                audit_epub._visible_text(book.docs.get(d, "")) for d in book.spine
+            ]
+            self.assertEqual(book.visible_texts(), direct)
+
+
+class TestAuditEpubConnectRo(unittest.TestCase):
+    """Library mode used to open metadata.db with no lock handling at all, so
+    a run while Calibre held the database died with a traceback."""
+
+    def _library(self, tmp):
+        path = pathlib.Path(tmp) / "metadata.db"
+        con = sqlite3.connect(path)
+        con.executescript(
+            "CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, path TEXT);"
+            "INSERT INTO books VALUES (1, 'T', 'A/T (1)');"
+        )
+        con.commit()
+        con.close()
+        return path
+
+    def test_unlocked_db_is_read_directly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            con, tmpdir = audit_epub.connect_ro(self._library(tmp))
+            try:
+                self.assertIsNone(tmpdir)
+                self.assertEqual(con.execute("SELECT id FROM books").fetchone()[0], 1)
+            finally:
+                con.close()
+
+    def test_a_locked_db_falls_back_to_a_snapshot(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._library(tmp)
+            locker = sqlite3.connect(path)
+            locker.execute("BEGIN EXCLUSIVE")
+            locker.execute("INSERT INTO books VALUES (2, 'T2', 'A/T2 (2)')")
+            real_connect = sqlite3.connect
+
+            def quick_connect(*a, **kw):
+                kw.setdefault("timeout", 0.1)  # do not sit out the 5s busy wait
+                return real_connect(*a, **kw)
+
+            try:
+                with mock.patch.object(
+                    audit_epub.sqlite3, "connect", side_effect=quick_connect
+                ):
+                    con, tmpdir = audit_epub.connect_ro(path)
+                try:
+                    self.assertIsNotNone(tmpdir)
+                    self.assertEqual(
+                        con.execute("SELECT id FROM books").fetchone()[0], 1
+                    )
+                finally:
+                    con.close()
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+            finally:
+                locker.rollback()
+                locker.close()
+
+
 class TestSpotCheckReview(unittest.TestCase):
     """Review mode: the id reconciliation is the part that must not fail open."""
 
@@ -941,6 +1074,46 @@ class TestSpotCheckReview(unittest.TestCase):
             seen += [int(x) for x in p.with_suffix(".ids").read_text().split()]
         self.assertEqual(sorted(seen), [1, 2, 3, 4, 5])
         self.assertIn("##### 1", written[0].read_text())
+
+    def test_chunking_an_empty_sample_writes_nothing(self):
+        # Regression: main() then indexed written[0] for the --against hint and
+        # died with IndexError instead of reporting an empty sample.
+        self.assertEqual(spot_check.write_review_chunks([], self.tmp / "r", 2), [])
+
+    def test_review_of_an_empty_sample_does_not_crash(self):
+        import sys
+        from unittest import mock
+
+        db = self.tmp / "metadata.db"
+        con = sqlite3.connect(db)
+        con.executescript(
+            "CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, path TEXT,"
+            " pubdate TEXT);"
+            "INSERT INTO books VALUES (1, 'T', 'A/T (1)', '2020-01-01');"
+        )
+        con.commit()
+        con.close()
+        argv = [
+            "spot_check.py",
+            "--db",
+            str(db),
+            "--n",
+            "0",
+            "--review",
+            "--report",
+            str(self.tmp / "r.tsv"),
+            "--bundle",
+            str(self.tmp / "b.txt"),
+            "--ledger",
+            str(self.tmp / "led.tsv"),
+            "--review-prefix",
+            str(self.tmp / "rev"),
+        ]
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(buf):
+            rc = spot_check.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("nothing to review", buf.getvalue())
 
 
 class TestContentSections(unittest.TestCase):

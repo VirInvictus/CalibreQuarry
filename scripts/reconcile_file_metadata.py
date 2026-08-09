@@ -69,6 +69,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 RED = "\033[31m" if USE_COLOR else ""
@@ -122,6 +123,15 @@ FORMAT_FIELDS: dict[str, tuple[str, ...]] = {
 CALIBREDB_FORMATS = {"EPUB", "AZW3", "MOBI"}
 EXIFTOOL_FORMATS = {"PDF"}
 DJVUSED_FORMATS = {"DJVU"}
+
+# Every external call is bounded. A full run is thousands of subprocesses, and
+# one wedged tool on one damaged file used to hang the whole pass with no way to
+# tell which book it stopped on. Writes get more room than reads; a calibredb
+# chunk re-embeds up to 100 books.
+READ_TIMEOUT = 60
+WRITE_TIMEOUT = 180
+CALIBREDB_TIMEOUT = 900
+PGREP_TIMEOUT = 10
 
 
 # --- normalisation ---------------------------------------------------------
@@ -190,10 +200,17 @@ def parse_identifiers(value: str | None) -> dict[str, str]:
 # --- database side ---------------------------------------------------------
 
 
+def db_uri_ro(path: Path) -> str:
+    """Read-only SQLite URI for a path. The path must be percent-encoded: '?'
+    and '#' are URI syntax, so a library at "Books #2/metadata.db" interpolated
+    raw opens some other file and fails with "no such table: books"."""
+    return f"file:{quote(str(path))}?mode=ro"
+
+
 def connect_ro(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
     """Open read-only; if Calibre holds the lock, read a temp copy (returning
     the temp dir for cleanup). Mirrors scripts/validate_metadata.py."""
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con = sqlite3.connect(db_uri_ro(db_path), uri=True)
     con.row_factory = sqlite3.Row
     try:
         con.execute("SELECT 1 FROM books LIMIT 1")
@@ -205,7 +222,7 @@ def connect_ro(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
         src = Path(str(db_path) + suffix)
         if src.exists():
             shutil.copy2(src, Path(tmpdir) / ("metadata.db" + suffix))
-    con = sqlite3.connect(f"file:{Path(tmpdir) / 'metadata.db'}?mode=ro", uri=True)
+    con = sqlite3.connect(db_uri_ro(Path(tmpdir) / "metadata.db"), uri=True)
     con.row_factory = sqlite3.Row
     return con, tmpdir
 
@@ -292,7 +309,7 @@ def read_ebook_meta(path: Path) -> dict[str, str] | None:
             ["ebook-meta", str(path)],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=READ_TIMEOUT,
         )
     except OSError, subprocess.TimeoutExpired:
         return None
@@ -329,7 +346,7 @@ def read_djvu_meta(path: Path) -> dict[str, str] | None:
             ["djvused", str(path), "-e", "print-meta"],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=READ_TIMEOUT,
         )
     except OSError, subprocess.TimeoutExpired:
         return None
@@ -353,7 +370,7 @@ def read_pdf_meta(path: Path) -> dict[str, str] | None:
             ["exiftool", "-j", "-Title", "-Author", "-Publisher", "-Date", str(path)],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=READ_TIMEOUT,
         )
     except OSError, subprocess.TimeoutExpired:
         return None
@@ -451,11 +468,18 @@ def diff_fields(db: dict, fm: dict[str, str], fmt: str) -> list[str]:
 def calibre_running() -> bool:
     try:
         return (
-            subprocess.run(["pgrep", "-x", "calibre"], capture_output=True).returncode
+            subprocess.run(
+                ["pgrep", "-x", "calibre"], capture_output=True, timeout=PGREP_TIMEOUT
+            ).returncode
             == 0
         )
     except OSError:
         return False
+    except subprocess.TimeoutExpired:
+        # Can't tell. This gates --apply, so the safe answer is "assume yes":
+        # refusing costs a re-run with --force, guessing wrong writes files
+        # underneath a live Calibre.
+        return True
 
 
 def embed_calibredb(ids: list[int], library_root: Path) -> bool:
@@ -470,7 +494,18 @@ def embed_calibredb(ids: list[int], library_root: Path) -> bool:
             str(library_root),
             *chunk,
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=CALIBREDB_TIMEOUT
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                f"  {RED}embed_metadata timed out{RESET} after {CALIBREDB_TIMEOUT}s "
+                f"on {len(chunk)} book(s) starting at #{chunk[0]}",
+                file=sys.stderr,
+            )
+            ok = False
+            continue
         if res.returncode != 0:
             print(
                 f"  {RED}embed_metadata failed{RESET}: {res.stderr.strip()[:200]}",
@@ -493,11 +528,19 @@ def embed_djvu(db: dict, path: Path) -> bool:
         tf.write("\n".join(lines) + "\n")
         meta_file = tf.name
     try:
-        res = subprocess.run(
-            ["djvused", str(path), "-e", f'set-meta "{meta_file}"', "-s"],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            res = subprocess.run(
+                ["djvused", str(path), "-e", f'set-meta "{meta_file}"', "-s"],
+                capture_output=True,
+                text=True,
+                timeout=WRITE_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                f"  {RED}djvused timed out{RESET} on {path.name}",
+                file=sys.stderr,
+            )
+            return False
         if res.returncode != 0:
             print(
                 f"  {RED}djvused failed{RESET} on {path.name}: {res.stderr.strip()[:160]}",
@@ -548,7 +591,16 @@ def _run_exiftool(db: dict, path: Path) -> subprocess.CompletedProcess:
         args.append(f"-Keywords={'; '.join(db['tags'])}")
         args.append(f"-XMP-dc:Subject={'; '.join(db['tags'])}")
     args.append(str(path))
-    return subprocess.run(args, capture_output=True, text=True)
+    try:
+        return subprocess.run(
+            args, capture_output=True, text=True, timeout=WRITE_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        # Synthesize the failure shape the callers already handle, so a hung
+        # exiftool reads as "this one file failed" rather than killing the run.
+        return subprocess.CompletedProcess(
+            args, 1, "", f"exiftool timed out after {WRITE_TIMEOUT}s"
+        )
 
 
 def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
@@ -564,9 +616,15 @@ def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
     if res.returncode == 0:
         return True
     if repair and is_repairable_pdf_error(res.stderr):
-        qpdf = subprocess.run(
-            ["qpdf", "--replace-input", str(path)], capture_output=True, text=True
-        )
+        try:
+            qpdf = subprocess.run(
+                ["qpdf", "--replace-input", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=WRITE_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            qpdf = subprocess.CompletedProcess([], 1, "", "qpdf timed out")
         if qpdf.returncode in (0, 3):  # 0 = clean, 3 = rebuilt with warnings
             backup = path.with_name(path.name + ".~qpdf-orig")
             try:

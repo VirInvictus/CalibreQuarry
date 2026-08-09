@@ -84,6 +84,22 @@ What's done, what's next. Updated as of v3.9.0.
 - [x] **`fetch_library_codes.py`** (v3.8.0): derive LoC Classification codes from the LoC SRU catalogue (`bath.isbn`, the index that actually works, unlike the existing Calibre plugin's dead `dc.identifier` path) and store them as `lcc`/`ddc` identifiers. Dry-run default with per-branch hit rates, disk-cached and resumable, 2.0s pacing with backoff and an eight-failure abort; `--apply` backs up `metadata.db` and refuses while Calibre runs.
 - [x] **`reconcile_file_metadata.py` identifier-space fix** (v3.8.0): `parse_identifiers` split on commas *or whitespace*, so any identifier value containing a space (`lcc:BF637.S4 G63 2007`) was truncated and the book reported drifted forever; now splits on commas alone, the format `ebook-meta` actually emits.
 
+## Maintenance (full-repo sweep, 2026-08-09, shipped as v3.9.2)
+*Package and all seven companion scripts. Eight fixes, three additions, four cleanups, each pinned by a regression test (suite: 243 to 273). Full detail in `patchnotes.md` v3.9.2.*
+
+- [x] Every `file:` URI is percent-encoded (`db_uri_ro`): a library path containing `?` or `#` opened a different file and failed with "no such table: books". Package plus six scripts; `fetch_library_codes.py` already did it right
+- [x] `audit_isbns.py` / `fetch_library_codes.py`: `--tag` scoping considers every tag, not one arbitrary `LIMIT 1` pick. **Latent on the reference library** (all 7,439 books carry exactly one tag); reproduced with a two-tag fixture
+- [x] `compress_pdf.py`: `--out-dir` aimed at the PDF's own directory is refused instead of destroying the original with no rollback
+- [x] `catalog.py`: colliding wing filenames get distinct files; `write_catalog` creates a missing output directory like `run_audit`/`run_export` do
+- [x] `spot_check.py`: `--review` on an empty sample reports instead of raising IndexError
+- [x] `audit_drm.py` / `audit_epub.py`: locked-database snapshot fallback, matching the package and the other readers (tests take a real `BEGIN EXCLUSIVE` lock)
+- [x] `spot_check.py` / `audit_drm.py`: explicit `encoding="utf-8"` on the last two writers lacking it
+- [x] `--audit` flags `cover_file_missing` (has_cover set, file gone from disk)
+- [x] TUI prompt reads whole characters (`get_wch`), so non-ASCII can be typed into a query or path
+- [x] Every external tool call bounded by a timeout, each failure path handled; ghostscript deliberately left unbounded
+- [x] `audit_epub.py` extracts each book's rendered text once, shared by `emptytext` and `ocr`, instead of twice under `all`
+- [x] Stale docs closed: two `validate_library.py` references (not a script in this repo), "all three audits" for four, function-scoped `sqlite3` import, no-op branch in `stats.py`
+
 ## Maintenance (full-repo bug sweep, 2026-08-07, shipped as v3.8.1)
 *Package, all seven companion scripts, tests, and docs. The package core was clean; the scripts yielded nine fixes, each pinned by a regression test (suite: 195 to 208). Full detail in `patchnotes.md` v3.8.1.*
 

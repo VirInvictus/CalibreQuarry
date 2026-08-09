@@ -29,12 +29,12 @@ the per-book verdict. `all` opens each EPUB once and feeds the decoded spine to
 all four analyzers (the expensive part is decompression, so this is a real
 win at library scale).
 
-Companion to validate_library.py / validate_metadata.py (which audit metadata)
-and to Bindery (which repairs EPUB structure). This one reads body text and
-changes nothing; it opens metadata.db strictly mode=ro.
+Companion to validate_metadata.py (which audits the catalogue) and to Bindery
+(which repairs EPUB structure). This one reads body text and changes nothing;
+it opens metadata.db strictly mode=ro.
 
 Run from the library directory:
-    python3 audit_epub.py all                 # all three audits, whole library
+    python3 audit_epub.py all                 # all four audits, whole library
     python3 audit_epub.py content             # one audit, whole library
     python3 audit_epub.py all ~/Downloads     # vet loose .epub files before import
     python3 audit_epub.py emptytext ~/Downloads --min-chars 1000
@@ -53,11 +53,14 @@ Exit codes:
 import argparse
 import os
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 import zipfile
 from collections import Counter
 from pathlib import Path
+from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
 # ----------------------------------------------------------------------------
@@ -73,6 +76,31 @@ def resolve_library_root() -> Path | None:
         if (d / "metadata.db").is_file():
             return d
     return None
+
+
+def db_uri_ro(path: Path) -> str:
+    """Read-only SQLite URI for a path. The path must be percent-encoded: '?'
+    and '#' are URI syntax, so a library at "Books #2/metadata.db" interpolated
+    raw opens some other file and fails with "no such table: books"."""
+    return f"file:{quote(str(path))}?mode=ro"
+
+
+def connect_ro(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
+    """Open read-only; if Calibre holds the lock, read a temp copy (returning
+    the temp dir for cleanup). Mirrors the cquarry package and the other
+    companion scripts, which all degrade this way instead of dying on a lock."""
+    con = sqlite3.connect(db_uri_ro(db_path), uri=True)
+    try:
+        con.execute("SELECT 1 FROM books LIMIT 1")
+        return con, None
+    except sqlite3.OperationalError:
+        con.close()
+    tmpdir = tempfile.mkdtemp(prefix="cquarry-epub-")
+    for suffix in ("", "-wal", "-shm"):
+        src = Path(str(db_path) + suffix)
+        if src.exists():
+            shutil.copy2(src, Path(tmpdir) / ("metadata.db" + suffix))
+    return sqlite3.connect(db_uri_ro(Path(tmpdir) / "metadata.db"), uri=True), tmpdir
 
 
 # ANSI colours; suppress when stdout isn't a TTY.
@@ -104,7 +132,7 @@ class Book:
     """A decompressed EPUB: spine documents read once and shared by every
     analyzer. The whole point of the single-pass design lives here."""
 
-    __slots__ = ("spine", "nav", "lang", "docs", "names")
+    __slots__ = ("spine", "nav", "lang", "docs", "names", "_visible")
 
     def __init__(self, spine, nav, lang, docs, names):
         self.spine = spine  # resolved, in-order, in-archive spine doc paths
@@ -112,6 +140,18 @@ class Book:
         self.lang = lang  # declared dc:language (lowercased), or ""
         self.docs = docs  # {path: decoded html} for every spine doc
         self.names = names  # full archive namelist (for image / marker counts)
+        self._visible: list[str] | None = None
+
+    def visible_texts(self) -> list[str]:
+        """Rendered text, one entry per spine doc, computed once per book.
+
+        emptytext and ocr both need it, and under `all` they each used to strip
+        tags over the whole book independently: the second pass was pure waste
+        in a design whose entire point is touching each EPUB once.
+        """
+        if self._visible is None:
+            self._visible = [_visible_text(self.docs.get(d, "")) for d in self.spine]
+        return self._visible
 
 
 def load_book(path: Path) -> Book:
@@ -599,7 +639,7 @@ def _visible_chars(html: str) -> int:
 
 def analyze_emptytext(book: Book) -> dict:
     """Count visible text across the (pre-read) spine and gather triage signals."""
-    texts = [_visible_text(book.docs.get(doc, "")) for doc in book.spine]
+    texts = book.visible_texts()
     chars = sum(len(t) for t in texts)
     images = sum(1 for n in book.names if n.lower().endswith(IMAGE_EXTS))
     bookmate = any(any(m in n.lower() for m in BOOKMATE_MARKERS) for n in book.names)
@@ -806,7 +846,7 @@ def analyze_ocr(book: Book) -> dict:
                     examples.append({"prev": prev[-60:], "next": nxt[:60]})
 
     # Side signals over the visible text (dictionary-free by design).
-    text = " ".join(_visible_text(book.docs.get(doc, "")) for doc in book.spine)
+    text = " ".join(book.visible_texts())
     glued: list[str] = []
     for w in set(_CAMEL_RE.findall(text)):
         hyphenated = _HUMP_RE.sub("-", w)
@@ -976,24 +1016,32 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
         return 2
     db_path = library_root / "metadata.db"
 
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    cur = con.cursor()
-    booktags: dict[int, list[str]] = {}
-    for bid, tname in cur.execute(
-        "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"
-    ):
-        booktags.setdefault(bid, []).append(tname)
-    declared: dict[int, set[str]] = {}
-    for bid, lang in cur.execute(
-        "SELECT bl.book, l.lang_code FROM books_languages_link bl "
-        "JOIN languages l ON l.id = bl.lang_code"
-    ):
-        declared.setdefault(bid, set()).add(lang)
-    rows = cur.execute(
-        "SELECT b.id, b.title, b.path, d.name FROM data d "
-        "JOIN books b ON b.id = d.book WHERE d.format = 'EPUB' ORDER BY b.id"
-    ).fetchall()
-    con.close()
+    try:
+        con, tmpdir = connect_ro(db_path)
+    except sqlite3.Error as e:
+        print(f"ERROR: cannot open {db_path}: {e}")
+        return 2
+    try:
+        cur = con.cursor()
+        booktags: dict[int, list[str]] = {}
+        for bid, tname in cur.execute(
+            "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"
+        ):
+            booktags.setdefault(bid, []).append(tname)
+        declared: dict[int, set[str]] = {}
+        for bid, lang in cur.execute(
+            "SELECT bl.book, l.lang_code FROM books_languages_link bl "
+            "JOIN languages l ON l.id = bl.lang_code"
+        ):
+            declared.setdefault(bid, set()).add(lang)
+        rows = cur.execute(
+            "SELECT b.id, b.title, b.path, d.name FROM data d "
+            "JOIN books b ON b.id = d.book WHERE d.format = 'EPUB' ORDER BY b.id"
+        ).fetchall()
+    finally:
+        con.close()
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     nonlatin_hits: list[tuple] = []
     latin_foreign: list[tuple] = []

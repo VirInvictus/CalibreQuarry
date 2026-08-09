@@ -50,9 +50,12 @@ The search engine in `src/cquarry/search.py` ports Calibre's grammar and matchin
 
 ### 2.4 Database Access
 
-Read-only. Never writes. Opens with `?mode=ro` URI. All data comes from
-standard Calibre tables — no custom columns required. Ratings are stored
-0–10 internally (10 = 5 stars); converted to 0–5 for display.
+Read-only. Never writes. Opens with a `?mode=ro` URI, built by
+`helpers.db_uri_ro`, which percent-encodes the path: `?` and `#` are URI
+syntax, so a library directory containing either would otherwise resolve to
+a different file. All data comes from standard Calibre tables — no custom
+columns required. Ratings are stored 0–10 internally (10 = 5 stars);
+converted to 0–5 for display.
 
 If the database is locked by a running Calibre instance, CalibreQuarry
 copies it (plus WAL/SHM journals) to a temporary snapshot and reads
@@ -76,7 +79,7 @@ The path is saved to config on first successful resolution.
 | Catalog | `--catalog` | Formatted text grouped by author with ratings and series |
 | All wings | `--all-wings` | Separate catalog per virtual library |
 | Statistics | `--stats` | Format breakdown, ratings, tags, publishers |
-| Audit | `--audit` | Untagged, unrated, coverless/low-res books; deprecated formats; duplicates; series gaps |
+| Audit | `--audit` | Untagged, unrated, coverless/low-res books, and covers the DB claims but the disk lacks; deprecated formats; duplicates; series gaps |
 | Recent | `--recent N` | N most recently added books |
 | Series | `--series` | All series with completeness and gap detection |
 | Analytics | `--analytics {author,pace,tags,overlap}` | Per-author stats, reading-pace trend, tag tree, Wing overlap |
@@ -121,7 +124,7 @@ The `scripts/` directory holds standalone maintenance tools that are **not** par
 | `audit_epub.py` | Reads EPUB body text to flag content problems metadata cannot catch: wrong-language editions and injected foreign notices (`content`), print page numbers baked into the flow (`pagenumbers`), empty/placeholder stubs (`emptytext`), and OCR/conversion-damaged prose (`ocr`); `all` runs the four analyzers in one decompression pass | No (`metadata.db` opened `mode=ro`) | none |
 | `audit_drm.py` | Cross-format DRM scanner (EPUB/PDF/MOBI/AZW3; DJVU N/A) that clears benign look-alikes (font obfuscation, PDF permission flags) and catches residual handler dictionaries by streaming byte scan | No (`metadata.db` opened `mode=ro`) | `qpdf` (optional, to class Standard-encrypted PDFs) |
 | `validate_metadata.py` | Integrity linter for `metadata.db` (missing language, duplicate ISBNs, junk identifiers, orphan links) plus an optional taxonomy-driven opinionated layer | No (`metadata.db` opened `mode=ro`) | none |
-| `spot_check.py` | Randomized metadata + file-integrity audit: samples N random books and checks field quality (title corruption, junk authors, mojibake, stub comments) and file contents (EPUB archive/spine/text, PDF and DJVU page counts); `--review` emits judgement bundles for the checks no pattern can make (right title? right author? right description?), records verdicts to a ledger with exact id reconciliation, and excludes reviewed books from later samples | No (`metadata.db` opened `mode=ro`; the review ledger lives beside the reports, never in the DB) | `pdfinfo`, `djvused` (both optional) |
+| `spot_check.py` | Randomized metadata + file-integrity audit: samples N random books and checks field quality (title corruption, junk authors, mojibake, stub comments) and file contents (EPUB archive/spine/text, PDF and DJVU page counts); `--review` emits judgement bundles for the checks no pattern can make (right title? right author? right description?), records verdicts to a ledger with exact id reconciliation, and excludes reviewed books from later samples | No (`metadata.db` opened `mode=ro`; the review ledger lives beside the reports, never in the DB) | `exiftool`, `djvused` (both optional) |
 | `reconcile_file_metadata.py` | Diffs the curated `metadata.db` against each file's embedded metadata; `--apply` embeds the DB values back into drifted files, and `--repair-pdf` rebuilds a broken PDF xref table so the embed can succeed | **Yes** with `--apply` (rewrites book files; never `metadata.db`) | `calibredb`, `exiftool`, `djvused`, `qpdf` (`--repair-pdf`) |
 | `fetch_library_codes.py` | Queries the LoC SRU catalogue (`bath.isbn`) for Library of Congress Classification codes and stores them as `lcc` (optionally `ddc`) identifiers; dry-run by default, disk-cached and resumable, rate-limited with backoff | **Yes** with `--apply` (inserts identifiers; backs up `metadata.db` first, refuses while Calibre is open) | none (plain-HTTP SRU endpoint) |
 | `audit_isbns.py` | Checks each stored ISBN against the ISBN the book prints on its own copyright page, catching identifiers that point at a different book (usually a same-publisher sibling). Reads body text only, never embedded metadata, since `reconcile_file_metadata.py` writes the DB's values there and comparing against them would be circular. Classifies apart the three benign look-alikes: bibliographies, bundles/series, and format variants | No (`metadata.db` opened `mode=ro`; deliberately has no `--apply`) | `pdftotext`/`pdfinfo` (poppler), `djvutxt` (both optional) |

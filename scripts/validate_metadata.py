@@ -67,6 +67,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 # ANSI colours; suppress when stdout isn't a TTY or NO_COLOR is set
 # (matches audit_epub_content.py / the cquarry package).
@@ -204,10 +205,17 @@ def flatten_tree(nodes: list[Any], prefix: str = "") -> set[str]:
     return allowed
 
 
+def db_uri_ro(path: Path) -> str:
+    """Read-only SQLite URI for a path. The path must be percent-encoded: '?'
+    and '#' are URI syntax, so a library at "Books #2/metadata.db" interpolated
+    raw opens some other file and fails with "no such table: books"."""
+    return f"file:{quote(str(path))}?mode=ro"
+
+
 def connect_ro(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
     """Open `db_path` read-only. If Calibre holds the lock, read a temp copy
     instead (returning the temp dir so the caller can clean it up)."""
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con = sqlite3.connect(db_uri_ro(db_path), uri=True)
     con.row_factory = sqlite3.Row
     try:
         con.execute("SELECT 1 FROM books LIMIT 1")
@@ -219,7 +227,7 @@ def connect_ro(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
         src = Path(str(db_path) + suffix)
         if src.exists():
             shutil.copy2(src, Path(tmpdir) / ("metadata.db" + suffix))
-    con = sqlite3.connect(f"file:{Path(tmpdir) / 'metadata.db'}?mode=ro", uri=True)
+    con = sqlite3.connect(db_uri_ro(Path(tmpdir) / "metadata.db"), uri=True)
     con.row_factory = sqlite3.Row
     return con, tmpdir
 

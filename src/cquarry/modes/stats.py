@@ -66,7 +66,7 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     tags = db.get_all_tags()
     top_level: Counter = Counter()
     for t in tags:
-        prefix = t.split(".")[0] if "." in t else t
+        prefix = t.split(".")[0]
         top_level[prefix] += 1
     print(f"\nTag taxonomy ({len(tags)} tags):")
     for prefix, count in top_level.most_common():

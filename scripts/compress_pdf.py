@@ -41,6 +41,13 @@ from pathlib import Path
 #   prepress 300 dpi commercial print quality
 PRESETS = ("screen", "ebook", "printer", "prepress")
 
+# Seconds a structural probe (pdfinfo / pdfdetach / pdfimages) gets before it is
+# treated as unreadable. Ghostscript itself is deliberately NOT bounded: a
+# legitimate 1 GB sourcebook takes many minutes, and killing that mid-convert is
+# the wrong answer. Only the cheap inspection reads are capped, so one damaged
+# file cannot wedge a whole --inspect sweep.
+PROBE_TIMEOUT = 120
+
 # ANSI; suppress when not a TTY
 USE_COLOR = sys.stdout.isatty()
 RED = "\033[31m" if USE_COLOR else ""
@@ -73,9 +80,12 @@ def page_count(path: Path) -> int | None:
         return None
     try:
         out = subprocess.check_output(
-            [pdfinfo, str(path)], stderr=subprocess.DEVNULL, text=True
+            [pdfinfo, str(path)],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=PROBE_TIMEOUT,
         )
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError, subprocess.TimeoutExpired:
         return None
     for line in out.splitlines():
         if line.startswith("Pages:"):
@@ -102,7 +112,10 @@ def pdf_features(path: Path) -> dict:
     if pdfinfo:
         try:
             out = subprocess.check_output(
-                [pdfinfo, str(path)], stderr=subprocess.DEVNULL, text=True
+                [pdfinfo, str(path)],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=PROBE_TIMEOUT,
             )
             for line in out.splitlines():
                 if ":" not in line:
@@ -118,14 +131,17 @@ def pdf_features(path: Path) -> dict:
                     f["javascript"] = v.lower() == "yes"
                 elif k == "Tagged":
                     f["tagged"] = v.lower() == "yes"
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError, subprocess.TimeoutExpired:
             pass
 
     pdfdetach = shutil.which("pdfdetach")
     if pdfdetach:
         try:
             out = subprocess.check_output(
-                [pdfdetach, "-list", str(path)], stderr=subprocess.DEVNULL, text=True
+                [pdfdetach, "-list", str(path)],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=PROBE_TIMEOUT,
             )
             # Count entries; pdfdetach prefixes "0 embedded files" or a numbered list
             for line in out.splitlines():
@@ -135,14 +151,17 @@ def pdf_features(path: Path) -> dict:
                 if s.split()[0].isdigit() and "embedded files" in s:
                     f["attachments"] = int(s.split()[0])
                     break
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError, subprocess.TimeoutExpired:
             pass
 
     pdfimages = shutil.which("pdfimages")
     if pdfimages:
         try:
             out = subprocess.check_output(
-                [pdfimages, "-list", str(path)], stderr=subprocess.DEVNULL, text=True
+                [pdfimages, "-list", str(path)],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=PROBE_TIMEOUT,
             )
             dpis: list[int] = []
             for line in out.splitlines()[2:]:  # skip 2 header lines
@@ -159,7 +178,7 @@ def pdf_features(path: Path) -> dict:
             f["image_count"] = len(dpis)
             if dpis:
                 f["avg_dpi"] = sum(dpis) // len(dpis)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError, subprocess.TimeoutExpired:
             pass
 
     return f
@@ -404,6 +423,18 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
         out_dir.mkdir(parents=True, exist_ok=True)
         out_tmp = out_dir / (src.stem + ".compress.tmp.pdf")
         final_out = out_dir / src.name
+        # --out-dir promises the original is left untouched, and it lands the
+        # result at out_dir/<same name>. Pointed at the file's own directory
+        # those are the same path, so the "safe" mode silently replaced the
+        # original with the compressed copy and left no .pre-compress rollback.
+        if final_out.resolve() == src:
+            print(
+                f"{RED}ERROR{RESET}: --out-dir {out_dir} is the PDF's own directory, "
+                "so the output would overwrite the original. Drop --out-dir for "
+                "in-place mode (which keeps a .pre-compress.pdf rollback), or "
+                "choose a different directory."
+            )
+            return 2
     else:
         out_tmp = src.with_suffix(".compress.tmp.pdf")
         final_out = src

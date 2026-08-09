@@ -100,6 +100,7 @@ import subprocess
 import sys
 import unicodedata
 import zipfile
+from urllib.parse import quote
 
 # A number only counts when the book introduces it as an ISBN. Bare 10-13 digit
 # runs are everywhere in printed matter (dates, part numbers, phone numbers).
@@ -372,6 +373,13 @@ def classify(
 # --------------------------------------------------------------------------- #
 # database (read-only) and scoping
 # --------------------------------------------------------------------------- #
+def db_uri_ro(path: str) -> str:
+    """Read-only SQLite URI for a path. The path must be percent-encoded: '?'
+    and '#' are URI syntax, so a library at "Books #2/metadata.db" interpolated
+    raw opens some other file and fails with "no such table: books"."""
+    return f"file:{quote(path)}?mode=ro"
+
+
 def find_db(explicit: str | None) -> str:
     if explicit:
         return explicit
@@ -381,46 +389,68 @@ def find_db(explicit: str | None) -> str:
     return os.path.join(os.getcwd(), "metadata.db")
 
 
-def tag_matches(tag: str, prefixes: list[str]) -> bool:
-    """Anchored-hierarchical match, the rule cquarry's `tags:` search uses:
-    'NonFic' matches 'NonFic' and anything under 'NonFic.', but never
-    'NonFiction'."""
-    return any(tag == p or tag.startswith(p + ".") for p in prefixes)
+def tag_matches(tags: list[str], prefixes: list[str]) -> bool:
+    """Anchored-hierarchical match over ALL of a book's tags, the rule cquarry's
+    `tags:` search uses: 'NonFic' matches 'NonFic' and anything under 'NonFic.',
+    but never 'NonFiction'.
+
+    Matching every tag is the point. This used to read a single tag pulled by a
+    `LIMIT 1` subquery with no ORDER BY, so which tag a book was filtered on was
+    whichever one SQLite happened to return: a book tagged both Fic.Fantasy and
+    NonFic.Tech was invisible to `--tag NonFic.Tech` about half the time.
+    """
+    return any(t == p or t.startswith(p + ".") for t in tags for p in prefixes)
+
+
+def display_tag(tags: list[str], prefixes: list[str] | None) -> str:
+    """The tag to show for a book. Under a --tag filter, show one the filter
+    actually selected on, so the report agrees with the scoping."""
+    if prefixes:
+        for t in tags:
+            if tag_matches([t], prefixes):
+                return t
+    return tags[0] if tags else ""
 
 
 def load_targets(
     db_path: str, ids: list[int] | None, prefixes: list[str] | None
 ) -> list[dict]:
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con = sqlite3.connect(db_uri_ro(db_path), uri=True)
     try:
         rows = con.execute(
             """
-            SELECT b.id, b.title, b.path, i.val,
-                   (SELECT t.name FROM tags t
-                      JOIN books_tags_link l ON l.tag = t.id
-                     WHERE l.book = b.id LIMIT 1)
+            SELECT b.id, b.title, b.path, i.val
               FROM books b
               JOIN identifiers i ON i.book = b.id AND i.type = 'isbn'
              ORDER BY b.id
             """
         ).fetchall()
+        booktags: dict[int, list[str]] = {}
+        for bid, tname in con.execute(
+            "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"
+        ):
+            booktags.setdefault(bid, []).append(tname)
     finally:
         con.close()
 
     wanted = set(ids) if ids else None
-    out = [
-        {
-            "id": r[0],
-            "title": r[1],
-            "path": r[2],
-            "isbn": to_isbn13(r[3]),
-            "tag": r[4] or "",
-        }
-        for r in rows
-        if wanted is None or r[0] in wanted
-    ]
-    if prefixes:
-        out = [t for t in out if tag_matches(t["tag"], prefixes)]
+    out = []
+    for r in rows:
+        if wanted is not None and r[0] not in wanted:
+            continue
+        tags = sorted(booktags.get(r[0], []))
+        if prefixes and not tag_matches(tags, prefixes):
+            continue
+        out.append(
+            {
+                "id": r[0],
+                "title": r[1],
+                "path": r[2],
+                "isbn": to_isbn13(r[3]),
+                "tag": display_tag(tags, prefixes),
+                "tags": tags,
+            }
+        )
     return out
 
 

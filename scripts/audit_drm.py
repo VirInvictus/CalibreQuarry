@@ -54,11 +54,14 @@ import argparse
 import csv
 import os
 import shutil
+import sqlite3
 import struct
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
 # ANSI colours; suppress when stdout isn't a TTY.
@@ -118,6 +121,31 @@ def resolve_library_root() -> Path | None:
         if (d / "metadata.db").is_file():
             return d
     return None
+
+
+def db_uri_ro(path: Path) -> str:
+    """Read-only SQLite URI for a path. The path must be percent-encoded: '?'
+    and '#' are URI syntax, so a library at "Books #2/metadata.db" interpolated
+    raw opens some other file and fails with "no such table: books"."""
+    return f"file:{quote(str(path))}?mode=ro"
+
+
+def connect_ro(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
+    """Open read-only; if Calibre holds the lock, read a temp copy (returning
+    the temp dir for cleanup). Mirrors the cquarry package and the other
+    companion scripts, which all degrade this way instead of dying on a lock."""
+    con = sqlite3.connect(db_uri_ro(db_path), uri=True)
+    try:
+        con.execute("SELECT 1 FROM books LIMIT 1")
+        return con, None
+    except sqlite3.OperationalError:
+        con.close()
+    tmpdir = tempfile.mkdtemp(prefix="cquarry-drm-")
+    for suffix in ("", "-wal", "-shm"):
+        src = Path(str(db_path) + suffix)
+        if src.exists():
+            shutil.copy2(src, Path(tmpdir) / ("metadata.db" + suffix))
+    return sqlite3.connect(db_uri_ro(Path(tmpdir) / "metadata.db"), uri=True), tmpdir
 
 
 # --------------------------------------------------------------------------- #
@@ -400,7 +428,7 @@ def _summary(drm, benign, errors, scanned) -> int:
 
 
 def _write_csv(csv_path: Path, rows: list[tuple]) -> None:
-    with csv_path.open("w", newline="") as fh:
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(("id", "status", "kind", "detail", "path"))
         for bid, status, kind, detail, p in rows:
@@ -442,8 +470,6 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
 
 
 def run_library(csv_path: Path | None) -> int:
-    import sqlite3
-
     library_root = resolve_library_root()
     if library_root is None:
         print(
@@ -452,13 +478,20 @@ def run_library(csv_path: Path | None) -> int:
         )
         return 2
     db_path = library_root / "metadata.db"
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    cur = con.cursor()
-    rows = cur.execute(
-        "SELECT b.id, b.title, b.path, d.name, d.format FROM data d "
-        "JOIN books b ON b.id = d.book ORDER BY b.id"
-    ).fetchall()
-    con.close()
+    try:
+        con, tmpdir = connect_ro(db_path)
+    except sqlite3.Error as e:
+        print(f"ERROR: cannot open {db_path}: {e}")
+        return 2
+    try:
+        rows = con.execute(
+            "SELECT b.id, b.title, b.path, d.name, d.format FROM data d "
+            "JOIN books b ON b.id = d.book ORDER BY b.id"
+        ).fetchall()
+    finally:
+        con.close()
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     print(f"Scanning {len(rows)} file(s) across the library for DRM\n")
     drm = benign = errors = scanned = 0
