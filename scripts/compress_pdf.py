@@ -401,6 +401,20 @@ def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> N
 
 
 def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None) -> int:
+    # Argument validation comes before probing for tools: --out-dir promises the
+    # original is left untouched and lands the result at out_dir/<same name>, so
+    # pointing it at the file's own directory would overwrite the original with
+    # no .pre-compress.pdf rollback. Refusing that is not ghostscript's business,
+    # and gating it behind require("gs") would also skip it wherever gs is absent.
+    if out_dir is not None and (out_dir / src.name).resolve() == src.resolve():
+        print(
+            f"{RED}ERROR{RESET}: --out-dir {out_dir} is the PDF's own directory, "
+            "so the output would overwrite the original. Drop --out-dir for "
+            "in-place mode (which keeps a .pre-compress.pdf rollback), or "
+            "choose a different directory."
+        )
+        return 2
+
     gs = require("gs")
     if not src.is_file():
         print(f"{RED}ERROR{RESET}: {src} is not a file.")
@@ -423,18 +437,6 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
         out_dir.mkdir(parents=True, exist_ok=True)
         out_tmp = out_dir / (src.stem + ".compress.tmp.pdf")
         final_out = out_dir / src.name
-        # --out-dir promises the original is left untouched, and it lands the
-        # result at out_dir/<same name>. Pointed at the file's own directory
-        # those are the same path, so the "safe" mode silently replaced the
-        # original with the compressed copy and left no .pre-compress rollback.
-        if final_out.resolve() == src:
-            print(
-                f"{RED}ERROR{RESET}: --out-dir {out_dir} is the PDF's own directory, "
-                "so the output would overwrite the original. Drop --out-dir for "
-                "in-place mode (which keeps a .pre-compress.pdf rollback), or "
-                "choose a different directory."
-            )
-            return 2
     else:
         out_tmp = src.with_suffix(".compress.tmp.pdf")
         final_out = src
