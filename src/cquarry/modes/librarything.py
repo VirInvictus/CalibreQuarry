@@ -51,11 +51,9 @@ Exit codes:
     2 = setup error (no metadata.db, bad arguments)
 """
 
-import argparse
 import csv
 import os
 import re
-import sqlite3
 import sys
 
 from cquarry.db import CalibreDB
@@ -110,7 +108,9 @@ def tag_list(taxonomy: str | None, translators: str | None) -> str:
     return ", ".join(tags)
 
 
-def build_rows(db: CalibreDB, want_call_number: bool, matching_ids: set[int] | None = None) -> tuple[list, list]:
+def build_rows(
+    db: CalibreDB, want_call_number: bool, matching_ids: set[int] | None = None
+) -> tuple[list, list]:
     query = """
             SELECT b.id, b.title, b.author_sort, b.pubdate,
                    (SELECT val FROM identifiers WHERE book=b.id AND type='isbn'),
@@ -237,7 +237,14 @@ def self_check(paths: list[str], expected_rows: int) -> list[str]:
     return problems
 
 
-def run_librarything_export(db: CalibreDB, outdir: str, matching_ids: set[int] | None = None, batch_size: int = DEFAULT_BATCH, want_call_number: bool = True, quiet: bool = False) -> int:
+def run_librarything_export(
+    db: CalibreDB,
+    outdir: str,
+    matching_ids: set[int] | None = None,
+    batch_size: int = DEFAULT_BATCH,
+    want_call_number: bool = True,
+    quiet: bool = False,
+) -> int:
     os.makedirs(outdir, exist_ok=True)
 
     for stale in os.listdir(outdir):
@@ -272,7 +279,9 @@ def run_librarything_export(db: CalibreDB, outdir: str, matching_ids: set[int] |
         )
         print("\nUpload order (Universal Import > CSV at librarything.com/import):")
         for path in read_paths:
-            print(f"  {os.path.basename(path)}   <- assign these to a 'Read' collection")
+            print(
+                f"  {os.path.basename(path)}   <- assign these to a 'Read' collection"
+            )
         for path in main_paths:
             print(f"  {os.path.basename(path)}")
         print(

@@ -4,8 +4,6 @@ import sys
 from cquarry.config import VERSION
 from cquarry.db import CalibreDB
 from cquarry.helpers import find_db
-from cquarry.modes.catalog import write_catalog, write_all_wings
-from cquarry.modes.stats import show_stats
 from cquarry.modes.analytics import (
     show_author_stats,
     show_pace_stats,
@@ -13,10 +11,12 @@ from cquarry.modes.analytics import (
     show_wing_overlap,
 )
 from cquarry.modes.audit import run_audit
+from cquarry.modes.catalog import write_all_wings, write_catalog
 from cquarry.modes.display import show_recent, show_series, show_wings
 from cquarry.modes.export import run_export, run_search_export
-from cquarry.modes.tags import show_tag_dump
 from cquarry.modes.librarything import run_librarything_export
+from cquarry.modes.stats import show_stats
+from cquarry.modes.tags import show_tag_dump
 from cquarry.tui import interactive_menu
 
 
@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument(
         "--tags", action="store_true", help="Dump every tag with its book count"
     )
-    
+
     p.add_argument(
         "--exportlt",
         action="store_true",
@@ -154,18 +154,18 @@ def main(argv: list[str] | None = None) -> int:
                 if args.search is not None:
                     try:
                         matching_ids = set(db.search(args.search))
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         print(f"Error parsing search query: {e}", file=sys.stderr)
                         return 1
                     if not matching_ids:
-                        print(f"No books matched the query: '{args.search}'. Nothing written.", file=sys.stderr)
+                        print(
+                            f"No books matched the query: '{args.search}'. Nothing written.",
+                            file=sys.stderr,
+                        )
                         return 0
-                
+
                 run_librarything_export(
-                    db,
-                    outdir=outdir,
-                    matching_ids=matching_ids,
-                    quiet=args.quiet
+                    db, outdir=outdir, matching_ids=matching_ids, quiet=args.quiet
                 )
                 return 0
 
