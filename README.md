@@ -46,6 +46,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Series** | `--series` | List all series with completeness status and gap detection |
 | **Analytics** | `--analytics {author,pace,tags,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, Wing-overlap analysis |
 | **Export** | `--export` | Full library export to JSON, CSV, or an AI-readable flat format |
+| **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
 | **Search** | `--search QUERY` | Books matching a Calibre search expression; prints to stdout, or to a file with `--output` |
 | **Wings** | `--wings` | List all virtual libraries with book counts |
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
@@ -192,12 +193,14 @@ cquarry --catalog --wing "Sci-Fi Wing" --output scifi.txt
 # A whole wing as a compact, token-efficient list for an LLM prompt
 cquarry --search 'tags:Fic.Fantasy' --format ai --output fantasy.ai.txt
 
-# Full library as JSON / CSV for a spreadsheet or script
+# Export to CSV instead of JSON:
 cquarry --export --format csv --output library.csv
 
-# Calibre IDs for a batch calibredb operation
-cquarry --catalog --show-id --wing "Cooking" | grep '^\s*\*'
+# Export specifically formatted CSVs for LibraryThing, filtered to books added recently:
+cquarry --search 'date:>2026-08-05' --exportlt
 ```
+
+This exports `librarything_main.csv` and `librarything_read.csv` (split into chunks if necessary), stripping `0101-01-01` sentinel dates, parsing translator fields into distinct tags, and converting ISBN-10s into ISBN-13s to prevent spreadsheet tools from dropping leading zeroes.
 
 ## Sample output
 
@@ -374,10 +377,11 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 ```
 usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
                --analytics {author,pace,tags,overlap} | --audit |
-               --recent [RECENT] | --series | --export | --search QUERY |
-               --wings | --tags] [--db DB] [--wing WING] [--output OUTPUT]
-               [--outdir OUTDIR] [--format {json,csv,ai}] [--primary-only]
-               [--show-tags] [--show-id] [--show-custom COL_NAME] [--quiet]
+               --recent [RECENT] | --series | --export | --exportlt |
+               --search QUERY | --wings | --tags] [--db DB] [--wing WING]
+               [--output OUTPUT] [--outdir OUTDIR] [--format {json,csv,ai}]
+               [--primary-only] [--show-tags] [--show-id]
+               [--show-custom COL_NAME] [--quiet]
 
 Calibre library toolkit: catalog, stats, audit, export
 
@@ -393,6 +397,7 @@ options:
   --recent [RECENT]     Show N most recently added books (default: 20)
   --series              List all series with completeness and gap detection
   --export              Export library to JSON, CSV, or AI format
+  --exportlt            Export to LibraryThing CSV format (can be used alone or with --search)
   --search QUERY        Show/export books matching a Calibre search expression
                         (prints to stdout unless --output is given; empty
                         query = whole library)

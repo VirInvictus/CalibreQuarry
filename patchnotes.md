@@ -1,5 +1,10 @@
 # CalibreQuarry — Patch Notes
 
+## v3.10.0 (2026-08-11)
+
+### Features
+
+**LibraryThing Export Integration.** Ported the standalone `export_librarything.py` script natively into `cquarry`. You can now use the `--exportlt` flag to generate LT-formatted CSVs directly. Crucially, this can be combined with `--search` to export only specific subsets of your library (e.g., `--search "date:>2026-08-05" --exportlt`), making targeted updates significantly easier. The export fully handles LibraryThing data quirks, such as folding ISBN-10 to ISBN-13, expanding translators into individual tags, clearing sentinel dates, and breaking output into manageable 500-book chunks split by "Read" vs "Unread" statuses.
 ## v3.9.2 (2026-08-09)
 
 A bug, maintenance and improvement sweep across the package and all seven companion scripts. Eight fixes, three additions, four cleanups, every one pinned by a regression test. The suite grows from 243 to 273 tests.

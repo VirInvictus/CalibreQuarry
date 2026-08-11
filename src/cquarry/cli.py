@@ -16,6 +16,7 @@ from cquarry.modes.audit import run_audit
 from cquarry.modes.display import show_recent, show_series, show_wings
 from cquarry.modes.export import run_export, run_search_export
 from cquarry.modes.tags import show_tag_dump
+from cquarry.modes.librarything import run_librarything_export
 from cquarry.tui import interactive_menu
 
 
@@ -76,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     group.add_argument(
         "--tags", action="store_true", help="Dump every tag with its book count"
+    )
+    
+    p.add_argument(
+        "--exportlt",
+        action="store_true",
+        help="Export to LibraryThing CSV format (can be used alone or with --search)",
     )
 
     p.add_argument(
@@ -141,6 +148,27 @@ def main(argv: list[str] | None = None) -> int:
         db_path = find_db(args.db)
 
         with CalibreDB(db_path) as db:
+            if args.exportlt:
+                outdir = args.outdir or args.output or "librarything_export"
+                matching_ids = None
+                if args.search is not None:
+                    try:
+                        matching_ids = set(db.search(args.search))
+                    except Exception as e:
+                        print(f"Error parsing search query: {e}", file=sys.stderr)
+                        return 1
+                    if not matching_ids:
+                        print(f"No books matched the query: '{args.search}'. Nothing written.", file=sys.stderr)
+                        return 0
+                
+                run_librarything_export(
+                    db,
+                    outdir=outdir,
+                    matching_ids=matching_ids,
+                    quiet=args.quiet
+                )
+                return 0
+
             if args.catalog:
                 output = args.output or "catalog.txt"
                 write_catalog(
