@@ -977,13 +977,15 @@ def _menu_session() -> int:
                     _reset_terminal()
                     _run_with_capture(
                         "Catalog",
-                        lambda o=output, w=wing, p=primary, t=tags, i=ids: write_catalog(
-                            db,
-                            o,
-                            wing=w,
-                            primary_only=p,
-                            show_tags=t,
-                            show_id=i,
+                        lambda o=output, w=wing, p=primary, t=tags, i=ids: (
+                            write_catalog(
+                                db,
+                                o,
+                                wing=w,
+                                primary_only=p,
+                                show_tags=t,
+                                show_id=i,
+                            )
                         ),
                         footer=_out_note(output),
                     )
@@ -1049,7 +1051,9 @@ def _menu_session() -> int:
                 elif result == (2, 0):
                     count = _prompt_int("How many", 20)
                     _reset_terminal()
-                    _run_with_capture("Recently Added", lambda c=count: show_recent(db, c))
+                    _run_with_capture(
+                        "Recently Added", lambda c=count: show_recent(db, c)
+                    )
 
                 elif result == (2, 1):
                     _reset_terminal()
