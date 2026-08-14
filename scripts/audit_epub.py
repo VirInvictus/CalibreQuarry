@@ -132,7 +132,7 @@ class Book:
     """A decompressed EPUB: spine documents read once and shared by every
     analyzer. The whole point of the single-pass design lives here."""
 
-    __slots__ = ("spine", "nav", "lang", "docs", "names", "_visible")
+    __slots__ = ("_visible", "docs", "lang", "names", "nav", "spine")
 
     def __init__(self, spine, nav, lang, docs, names):
         self.spine = spine  # resolved, in-order, in-archive spine doc paths
@@ -221,35 +221,35 @@ def load_book(path: Path) -> Book:
 
 CAP = 400_000  # clean chars read per book; ample for a language verdict
 
-STYLE_RE = re.compile(r"<(style|script)\b[^>]*>.*?</\1>", re.I | re.S)
+STYLE_RE = re.compile(r"<(style|script)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
 WORD_RE = re.compile(r"[a-zA-ZàâäéèêëïîôöùûüçñáíóúãõßÀ-ÿ']+")
-SIGNATURE_RE = re.compile(r"importknig|книжный импорт|knizhny", re.I)
+SIGNATURE_RE = re.compile(r"importknig|книжный импорт|knizhny", re.IGNORECASE)
 
 # Distinctive stopword sets. Book-length text makes the vote unambiguous;
 # the small EN/IT overlap on "i" etc. is swamped by the rest.
 STOPWORDS: dict[str, set[str]] = {
     "en": set(
-        "the of and to a in that is was for it with as his on be at by he this had not are but from or have an they which one you were her all she there would their".split()
+        ["the", "of", "and", "to", "a", "in", "that", "is", "was", "for", "it", "with", "as", "his", "on", "be", "at", "by", "he", "this", "had", "not", "are", "but", "from", "or", "have", "an", "they", "which", "one", "you", "were", "her", "all", "she", "there", "would", "their"]
     ),
     "de": set(
-        "der die und in den von zu das mit sich des auf für ist im dem nicht ein eine als auch es an werden aus er hat dass sie nach wird bei einer um".split()
+        ["der", "die", "und", "in", "den", "von", "zu", "das", "mit", "sich", "des", "auf", "für", "ist", "im", "dem", "nicht", "ein", "eine", "als", "auch", "es", "an", "werden", "aus", "er", "hat", "dass", "sie", "nach", "wird", "bei", "einer", "um"]
     ),
     "fr": set(
-        "le la les de des un une et en dans que qui pour pas sur au avec ce il ne se plus par je nous vous est son ses aux".split()
+        ["le", "la", "les", "de", "des", "un", "une", "et", "en", "dans", "que", "qui", "pour", "pas", "sur", "au", "avec", "ce", "il", "ne", "se", "plus", "par", "je", "nous", "vous", "est", "son", "ses", "aux"]
     ),
     "es": set(
-        "el la los las de un una y en que no se con por para es su lo como más pero sus le ya o este sí porque esta entre".split()
+        ["el", "la", "los", "las", "de", "un", "una", "y", "en", "que", "no", "se", "con", "por", "para", "es", "su", "lo", "como", "más", "pero", "sus", "le", "ya", "o", "este", "sí", "porque", "esta", "entre"]
     ),
     "it": set(
-        "il lo la i gli le di un uno una e che non per con su come più ma anche da sono mi si nel alla dei delle".split()
+        ["il", "lo", "la", "i", "gli", "le", "di", "un", "uno", "una", "e", "che", "non", "per", "con", "su", "come", "più", "ma", "anche", "da", "sono", "mi", "si", "nel", "alla", "dei", "delle"]
     ),
     "pt": set(
-        "o a os as de um uma e que do da em não se com por para mais mas como ao dos das na no à seu".split()
+        ["o", "a", "os", "as", "de", "um", "uma", "e", "que", "do", "da", "em", "não", "se", "com", "por", "para", "mais", "mas", "como", "ao", "dos", "das", "na", "no", "à", "seu"]
     ),
     "nl": set(
-        "de het een en van te dat die in is op ik niet met zijn er maar om ook als voor naar dan zou hij heeft".split()
+        ["de", "het", "een", "en", "van", "te", "dat", "die", "in", "is", "op", "ik", "niet", "met", "zijn", "er", "maar", "om", "ook", "als", "voor", "naar", "dan", "zou", "hij", "heeft"]
     ),
 }
 
@@ -365,7 +365,7 @@ def scan_content(path: Path) -> dict:
 # ----------------------------------------------------------------------------
 
 INT_RE = re.compile(r"\d{1,4}$")
-ROMAN_RE = re.compile(r"[ivxlcdm]{2,7}$", re.I)
+ROMAN_RE = re.compile(r"[ivxlcdm]{2,7}$", re.IGNORECASE)
 # Block-level elements we track to reconstruct reading order.
 BLOCK_TAGS = {
     "p",
@@ -575,7 +575,7 @@ def analyze_pagenumbers(book: Book) -> dict:
         "span": span,
         "run": run,
         "watermark": any(
-            re.search(r"download|boykma|\.com\b", h, re.I) for h in runheads
+            re.search(r"download|boykma|\.com\b", h, re.IGNORECASE) for h in runheads
         ),
         "examples": examples,
     }
@@ -610,14 +610,14 @@ BOOKMATE_MARKERS = ("bookmate.css", "calibre_bookmarks.txt")
 _PLACEHOLDER_SIG = re.compile(
     r"bookshout|something went wrong loading|failed to load|"
     r"(content|page|book)\s+(is\s+)?(not available|unavailable|could not be loaded)",
-    re.I,
+    re.IGNORECASE,
 )
 PLACEHOLDER_STUB_MIN = 12  # ignore blank / trivial spine docs
 PLACEHOLDER_STUB_MAX = 600  # a placeholder stub is short
 PLACEHOLDER_MIN_REPEAT = 3  # the same stub across at least this many spine docs
 PLACEHOLDER_MIN_FRAC = 0.30  # ...and at least this fraction of the spine
 
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b.*?</\1>", re.I | re.S)
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b.*?</\1>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
@@ -756,11 +756,7 @@ def _alpha_density(text: str) -> float:
 # function-word set, same spirit as the content analyzer's stopword votes --
 # not a dictionary.
 OCR_FUNC_WORDS = frozenset(
-    "the a an and or but of to in on at by with for from as that this these "
-    "those his her their its my your our was were is are be been being had has "
-    "have he she they it we you i not no so if when than then who whom which "
-    "into onto over under between through during before after above below "
-    "up down out off very more most some any each every either neither".split()
+    ["the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at", "by", "with", "for", "from", "as", "that", "this", "these", "those", "his", "her", "their", "its", "my", "your", "our", "was", "were", "is", "are", "be", "been", "being", "had", "has", "have", "he", "she", "they", "it", "we", "you", "i", "not", "no", "so", "if", "when", "than", "then", "who", "whom", "which", "into", "onto", "over", "under", "between", "through", "during", "before", "after", "above", "below", "up", "down", "out", "off", "very", "more", "most", "some", "any", "each", "every", "either", "neither"]
 )
 
 # En-dash embedded inside a word: OCR reads a hyphen as U+2013 ("bottom–feedin'").

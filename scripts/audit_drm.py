@@ -102,7 +102,7 @@ _SIG_OVERLAP = max(len(s) for s in PDF_DRM_SIGNATURES) - 1
 class Verdict:
     """One file's classification: a status, a short kind, and a detail line."""
 
-    __slots__ = ("status", "kind", "detail")
+    __slots__ = ("detail", "kind", "status")
 
     def __init__(self, status: str, kind: str = "", detail: str = ""):
         self.status = status

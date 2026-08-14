@@ -1,4 +1,5 @@
 import sys
+
 from cquarry.cli import main
 from cquarry.tui import _reset_terminal
 

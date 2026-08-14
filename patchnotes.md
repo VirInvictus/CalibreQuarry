@@ -1,5 +1,11 @@
 # CalibreQuarry — Patch Notes
 
+## v3.10.1 (2026-08-14)
+
+### Fixes
+
+**CI Configuration & Code Closures.** The GitHub Actions pipeline (`ruff check`) failed because of several B023 late-binding closures inside `tui.py` which were unnoticed by the global configuration. Fixed those closures and added a test (`test_version.py`) to prevent version drift between `pyproject.toml`, `config.py`, and `VERSION` files.
+
 ## v3.10.0 (2026-08-11)
 
 ### Features

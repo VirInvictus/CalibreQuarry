@@ -170,8 +170,7 @@ def parse_series(value: str | None) -> tuple[str, str]:
         return s.lower(), ""
     name = (m.group(1) or "").strip().lower()
     idx = (m.group(2) or "").strip()
-    if idx.endswith(".0"):
-        idx = idx[:-2]
+    idx = idx.removesuffix(".0")
     return name, idx
 
 

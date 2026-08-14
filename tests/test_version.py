@@ -1,6 +1,5 @@
 """Tests to ensure version numbers are synchronized across the repository."""
 
-import os
 import unittest
 from pathlib import Path
 

@@ -8,8 +8,6 @@ from typing import Any
 
 from cquarry.config import VERSION, get_db_path, set_db_path
 from cquarry.db import CalibreDB
-from cquarry.modes.catalog import write_catalog, write_all_wings
-from cquarry.modes.stats import show_stats
 from cquarry.modes.analytics import (
     show_author_stats,
     show_pace_stats,
@@ -17,8 +15,10 @@ from cquarry.modes.analytics import (
     show_wing_overlap,
 )
 from cquarry.modes.audit import run_audit
+from cquarry.modes.catalog import write_all_wings, write_catalog
 from cquarry.modes.display import show_recent, show_series, show_wings
 from cquarry.modes.export import run_export, run_search_export
+from cquarry.modes.stats import show_stats
 from cquarry.modes.tags import show_tag_dump
 
 try:
@@ -977,13 +977,13 @@ def _menu_session() -> int:
                     _reset_terminal()
                     _run_with_capture(
                         "Catalog",
-                        lambda: write_catalog(
+                        lambda o=output, w=wing, p=primary, t=tags, i=ids: write_catalog(
                             db,
-                            output,
-                            wing=wing,
-                            primary_only=primary,
-                            show_tags=tags,
-                            show_id=ids,
+                            o,
+                            wing=w,
+                            primary_only=p,
+                            show_tags=t,
+                            show_id=i,
                         ),
                         footer=_out_note(output),
                     )
@@ -996,12 +996,12 @@ def _menu_session() -> int:
                     _reset_terminal()
                     _run_with_capture(
                         "Generate Wings",
-                        lambda: write_all_wings(
+                        lambda o=outdir, p=primary, t=tags, i=ids: write_all_wings(
                             db,
-                            outdir,
-                            primary_only=primary,
-                            show_tags=tags,
-                            show_id=ids,
+                            o,
+                            primary_only=p,
+                            show_tags=t,
+                            show_id=i,
                         ),
                         footer=f"Wings written to {os.path.abspath(outdir)}",
                     )
@@ -1015,7 +1015,7 @@ def _menu_session() -> int:
                     _reset_terminal()
                     _run_with_capture(
                         "Audit",
-                        lambda: run_audit(db, output),
+                        lambda o=output: run_audit(db, o),
                         footer=_out_note(output),
                     )
 
@@ -1026,7 +1026,7 @@ def _menu_session() -> int:
                         _reset_terminal()
                         _run_with_capture(
                             "Search Results",
-                            lambda: run_search_export(db, query, output),
+                            lambda q=query, o=output: run_search_export(db, q, o),
                             footer=_out_note(output),
                         )
 
@@ -1049,7 +1049,7 @@ def _menu_session() -> int:
                 elif result == (2, 0):
                     count = _prompt_int("How many", 20)
                     _reset_terminal()
-                    _run_with_capture("Recently Added", lambda: show_recent(db, count))
+                    _run_with_capture("Recently Added", lambda c=count: show_recent(db, c))
 
                 elif result == (2, 1):
                     _reset_terminal()
@@ -1075,7 +1075,7 @@ def _menu_session() -> int:
                     _reset_terminal()
                     _run_with_capture(
                         "Export",
-                        lambda: run_export(db, output, fmt),
+                        lambda o=output, f=fmt: run_export(db, o, f),
                         footer=_out_note(output),
                     )
         except _Cancelled:

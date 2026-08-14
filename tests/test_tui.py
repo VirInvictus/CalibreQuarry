@@ -9,15 +9,15 @@ import os
 import tempfile
 import unittest
 
-import cquarry.tui as tui
+from cquarry import tui
 from cquarry.tui import (
-    _build_fallback,
     _LETTER_KEYS,
     _MAIN_ALIASES,
     _MAIN_FALLBACK_DISPLAY,
     _MAIN_FALLBACK_MAP,
     _MAIN_FALLBACK_MAX,
     _MAIN_SECTIONS,
+    _build_fallback,
 )
 
 

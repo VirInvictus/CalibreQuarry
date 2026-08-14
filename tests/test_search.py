@@ -14,7 +14,6 @@ import unittest
 from cquarry.db import CalibreDB
 from cquarry.search import ParseException, SearchEngine, _Parser
 
-
 # --- In-memory provider for engine tests -----------------------------------
 
 BOOKS = {

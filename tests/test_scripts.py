@@ -7,8 +7,8 @@ metadata.db.
 """
 
 import contextlib
-import io
 import importlib.util
+import io
 import os
 import pathlib
 import shutil
