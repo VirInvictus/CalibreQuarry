@@ -9,7 +9,6 @@ with open("patchnotes.md", "w") as f:
     f.write(patch)
 
 # And fix the version in pyproject, config.py, and VERSION to 3.11.0
-import glob
 
 # pyproject.toml
 with open("pyproject.toml", "r") as f:

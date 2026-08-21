@@ -93,8 +93,8 @@ Exit codes:
 import argparse
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
-import ui
 import json
 import os
 import random
@@ -105,6 +105,8 @@ import sys
 import unicodedata
 import zipfile
 from urllib.parse import quote
+
+import ui
 
 # A number only counts when the book introduces it as an ISBN. Bare 10-13 digit
 # runs are everywhere in printed matter (dates, part numbers, phone numbers).

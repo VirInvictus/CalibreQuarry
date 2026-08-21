@@ -1,4 +1,5 @@
 import glob
+
 for script in glob.glob("/home/bdkl/.gitrepos/CalibreQuarry/scripts/*.py"):
     if "ui.py" in script:
         continue

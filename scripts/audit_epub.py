@@ -53,8 +53,8 @@ Exit codes:
 import argparse
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
-import ui
 import os
 import re
 import shutil
@@ -66,6 +66,8 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
+
+import ui
 
 # ----------------------------------------------------------------------------
 # Shared scaffolding
@@ -1561,7 +1563,7 @@ def main() -> int:
         help=f"emptytext THIN advisory threshold (default {DEFAULT_THIN_CHARS})",
     )
     args = parser.parse_args()
-    ui.print_header(f"audit_epub.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else f"audit_epub.py - Execution")
+    ui.print_header("audit_epub.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "audit_epub.py - Execution")
     selected = list(ALL) if args.mode == "all" else [args.mode]
     if args.directory:
         return run_directory(

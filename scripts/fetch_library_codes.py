@@ -46,8 +46,8 @@ Exit codes:
 import argparse
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
-import ui
 import json
 import os
 import random
@@ -61,6 +61,8 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
+
+import ui
 
 SRU_BASE = "http://lx2.loc.gov:210/LCDB"
 MODS_NS = {"mods": "http://www.loc.gov/mods/v3"}
@@ -399,7 +401,7 @@ def main() -> int:
     )
     ap.add_argument("--quiet", action="store_true", help="suppress per-book lines")
     args = ap.parse_args()
-    ui.print_header(f"fetch_library_codes.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else f"fetch_library_codes.py - Execution")
+    ui.print_header("fetch_library_codes.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "fetch_library_codes.py - Execution")
 
     if args.delay < 1.0:
         print(

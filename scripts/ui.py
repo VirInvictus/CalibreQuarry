@@ -1,6 +1,5 @@
 import os
 import sys
-from datetime import datetime
 
 try:
     from tqdm import tqdm
@@ -80,10 +79,10 @@ def print_header(title: str) -> None:
     tqdm.write(color(f"{'=' * 60}", BOLD))
 
 def print_summary(stats: dict) -> None:
-    tqdm.write(color(f"\n--- SUMMARY ---", BOLD))
+    tqdm.write(color("\n--- SUMMARY ---", BOLD))
     for k, v in stats.items():
         if isinstance(v, int) and v > 0:
             tqdm.write(f"  {k}: {color(str(v), GREEN)}")
         else:
             tqdm.write(f"  {k}: {v}")
-    tqdm.write(color(f"===============\n", BOLD))
+    tqdm.write(color("===============\n", BOLD))

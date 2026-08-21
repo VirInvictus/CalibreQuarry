@@ -61,9 +61,8 @@ with `--repair-pdf`. Missing a needed tool exits 2.
 import argparse
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
-import ui
-import ui
 import json
 import os
 import random
@@ -75,6 +74,8 @@ import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
+
+import ui
 
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 RED = "\033[31m" if USE_COLOR else ""
@@ -726,7 +727,7 @@ def main() -> int:
         help="print only drift, truncate long field lists",
     )
     args = parser.parse_args()
-    ui.print_header(f"reconcile_file_metadata.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else f"reconcile_file_metadata.py - Execution")
+    ui.print_header("reconcile_file_metadata.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "reconcile_file_metadata.py - Execution")
 
     if args.id and parse_id_list(args.id) is None:
         print(

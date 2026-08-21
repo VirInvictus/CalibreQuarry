@@ -61,9 +61,8 @@ copy, mirroring how the cquarry package degrades.
 import argparse
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
-import ui
-import ui
 import json
 import os
 import shutil
@@ -73,6 +72,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+
+import ui
 
 # ANSI colours; suppress when stdout isn't a TTY or NO_COLOR is set
 # (matches audit_epub_content.py / the cquarry package).
@@ -458,7 +459,7 @@ def main() -> int:
         "--quiet", action="store_true", help="print only problems; truncate long lists"
     )
     args = parser.parse_args()
-    ui.print_header(f"validate_metadata.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else f"validate_metadata.py - Execution")
+    ui.print_header("validate_metadata.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "validate_metadata.py - Execution")
 
     db_path = resolve_db_path(args.path)
     if db_path is None:

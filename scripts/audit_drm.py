@@ -53,8 +53,8 @@ Exit codes:
 import argparse
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
-import ui
 import csv
 import os
 import shutil
@@ -67,6 +67,8 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
+
+import ui
 
 # ANSI colours; suppress when stdout isn't a TTY.
 USE_COLOR = sys.stdout.isatty()
@@ -545,7 +547,7 @@ def main() -> int:
         help="also write a CSV audit (id,status,kind,detail,path)",
     )
     args = parser.parse_args()
-    ui.print_header(f"audit_drm.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else f"audit_drm.py - Execution")
+    ui.print_header("audit_drm.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "audit_drm.py - Execution")
     csv_path = Path(args.csv).expanduser() if args.csv else None
     if args.directory:
         return run_directory(Path(args.directory).expanduser(), csv_path)

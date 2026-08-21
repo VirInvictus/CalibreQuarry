@@ -30,13 +30,15 @@ Exit codes
 import argparse
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
-import ui
 import shutil
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+
+import ui
 
 # Ghostscript pdfwrite quality presets:
 #   screen   72 dpi  smallest, low quality (web preview)
