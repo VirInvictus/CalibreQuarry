@@ -91,6 +91,10 @@ Exit codes:
 """
 
 import argparse
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+import ui
 import json
 import os
 import random
@@ -526,13 +530,14 @@ def main() -> int:
     )
     ap.add_argument("--quiet", action="store_true", help="suppress per-book lines")
     args = ap.parse_args()
+    ui.print_header("audit_isbns.py - Execution")
 
     ids = None
     if args.id:
         try:
             ids = [int(x) for x in args.id.split(",") if x.strip()]
         except ValueError:
-            print("setup error: --id takes comma-separated integers", file=sys.stderr)
+            print(ui.error("setup error: --id takes comma-separated integers"))
             return 2
 
     prefixes = (
@@ -541,14 +546,14 @@ def main() -> int:
 
     db_path = find_db(args.db)
     if not os.path.exists(db_path):
-        print(f"setup error: no metadata.db at {db_path}", file=sys.stderr)
+        print(ui.error(f"setup error: no metadata.db at {db_path}"))
         return 2
     library_root = os.path.dirname(os.path.abspath(db_path))
 
     try:
         targets = load_targets(db_path, ids, prefixes)
     except sqlite3.Error as exc:
-        print(f"setup error: {exc}", file=sys.stderr)
+        print(ui.error(f"setup error: {exc}"))
         return 2
 
     if args.sample and args.sample < len(targets):
@@ -559,14 +564,14 @@ def main() -> int:
         targets = targets[: args.limit]
 
     if not targets:
-        print("no books with an ISBN matched the selection", file=sys.stderr)
+        print(ui.error("no books with an ISBN matched the selection"))
         return 2
 
     if args.format == "text" and not args.quiet:
-        print(f"Reading {len(targets)} book(s) for a printed ISBN...\n")
+        print(ui.info(f"Reading {len(targets)} book(s) for a printed ISBN..."))
 
     results = []
-    for target in targets:
+    for target in ui.tqdm(targets, desc=ui.info("Checking books")):
         text, fmt = book_text(os.path.join(library_root, target["path"]))
         if text is None:
             # no supported format present at all vs one that yielded nothing

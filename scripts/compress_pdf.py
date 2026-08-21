@@ -28,6 +28,10 @@ Exit codes
 """
 
 import argparse
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+import ui
 import shutil
 import sqlite3
 import subprocess
@@ -48,13 +52,6 @@ PRESETS = ("screen", "ebook", "printer", "prepress")
 # file cannot wedge a whole --inspect sweep.
 PROBE_TIMEOUT = 120
 
-# ANSI; suppress when not a TTY
-USE_COLOR = sys.stdout.isatty()
-RED = "\033[31m" if USE_COLOR else ""
-YELLOW = "\033[33m" if USE_COLOR else ""
-GREEN = "\033[32m" if USE_COLOR else ""
-BOLD = "\033[1m" if USE_COLOR else ""
-RESET = "\033[0m" if USE_COLOR else ""
 
 
 def fmt_size(n: int) -> str:
@@ -68,7 +65,7 @@ def fmt_size(n: int) -> str:
 def require(cmd: str) -> str:
     p = shutil.which(cmd)
     if not p:
-        print(f"{RED}ERROR{RESET}: required tool '{cmd}' not found on PATH.")
+        ui.tqdm.write(f"{ui.RED}ERROR{ui.RESET}: required tool '{cmd}' not found on PATH.")
         sys.exit(2)
     return p
 
@@ -239,21 +236,21 @@ def inspect_one(path: Path, brief: bool = False) -> dict:
     f["verdict"] = verdict
     f["rationale"] = why
     if not brief:
-        print(f"{BOLD}{path}{RESET}")
-        print(f"  size:           {fmt_size(f['size'])}")
-        print(f"  pages:          {f['pages']}")
-        print(f"  optimized:      {f['optimized']}")
-        print(f"  form:           {f['form']}")
-        print(f"  javascript:     {f['javascript']}")
-        print(f"  attachments:    {f['attachments']}")
-        print(
+        ui.tqdm.write(f"{ui.BOLD}{path}{ui.RESET}")
+        ui.tqdm.write(f"  size:           {fmt_size(f['size'])}")
+        ui.tqdm.write(f"  pages:          {f['pages']}")
+        ui.tqdm.write(f"  optimized:      {f['optimized']}")
+        ui.tqdm.write(f"  form:           {f['form']}")
+        ui.tqdm.write(f"  javascript:     {f['javascript']}")
+        ui.tqdm.write(f"  attachments:    {f['attachments']}")
+        ui.tqdm.write(
             f"  images:         {f['image_count']}  (avg {f['avg_dpi']} DPI)"
             if f["avg_dpi"]
             else f"  images:         {f['image_count']}"
         )
-        print(f"  verdict:        {verdict}")
-        print(f"  rationale:      {why}")
-        print()
+        ui.tqdm.write(f"  verdict:        {verdict}")
+        ui.tqdm.write(f"  rationale:      {why}")
+        ui.tqdm.write()
     return f
 
 
@@ -264,7 +261,7 @@ def inspect_path(target: Path, min_size_mb: int) -> None:
         return
     min_bytes = min_size_mb * (1 << 20)
     pdfs: list[tuple[int, Path]] = []
-    for p in target.rglob("*.pdf"):
+    for p in ui.tqdm(list(target.rglob("*.pdf")), desc=ui.info("Finding PDFs")):
         try:
             sz = p.stat().st_size
         except OSError:
@@ -273,15 +270,15 @@ def inspect_path(target: Path, min_size_mb: int) -> None:
             pdfs.append((sz, p))
     pdfs.sort(reverse=True)
 
-    print(
-        f"{BOLD}Inspecting {len(pdfs)} PDF(s) over {min_size_mb} MB under {target}{RESET}\n"
+    ui.tqdm.write(
+        f"{ui.BOLD}Inspecting {len(pdfs)} PDF(s) over {min_size_mb} MB under {target}{ui.RESET}\n"
     )
     summary: dict[str, list[tuple[Path, dict]]] = {}
-    for _, p in pdfs:
+    for _, p in ui.tqdm(pdfs, desc=ui.info("Inspecting PDFs")):
         f = inspect_one(p, brief=False)
         summary.setdefault(f["verdict"], []).append((p, f))
 
-    print(f"{BOLD}=== Summary by verdict ==={RESET}")
+    ui.tqdm.write(f"{ui.BOLD}=== Summary by verdict ==={ui.RESET}")
     total_save_ebook = 0
     total_save_printer = 0
     for v in (
@@ -294,7 +291,7 @@ def inspect_path(target: Path, min_size_mb: int) -> None:
     ):
         if v not in summary:
             continue
-        print(f"\n[{v}] ({len(summary[v])} file(s))")
+        ui.tqdm.write(f"\n[{v}] ({len(summary[v])} file(s))")
         for p, f in summary[v]:
             est_pct = 0
             if v == "ebook" and f["avg_dpi"]:
@@ -309,15 +306,15 @@ def inspect_path(target: Path, min_size_mb: int) -> None:
                 est_save = int(f["size"] * est_pct / 100 * 0.75)
                 total_save_printer += est_save
             label = f"~{est_pct}% est" if est_pct else "..."
-            print(f"  {fmt_size(f['size']):>10}  {label:>10}  {p}")
+            ui.tqdm.write(f"  {fmt_size(f['size']):>10}  {label:>10}  {p}")
     if total_save_ebook or total_save_printer:
-        print()
+        ui.tqdm.write()
         if total_save_ebook:
-            print(
+            ui.tqdm.write(
                 f"Estimated savings if /ebook on the 'ebook' bucket: ~{fmt_size(total_save_ebook)}"
             )
         if total_save_printer:
-            print(
+            ui.tqdm.write(
                 f"Estimated savings if /printer on the 'printer' bucket: ~{fmt_size(total_save_printer)}"
             )
 
@@ -352,14 +349,14 @@ def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> N
     try:
         con = sqlite3.connect(db, timeout=5)
     except sqlite3.Error as e:
-        print(f"{YELLOW}WARN{RESET}: could not open {db} to sync size: {e}")
+        ui.tqdm.write(f"{ui.YELLOW}WARN{ui.RESET}: could not open {db} to sync size: {e}")
         return
     try:
         cur = con.cursor()
         cur.execute("SELECT id FROM books WHERE path = ?", (book_path,))
         row = cur.fetchone()
         if not row:
-            print(
+            ui.tqdm.write(
                 f"(Inside a Calibre library, but no book row for {book_path!r}; size not synced.)"
             )
             return
@@ -384,18 +381,18 @@ def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> N
 
         con.commit()
         if synced:
-            print(f"Synced {' + '.join(synced)} in {db}")
+            ui.tqdm.write(f"Synced {' + '.join(synced)} in {db}")
         else:
-            print(
+            ui.tqdm.write(
                 f"(No data/books_pages_link rows for book {book_id}/{fmt}; size not synced.)"
             )
     except sqlite3.OperationalError as e:
-        print(
-            f"{YELLOW}WARN{RESET}: metadata.db is busy or locked ({e}). The PDF was "
+        ui.tqdm.write(
+            f"{ui.YELLOW}WARN{ui.RESET}: metadata.db is busy or locked ({e}). The PDF was "
             "replaced; close Calibre and re-run to sync the page-size cache."
         )
     except sqlite3.Error as e:
-        print(f"{YELLOW}WARN{RESET}: could not sync size to metadata.db: {e}")
+        ui.tqdm.write(f"{ui.YELLOW}WARN{ui.RESET}: could not sync size to metadata.db: {e}")
     finally:
         con.close()
 
@@ -407,8 +404,8 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
     # no .pre-compress.pdf rollback. Refusing that is not ghostscript's business,
     # and gating it behind require("gs") would also skip it wherever gs is absent.
     if out_dir is not None and (out_dir / src.name).resolve() == src.resolve():
-        print(
-            f"{RED}ERROR{RESET}: --out-dir {out_dir} is the PDF's own directory, "
+        ui.tqdm.write(
+            f"{ui.RED}ERROR{ui.RESET}: --out-dir {out_dir} is the PDF's own directory, "
             "so the output would overwrite the original. Drop --out-dir for "
             "in-place mode (which keeps a .pre-compress.pdf rollback), or "
             "choose a different directory."
@@ -417,21 +414,21 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
 
     gs = require("gs")
     if not src.is_file():
-        print(f"{RED}ERROR{RESET}: {src} is not a file.")
+        ui.tqdm.write(f"{ui.RED}ERROR{ui.RESET}: {src} is not a file.")
         return 2
     if src.suffix.lower() != ".pdf":
-        print(f"{RED}ERROR{RESET}: {src} does not look like a PDF.")
+        ui.tqdm.write(f"{ui.RED}ERROR{ui.RESET}: {src} does not look like a PDF.")
         return 2
 
     orig_size = src.stat().st_size
     orig_pages = page_count(src)
 
-    print(f"{BOLD}Input{RESET}: {src}")
-    print(f"  size:  {fmt_size(orig_size)}  ({orig_size:,} bytes)")
-    print(
+    ui.tqdm.write(f"{ui.BOLD}Input{ui.RESET}: {src}")
+    ui.tqdm.write(f"  size:  {fmt_size(orig_size)}  ({orig_size:,} bytes)")
+    ui.tqdm.write(
         f"  pages: {orig_pages if orig_pages is not None else '(pdfinfo unavailable; skipping)'}"
     )
-    print(f"  preset: /{preset}")
+    ui.tqdm.write(f"  preset: /{preset}")
 
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -444,8 +441,8 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
     # A leftover rollback file is the only copy of the true original; replacing
     # it with the (already once-compressed) src would destroy it silently.
     if out_dir is None and not dry_run and backup.exists():
-        print(
-            f"{RED}ABORT{RESET}: rollback file already exists: {backup}. "
+        ui.tqdm.write(
+            f"{ui.RED}ABORT{ui.RESET}: rollback file already exists: {backup}. "
             "Replacing would overwrite the original from a previous run; "
             "move or delete it first."
         )
@@ -462,11 +459,11 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
         f"-sOutputFile={out_tmp}",
         str(src),
     ]
-    print("\nRunning ghostscript...")
+    ui.tqdm.write("\nRunning ghostscript...")
     try:
         subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"{RED}ghostscript exited {e.returncode}{RESET}")
+        ui.tqdm.write(f"{ui.RED}ghostscript exited {e.returncode}{ui.RESET}")
         out_tmp.unlink(missing_ok=True)
         return 1
 
@@ -475,50 +472,50 @@ def compress(src: Path, preset: str, dry_run: bool, out_dir: Path | None = None)
     saved = orig_size - new_size
     pct = (saved / orig_size) * 100 if orig_size else 0
 
-    print(f"\n{BOLD}Result{RESET}:")
-    print(f"  before: {fmt_size(orig_size)}  ({orig_size:,} bytes)")
-    print(f"  after:  {fmt_size(new_size)}  ({new_size:,} bytes)")
-    print(f"  saved:  {fmt_size(saved)}  ({pct:.1f}%)")
-    print(f"  pages:  {new_pages} (was {orig_pages})")
+    ui.tqdm.write(f"\n{ui.BOLD}Result{ui.RESET}:")
+    ui.tqdm.write(f"  before: {fmt_size(orig_size)}  ({orig_size:,} bytes)")
+    ui.tqdm.write(f"  after:  {fmt_size(new_size)}  ({new_size:,} bytes)")
+    ui.tqdm.write(f"  saved:  {fmt_size(saved)}  ({pct:.1f}%)")
+    ui.tqdm.write(f"  pages:  {new_pages} (was {orig_pages})")
 
     if orig_pages is not None and new_pages is None:
         # pdfinfo parsed the original but not the output: the conversion is
         # unreadable, which must fail verification, not skip it.
-        print(
-            f"\n{RED}ABORT{RESET}: pdfinfo cannot read the converted output. Original untouched; temp dropped."
+        ui.tqdm.write(
+            f"\n{ui.RED}ABORT{ui.RESET}: pdfinfo cannot read the converted output. Original untouched; temp dropped."
         )
         out_tmp.unlink(missing_ok=True)
         return 1
     if orig_pages is not None and new_pages is not None and orig_pages != new_pages:
-        print(
-            f"\n{RED}ABORT{RESET}: page count changed ({orig_pages} -> {new_pages}). Original untouched; temp dropped."
+        ui.tqdm.write(
+            f"\n{ui.RED}ABORT{ui.RESET}: page count changed ({orig_pages} -> {new_pages}). Original untouched; temp dropped."
         )
         out_tmp.unlink(missing_ok=True)
         return 1
     if new_size >= orig_size:
-        print(
-            f"\n{YELLOW}No size win{RESET}: output is not smaller. Original untouched; temp dropped."
+        ui.tqdm.write(
+            f"\n{ui.YELLOW}No size win{ui.RESET}: output is not smaller. Original untouched; temp dropped."
         )
         out_tmp.unlink(missing_ok=True)
         return 1
 
     if dry_run:
-        print(
-            f"\n{YELLOW}DRY-RUN{RESET}: leaving {out_tmp.name} in place; nothing replaced."
+        ui.tqdm.write(
+            f"\n{ui.YELLOW}DRY-RUN{ui.RESET}: leaving {out_tmp.name} in place; nothing replaced."
         )
         return 0
 
     if out_dir is not None:
         # Out-of-tree mode: rename temp to final, leave original alone, skip Calibre DB sync.
         shutil.move(str(out_tmp), str(final_out))
-        print(f"\n{GREEN}WROTE{RESET}: {final_out}")
-        print(f"Original untouched at: {src}")
+        ui.tqdm.write(f"\n{ui.GREEN}WROTE{ui.RESET}: {final_out}")
+        ui.tqdm.write(f"Original untouched at: {src}")
         return 0
 
     # In-place mode: leave a .pre-compress.pdf rollback file in the source dir
     shutil.move(str(src), str(backup))
     shutil.move(str(out_tmp), str(src))
-    print(f"\n{GREEN}REPLACED{RESET}. Original at: {backup.name}")
+    ui.tqdm.write(f"\n{ui.GREEN}REPLACED{ui.RESET}. Original at: {backup.name}")
 
     # If the file sits inside a Calibre library, sync books_pages_link.format_size
     library = find_calibre_library(src.parent)
@@ -565,6 +562,7 @@ def main() -> int:
         "(original PDF is left untouched; Calibre DB is not modified)",
     )
     args = p.parse_args()
+    ui.print_header("Compress PDF")
     if args.inspect:
         inspect_path(args.path.resolve(), args.min_size_mb)
         return 0

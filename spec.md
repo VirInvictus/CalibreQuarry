@@ -2,7 +2,7 @@
 
 **Version:** 3.8.1  
 **Language:** Python 3.14+  
-**Dependencies:** None (stdlib only: sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** None (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -41,7 +41,7 @@ The search engine in `src/cquarry/search.py` ports Calibre's grammar and matchin
 - Field locations: `title`, `authors`/`author`, `author_sort`, `series`, `publisher`, `tags`/`tag` (hierarchical), `rating`, `formats`/`format`, `languages`/`language`, `pubdate`, `timestamp`/`date`, `last_modified`, `identifiers`/`identifier`/`isbn`, `comments`/`comment`, `cover`, `id`, `uuid`, `#custom` columns, `all`, and `vl:`.
 - Numeric relational (`= > < >= <= !=`, plus `true`/`false` for presence) and date relational (incl. `today`, `yesterday`, `thismonth`, `N daysago`).
 
-**Deliberate, dependency-bound deviations from Calibre** (it is stdlib-only):
+**Deliberate, dependency-bound deviations from Calibre** (it is minimal-dependency (uses tqdm)):
 
 - `~` regex uses the stdlib `re` engine, not Calibre's third-party `regex` module.
 - Accent/contains folding uses `unicodedata` (NFKD), not ICU collation, so punctuation-insensitivity is not reproduced.
@@ -116,7 +116,7 @@ These guarantees apply to the `cquarry` package only. The companion scripts in Â
 
 ## 5. Companion Scripts
 
-The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry` package and do **not** share its read-only or import guarantees. They are stdlib-only Python but shell out to external tools, and three of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
+The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry` package and do **not** share its read-only or import guarantees. They are minimal-dependency (uses tqdm) Python but shell out to external tools, and three of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
 
 | Script | What it does | Writes? | External tools |
 |--------|--------------|---------|----------------|

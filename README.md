@@ -284,7 +284,7 @@ cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'
 * **Virtual Library Referencing**: `vl:"Wing Name"` cross-references an existing Wing (recursion is detected and reported).
 * **Empty query**: an empty `--search ''` returns the whole library, matching Calibre.
 
-#### Parity scope (stdlib-only deviations)
+#### Parity scope (minimal-dependency (uses tqdm) deviations)
 
 Matching is near-complete but not bit-for-bit identical to Calibre, by design: CalibreQuarry has zero dependencies, while a few of Calibre's behaviors are tied to third-party libraries.
 
@@ -343,7 +343,7 @@ Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same co
 **A search or wing returns nothing.**
 - Tags are anchored-hierarchical: `tags:Fic` matches `Fic` and `Fic.*`, but not a tag that merely contains "fic" in the middle. Use the full dotted path, or `=` for an exact leaf (`tags:"=Fic.SciFi.Cyberpunk"`).
 - Check the wing name with `cquarry --wings`; names are case-sensitive and must match Calibre exactly. Quote names with spaces: `--wing "Sci-Fi Wing"`.
-- A field prefix that Calibre supports but cquarry does not (templates `@...:`, saved searches `search:`) matches nothing. See [Parity scope](#parity-scope-stdlib-only-deviations).
+- A field prefix that Calibre supports but cquarry does not (templates `@...:`, saved searches `search:`) matches nothing. See [Parity scope](#parity-scope-minimal-dependency (uses tqdm)-deviations).
 
 **"Database not found" or it points at the wrong library.**
 - Pass `--db /path/to/metadata.db` (or a directory containing it). The resolved path is saved to `~/.config/cquarry/config.json`; delete that file or pass `--db` to reset it.
@@ -422,7 +422,7 @@ options:
 
 ## Companion scripts
 
-The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are stdlib-only Python; some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
+The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are minimal-dependency (uses tqdm) Python; some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
 
 ### `compress_pdf.py` — shrink oversize PDFs (writes)
 

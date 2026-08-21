@@ -51,6 +51,10 @@ Exit codes:
 """
 
 import argparse
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+import ui
 import os
 import re
 import shutil
@@ -1350,7 +1354,7 @@ def run_library(selected: list[str], min_chars: int, thin_chars: int) -> int:
     errors: list[tuple] = []
     scanned = 0
 
-    for book_id, title, path, name in rows:
+    for book_id, title, path, name in ui.tqdm(rows, desc=ui.info("Scanning library")):
         full = library_root / path / f"{name}.epub"
         tags = booktags.get(book_id, [])
         tag = tags[0] if tags else "?"
@@ -1478,11 +1482,11 @@ def run_directory(
     multi = len(selected) > 1
     problems = 0
     errors = 0
-    for path in epubs:
+    for path in ui.tqdm(epubs, desc=ui.info("Scanning directory")):
         try:
             book = load_book(path)
         except Exception as e:
-            print(f"  {YELLOW}ERROR {RESET} {path.name}\n      {type(e).__name__}: {e}")
+            ui.tqdm.write(f"  {YELLOW}ERROR {RESET} {path.name}\n      {type(e).__name__}: {e}")
             errors += 1
             continue
 
@@ -1505,18 +1509,18 @@ def run_directory(
             verdicts.append((key, problem, status, lines))
 
         if multi:
-            print(f"  {path.name}")
+            ui.tqdm.write(f"  {path.name}")
             for key, problem, status, lines in verdicts:
                 color = RED if problem else (YELLOW if status != "OK" else GREEN)
-                print(f"      {color}{status:<6}{RESET} {key}")
+                ui.tqdm.write(f"      {color}{status:<6}{RESET} {key}")
                 for ln in lines:
-                    print(f"          {ln}")
+                    ui.tqdm.write(f"          {ln}")
         else:
             _key, problem, status, lines = verdicts[0]
             color = RED if problem else (YELLOW if status != "OK" else GREEN)
-            print(f"  {color}{status:<6}{RESET} {path.name}")
+            ui.tqdm.write(f"  {color}{status:<6}{RESET} {path.name}")
             for ln in lines:
-                print(f"      {ln}")
+                ui.tqdm.write(f"      {ln}")
     print()
 
     if problems == 0 and errors == 0:
@@ -1557,6 +1561,7 @@ def main() -> int:
         help=f"emptytext THIN advisory threshold (default {DEFAULT_THIN_CHARS})",
     )
     args = parser.parse_args()
+    ui.print_header(f"audit_epub.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else f"audit_epub.py - Execution")
     selected = list(ALL) if args.mode == "all" else [args.mode]
     if args.directory:
         return run_directory(

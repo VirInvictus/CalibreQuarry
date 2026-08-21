@@ -51,6 +51,10 @@ Exit codes:
 """
 
 import argparse
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+import ui
 import csv
 import os
 import shutil
@@ -409,9 +413,9 @@ def _print_row(label: str, verdict: Verdict) -> None:
         if verdict.kind and verdict.status in (DRM, BENIGN, ERROR)
         else ""
     )
-    print(f"  {c}{verdict.status:<7}{RESET}{kind} {label}")
+    ui.tqdm.write(f"  {c}{verdict.status:<7}{RESET}{kind} {label}")
     if verdict.detail and verdict.status in (DRM, ERROR):
-        print(f"      {verdict.detail}")
+        ui.tqdm.write(f"      {verdict.detail}")
 
 
 def _summary(drm, benign, errors, scanned) -> int:
@@ -449,7 +453,7 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
     print(f"Scanning {len(files)} file(s) in {directory} for DRM\n")
     drm = benign = errors = scanned = 0
     csv_rows = []
-    for path in files:
+    for path in ui.tqdm(files, desc=ui.info("Scanning files")):
         verdict = classify_file(path)
         if verdict.status == NA:
             continue
@@ -496,7 +500,7 @@ def run_library(csv_path: Path | None) -> int:
     print(f"Scanning {len(rows)} file(s) across the library for DRM\n")
     drm = benign = errors = scanned = 0
     csv_rows = []
-    for book_id, title, path, name, fmt in rows:
+    for book_id, title, path, name, fmt in ui.tqdm(rows, desc=ui.info("Scanning library")):
         full = library_root / path / f"{name}.{fmt.lower()}"
         if not full.is_file():
             errors += 1
@@ -541,6 +545,7 @@ def main() -> int:
         help="also write a CSV audit (id,status,kind,detail,path)",
     )
     args = parser.parse_args()
+    ui.print_header(f"audit_drm.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else f"audit_drm.py - Execution")
     csv_path = Path(args.csv).expanduser() if args.csv else None
     if args.directory:
         return run_directory(Path(args.directory).expanduser(), csv_path)
