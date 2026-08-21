@@ -444,13 +444,13 @@ def _write_csv(csv_path: Path, rows: list[tuple]) -> None:
 # --------------------------------------------------------------------------- #
 def run_directory(directory: Path, csv_path: Path | None) -> int:
     if not directory.is_dir():
-        print(f"ERROR: {directory} is not a directory.")
+        print(ui.error(f"{directory} is not a directory."))
         return 2
     files = sorted(p for p in directory.rglob("*") if p.suffix.lower() in SUPPORTED_EXT)
     if not files:
-        print(f"No ebook files found under {directory}")
+        print(ui.warn(f"No ebook files found under {directory}"))
         return 2
-    print(f"Scanning {len(files)} file(s) in {directory} for DRM\n")
+    print(ui.info(f"Scanning {len(files)} file(s) in {directory} for DRM\n"))
     drm = benign = errors = scanned = 0
     csv_rows = []
     for path in ui.tqdm(files, desc=ui.info("Scanning files")):
@@ -476,16 +476,16 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
 def run_library(csv_path: Path | None) -> int:
     library_root = resolve_library_root()
     if library_root is None:
-        print(
-            "ERROR: no metadata.db next to this script or in the current "
+        print(ui.error(
+            "no metadata.db next to this script or in the current "
             "directory. Run from the library directory."
-        )
+        ))
         return 2
     db_path = library_root / "metadata.db"
     try:
         con, tmpdir = connect_ro(db_path)
     except sqlite3.Error as e:
-        print(f"ERROR: cannot open {db_path}: {e}")
+        print(ui.error(f"cannot open {db_path}: {e}"))
         return 2
     try:
         rows = con.execute(
@@ -497,7 +497,7 @@ def run_library(csv_path: Path | None) -> int:
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    print(f"Scanning {len(rows)} file(s) across the library for DRM\n")
+    print(ui.info(f"Scanning {len(rows)} file(s) across the library for DRM\n"))
     drm = benign = errors = scanned = 0
     csv_rows = []
     for book_id, title, path, name, fmt in ui.tqdm(rows, desc=ui.info("Scanning library")):
