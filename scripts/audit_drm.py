@@ -478,10 +478,12 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
 def run_library(csv_path: Path | None) -> int:
     library_root = resolve_library_root()
     if library_root is None:
-        print(ui.error(
-            "no metadata.db next to this script or in the current "
-            "directory. Run from the library directory."
-        ))
+        print(
+            ui.error(
+                "no metadata.db next to this script or in the current "
+                "directory. Run from the library directory."
+            )
+        )
         return 2
     db_path = library_root / "metadata.db"
     try:
@@ -502,7 +504,9 @@ def run_library(csv_path: Path | None) -> int:
     print(ui.info(f"Scanning {len(rows)} file(s) across the library for DRM\n"))
     drm = benign = errors = scanned = 0
     csv_rows = []
-    for book_id, title, path, name, fmt in ui.tqdm(rows, desc=ui.info("Scanning library")):
+    for book_id, title, path, name, fmt in ui.tqdm(
+        rows, desc=ui.info("Scanning library")
+    ):
         full = library_root / path / f"{name}.{fmt.lower()}"
         if not full.is_file():
             errors += 1
@@ -547,7 +551,11 @@ def main() -> int:
         help="also write a CSV audit (id,status,kind,detail,path)",
     )
     args = parser.parse_args()
-    ui.print_header("audit_drm.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "audit_drm.py - Execution")
+    ui.print_header(
+        "audit_drm.py - Execution [DRY RUN]"
+        if getattr(args, "dry_run", False)
+        else "audit_drm.py - Execution"
+    )
     csv_path = Path(args.csv).expanduser() if args.csv else None
     if args.directory:
         return run_directory(Path(args.directory).expanduser(), csv_path)

@@ -6,7 +6,16 @@ try:
 except ImportError:
     # Minimal fallback if tqdm is missing
     class tqdm:
-        def __init__(self, iterable=None, desc=None, disable=False, total=None, unit="it", leave=True, **kwargs):
+        def __init__(
+            self,
+            iterable=None,
+            desc=None,
+            disable=False,
+            total=None,
+            unit="it",
+            leave=True,
+            **kwargs,
+        ):
             self.iterable = iterable
             self.desc = desc
             self.disable = disable
@@ -43,40 +52,49 @@ except ImportError:
 
 
 # ANSI Colors
-RED = '\033[31m'
-GREEN = '\033[32m'
-YELLOW = '\033[33m'
-CYAN = '\033[36m'
-MAGENTA = '\033[35m'
-BOLD = '\033[1m'
-DIM = '\033[2m'
-RESET = '\033[0m'
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+MAGENTA = "\033[35m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
 
 def _use_color() -> bool:
     return "NO_COLOR" not in os.environ and sys.stdout.isatty()
 
+
 def color(text: str, code: str) -> str:
     return f"{code}{text}{RESET}" if _use_color() else text
+
 
 def info(msg: str) -> str:
     return color(f"ℹ {msg}", CYAN)
 
+
 def success(msg: str) -> str:
     return color(f"✓ {msg}", GREEN)
+
 
 def warn(msg: str) -> str:
     return color(f"⚠ {msg}", YELLOW)
 
+
 def error(msg: str) -> str:
     return color(f"✗ {msg}", RED)
 
+
 def dry_run(msg: str) -> str:
     return f"{color('[DRY]', YELLOW)} {msg}"
+
 
 def print_header(title: str) -> None:
     tqdm.write(color(f"\n{'=' * 60}", BOLD))
     tqdm.write(color(f"{title}", BOLD + CYAN))
     tqdm.write(color(f"{'=' * 60}", BOLD))
+
 
 def print_summary(stats: dict) -> None:
     tqdm.write(color("\n--- SUMMARY ---", BOLD))

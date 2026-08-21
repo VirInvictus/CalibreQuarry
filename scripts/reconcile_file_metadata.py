@@ -727,7 +727,11 @@ def main() -> int:
         help="print only drift, truncate long field lists",
     )
     args = parser.parse_args()
-    ui.print_header("reconcile_file_metadata.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "reconcile_file_metadata.py - Execution")
+    ui.print_header(
+        "reconcile_file_metadata.py - Execution [DRY RUN]"
+        if getattr(args, "dry_run", False)
+        else "reconcile_file_metadata.py - Execution"
+    )
 
     if args.id and parse_id_list(args.id) is None:
         print(

@@ -598,7 +598,11 @@ def main() -> int:
     )
     args = ap.parse_args()
     ui.print_header("spot_check.py - Random spot check")
-    ui.print_header("spot_check.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "spot_check.py - Execution")
+    ui.print_header(
+        "spot_check.py - Execution [DRY RUN]"
+        if getattr(args, "dry_run", False)
+        else "spot_check.py - Execution"
+    )
 
     ledger_path = Path(args.ledger).expanduser()
     if args.worklist:

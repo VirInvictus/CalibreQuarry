@@ -459,7 +459,11 @@ def main() -> int:
         "--quiet", action="store_true", help="print only problems; truncate long lists"
     )
     args = parser.parse_args()
-    ui.print_header("validate_metadata.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "validate_metadata.py - Execution")
+    ui.print_header(
+        "validate_metadata.py - Execution [DRY RUN]"
+        if getattr(args, "dry_run", False)
+        else "validate_metadata.py - Execution"
+    )
 
     db_path = resolve_db_path(args.path)
     if db_path is None:

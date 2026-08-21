@@ -1488,7 +1488,9 @@ def run_directory(
         try:
             book = load_book(path)
         except Exception as e:
-            ui.tqdm.write(f"  {YELLOW}ERROR {RESET} {path.name}\n      {type(e).__name__}: {e}")
+            ui.tqdm.write(
+                f"  {YELLOW}ERROR {RESET} {path.name}\n      {type(e).__name__}: {e}"
+            )
             errors += 1
             continue
 
@@ -1563,7 +1565,11 @@ def main() -> int:
         help=f"emptytext THIN advisory threshold (default {DEFAULT_THIN_CHARS})",
     )
     args = parser.parse_args()
-    ui.print_header("audit_epub.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "audit_epub.py - Execution")
+    ui.print_header(
+        "audit_epub.py - Execution [DRY RUN]"
+        if getattr(args, "dry_run", False)
+        else "audit_epub.py - Execution"
+    )
     selected = list(ALL) if args.mode == "all" else [args.mode]
     if args.directory:
         return run_directory(

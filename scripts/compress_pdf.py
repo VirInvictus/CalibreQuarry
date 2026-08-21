@@ -55,7 +55,6 @@ PRESETS = ("screen", "ebook", "printer", "prepress")
 PROBE_TIMEOUT = 120
 
 
-
 def fmt_size(n: int) -> str:
     if n >= 1 << 30:
         return f"{n / (1 << 30):.2f} GB"
@@ -67,7 +66,9 @@ def fmt_size(n: int) -> str:
 def require(cmd: str) -> str:
     p = shutil.which(cmd)
     if not p:
-        ui.tqdm.write(f"{ui.RED}ERROR{ui.RESET}: required tool '{cmd}' not found on PATH.")
+        ui.tqdm.write(
+            f"{ui.RED}ERROR{ui.RESET}: required tool '{cmd}' not found on PATH."
+        )
         sys.exit(2)
     return p
 
@@ -351,7 +352,9 @@ def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> N
     try:
         con = sqlite3.connect(db, timeout=5)
     except sqlite3.Error as e:
-        ui.tqdm.write(f"{ui.YELLOW}WARN{ui.RESET}: could not open {db} to sync size: {e}")
+        ui.tqdm.write(
+            f"{ui.YELLOW}WARN{ui.RESET}: could not open {db} to sync size: {e}"
+        )
         return
     try:
         cur = con.cursor()
@@ -394,7 +397,9 @@ def update_calibre_size(library_root: Path, file_path: Path, new_size: int) -> N
             "replaced; close Calibre and re-run to sync the page-size cache."
         )
     except sqlite3.Error as e:
-        ui.tqdm.write(f"{ui.YELLOW}WARN{ui.RESET}: could not sync size to metadata.db: {e}")
+        ui.tqdm.write(
+            f"{ui.YELLOW}WARN{ui.RESET}: could not sync size to metadata.db: {e}"
+        )
     finally:
         con.close()
 

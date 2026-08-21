@@ -401,7 +401,11 @@ def main() -> int:
     )
     ap.add_argument("--quiet", action="store_true", help="suppress per-book lines")
     args = ap.parse_args()
-    ui.print_header("fetch_library_codes.py - Execution [DRY RUN]" if getattr(args, "dry_run", False) else "fetch_library_codes.py - Execution")
+    ui.print_header(
+        "fetch_library_codes.py - Execution [DRY RUN]"
+        if getattr(args, "dry_run", False)
+        else "fetch_library_codes.py - Execution"
+    )
 
     if args.delay < 1.0:
         print(
@@ -476,8 +480,10 @@ def main() -> int:
                     codes = fetch_codes(isbn, args.timeout, strict=(queried == 0))
                 except SRUDiagnostic as e:
                     ui.tqdm.write(
-                        ui.error(f"  ABORT: the very first query was refused: {e}\n"
-                        "  This means the query form is wrong, not that the book is missing."),
+                        ui.error(
+                            f"  ABORT: the very first query was refused: {e}\n"
+                            "  This means the query form is wrong, not that the book is missing."
+                        ),
                         file=sys.stderr,
                     )
                     return 1
@@ -486,15 +492,19 @@ def main() -> int:
                     consecutive_failures += 1
                     if not args.quiet:
                         ui.tqdm.write(
-                            ui.error(f"  [{i}/{len(targets)}] ERR  #{t['id']} {t['title'][:44]}")
+                            ui.error(
+                                f"  [{i}/{len(targets)}] ERR  #{t['id']} {t['title'][:44]}"
+                            )
                         )
                     if consecutive_failures >= ABORT_AFTER_CONSECUTIVE_FAILURES:
                         # Break rather than return: everything found before LoC
                         # stopped answering is still good and still gets written.
                         ui.tqdm.write(
-                            ui.error(f"\nSTOPPING: {consecutive_failures} consecutive failures. "
-                            "LoC is refusing us; writing what we have, resume later "
-                            "(lookups are cached, so a re-run replays them instantly)."),
+                            ui.error(
+                                f"\nSTOPPING: {consecutive_failures} consecutive failures. "
+                                "LoC is refusing us; writing what we have, resume later "
+                                "(lookups are cached, so a re-run replays them instantly)."
+                            ),
                             file=sys.stderr,
                         )
                         aborted = True
@@ -517,17 +527,23 @@ def main() -> int:
                     writes.append((t["id"], "ddc", ddc))
                 if not args.quiet:
                     ui.tqdm.write(
-                        ui.success(f"  [{i}/{len(targets)}] HIT  {lcc:<24} #{t['id']} {t['title'][:40]}")
+                        ui.success(
+                            f"  [{i}/{len(targets)}] HIT  {lcc:<24} #{t['id']} {t['title'][:40]}"
+                        )
                     )
             elif not args.quiet:
                 ui.tqdm.write(
-                    ui.info(f"  [{i}/{len(targets)}] --   {'':<24} #{t['id']} {t['title'][:40]}")
+                    ui.info(
+                        f"  [{i}/{len(targets)}] --   {'':<24} #{t['id']} {t['title'][:40]}"
+                    )
                 )
 
             if src == "loc":
                 time.sleep(args.delay)
     except KeyboardInterrupt:
-        ui.tqdm.write(ui.warn("\ninterrupted; progress cached, re-run to resume"), file=sys.stderr)
+        ui.tqdm.write(
+            ui.warn("\ninterrupted; progress cached, re-run to resume"), file=sys.stderr
+        )
     finally:
         if not args.no_cache:
             save_cache(args.cache, cache)
