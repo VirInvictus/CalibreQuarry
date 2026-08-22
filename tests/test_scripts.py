@@ -7,24 +7,17 @@ metadata.db.
 """
 
 import contextlib
-
 import importlib.util
-
 import io
-
 import os
-
 import pathlib
-
 import shutil
-
 import sqlite3
-
 import tempfile
-
 import unittest
 
 _SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
+
 
 def _load(name):
     spec = importlib.util.spec_from_file_location(name, _SCRIPTS / f"{name}.py")
@@ -32,7 +25,9 @@ def _load(name):
     spec.loader.exec_module(mod)
     return mod
 
+
 compress_pdf = _load("compress_pdf")
+
 
 def _features(**over):
     base = {
@@ -48,6 +43,7 @@ def _features(**over):
     }
     base.update(over)
     return base
+
 
 class TestRecommend(unittest.TestCase):
     def verdict(self, **over):
@@ -78,11 +74,13 @@ class TestRecommend(unittest.TestCase):
     def test_printer_for_moderate_dpi(self):
         self.assertEqual(self.verdict(avg_dpi=200), "printer")
 
+
 class TestFmtSize(unittest.TestCase):
     def test_units(self):
         self.assertEqual(compress_pdf.fmt_size(2 << 30), "2.00 GB")
         self.assertEqual(compress_pdf.fmt_size(5 << 20), "5.0 MB")
         self.assertTrue(compress_pdf.fmt_size(2048).endswith("KB"))
+
 
 class TestCalibreSizeSync(unittest.TestCase):
     """update_calibre_size against a throwaway temp library (never the live DB)."""
@@ -149,6 +147,7 @@ class TestCalibreSizeSync(unittest.TestCase):
         stray = root / "Nobody" / "Nothing (9)" / "x.pdf"
         compress_pdf.update_calibre_size(root, stray, 1)
 
+
 class TestBackupGuard(unittest.TestCase):
     """A leftover .pre-compress.pdf rollback file must never be overwritten."""
 
@@ -164,6 +163,7 @@ class TestBackupGuard(unittest.TestCase):
         # both files untouched
         self.assertEqual(backup.read_bytes(), b"%PDF-1.4 original")
         self.assertEqual(src.read_bytes(), b"%PDF-1.4 fake")
+
 
 class TestOutDirGuard(unittest.TestCase):
     """--out-dir promises the original is untouched, and lands the result at
@@ -201,10 +201,12 @@ class TestOutDirGuard(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+
 if __name__ == "__main__":
     unittest.main()
 
 spot_check = _load("spot_check")
+
 
 class TestSpotCheckLint(unittest.TestCase):
     def test_case_garble_title_flags(self):
@@ -275,6 +277,7 @@ class TestSpotCheckLint(unittest.TestCase):
             "COMMENT_TRUNCATED", spot_check.lint_comment(prose + "see example.co.uk")
         )
 
+
 class TestSpotCheckEpub(unittest.TestCase):
     OPF = (
         '<package xmlns="http://www.idpf.org/2007/opf">'
@@ -315,6 +318,7 @@ class TestSpotCheckEpub(unittest.TestCase):
             p = pathlib.Path(tmp) / "junk.epub"
             p.write_bytes(b"not a zip at all")
             self.assertTrue(spot_check.check_epub(p)[0].startswith("EPUB_BADZIP"))
+
 
 class TestSpotCheckReview(unittest.TestCase):
     """Review mode: the id reconciliation is the part that must not fail open."""
@@ -477,7 +481,9 @@ class TestSpotCheckReview(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("nothing to review", buf.getvalue())
 
+
 validate_metadata = _load("validate_metadata")
+
 
 class TestFormatFictionPdf(unittest.TestCase):
     """One FORMAT_FICTION_PDF warning per book (regression: a crossover book
@@ -505,7 +511,9 @@ class TestFormatFictionPdf(unittest.TestCase):
         self.assertIn("Fic.Fantasy", msg)
         self.assertIn("Fic.Horror", msg)
 
+
 fetch_library_codes = _load("fetch_library_codes")
+
 
 class TestFetchLibraryCodesBackup(unittest.TestCase):
     """backup_db never overwrites an earlier restore point (regression: the
@@ -523,6 +531,7 @@ class TestFetchLibraryCodesBackup(unittest.TestCase):
             self.assertNotEqual(first, second)
             self.assertEqual(pathlib.Path(first).read_bytes(), b"before first run")
             self.assertEqual(pathlib.Path(second).read_bytes(), b"after first run")
+
 
 class TestFetchLibraryCodesFindDb(unittest.TestCase):
     def test_missing_db_is_a_setup_error_exit_2(self):
@@ -542,4 +551,3 @@ class TestFetchLibraryCodesFindDb(unittest.TestCase):
                 os.chdir(cwd)
         self.assertEqual(cm.exception.code, 2)
         self.assertIn("metadata.db", buf.getvalue())
-
