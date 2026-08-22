@@ -34,7 +34,7 @@ Per format:
   /AZW3   Mobipocket DRM). Pure stdlib.
   DJVU   No DRM scheme in practice => reported N/A.
 
-Companion to audit_epub.py (body text) and validate_metadata.py (catalogue);
+Companion to validate_metadata.py (catalogue);
 like them it has a library mode (formats and paths from metadata.db, opened
 strictly mode=ro) and a directory mode (recursive scan of loose files before
 import), and the same exit codes.

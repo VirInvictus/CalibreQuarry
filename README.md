@@ -334,7 +334,7 @@ The whole suite runs without a Calibre library (stdlib `unittest`, ~273 tests):
 - **Helpers** (`tests/test_helpers.py`): rating-to-stars and the half-star glyph, series-gap detection, the read-only URI builder (a library path containing `?` or `#`), and the JPEG/PNG cover sizers (including a JPEG whose SOF sits past the first 1 KB).
 - **Modes** (`tests/test_modes.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, and the audit's cover checks, all against a temporary database.
 - **TUI** (`tests/test_tui.py`): fallback-menu generation, prompt/cancel semantics, non-ASCII prompt input, and the persistent-screen session lifecycle.
-- **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`, `tests/test_audit_isbns.py`): `compress_pdf.py` size-sync and backup guards, the `audit_epub.py` analyzers, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, DRM classification, and the ISBN arithmetic, printed-ISBN extraction, and verdict rules behind `audit_isbns.py`.
+- **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`, `tests/test_audit_isbns.py`): `compress_pdf.py` size-sync and backup guards, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, DRM classification, and the ISBN arithmetic, printed-ISBN extraction, and verdict rules behind `audit_isbns.py`.
 
 Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same command CI runs). The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
 
@@ -441,26 +441,6 @@ python3 scripts/compress_pdf.py book.pdf --out-dir ~/out # write a copy elsewher
 ```
 
 Exit codes: `0` compressed/verified (or clean inspect), `1` aborted (no shrink, page-count mismatch), `2` setup error (Ghostscript missing, unreadable file).
-
-### `audit_epub.py` — flag EPUB content problems (read-only)
-
-Reads the actual body text of EPUBs to catch problems metadata and structural validators cannot see. Four analyzers in one tool, selected by subcommand:
-
-- `content` — editions whose body is in the wrong language (declared `eng` but actually Portuguese, Russian, etc.) and an injected foreign-language ad-notice signature. Votes a language across stopword sets and counts non-Latin script.
-- `pagenumbers` — print page numbers (and running headers) a bad PDF/OCR conversion captured as paragraphs instead of real pagination, so they reflow into the middle of a sentence. Flags a number only when it interrupts prose (a lowercase continuation, a word split across it, or a repeated running header beside it), leaving legitimate chapter/section numbers and endnote markers alone. Also surfaces piracy watermarks and bad OCR scans.
-- `emptytext` — content-less stubs (the "Bookmate" export is cover/promo images plus a tiny HTML placeholder, the spine pointing only at the placeholder, the book itself absent). Such a file passes `epubcheck` and a structural repairer because its one referenced doc is valid; only counting rendered characters catches it. EMPTY (`<=2000` chars, `--min-chars`) is a real defect; THIN (`<20000`, `--thin-chars`) is advisory.
-- `ocr` — OCR/conversion-damaged prose: paragraphs split mid-sentence at line-wrap or page-break positions ("could just make out the shape" / "of another boat"). Separates damage from deliberately unpunctuated literary style by *where* the fragment ends (damage lands on function words; style breaks at clause boundaries) and clears legitimate idioms (figure-interrupted paragraphs, display math, rendered indexes, epistolary sign-offs, block quotations). Also reports dictionary-free side signals: en-dashes inside words, doubled opening quotes, and space-stripped proper nouns (`AnkhMorpork` beside `Ankh-Morpork`). Character-substitution errors ("sonic" for "some") are out of scope; catching those needs a wordlist.
-- `all` — runs all four in a single decompression pass per book (the expensive part is decompression, so this is much faster than four separate runs).
-
-It opens `metadata.db` strictly `mode=ro`. (Merged in v3.1.0 from the former `audit_epub_content.py` / `audit_epub_pagenumbers.py` / `audit_epub_emptytext.py`, which shared the same spine resolution, dual-mode, and exit codes; the `ocr` analyzer was added in v3.6.0.)
-
-```bash
-python3 audit_epub.py all                 # all four audits, whole library (from the library dir)
-python3 audit_epub.py content             # one audit, whole library
-python3 audit_epub.py all ~/Downloads     # vet loose .epub files before importing them
-python3 audit_epub.py emptytext ~/Downloads --min-chars 1000
-```
-
 Exit codes: `0` clean (THIN is advisory), `1` a real problem (foreign content, baked page numbers, empty book, OCR-damaged prose) or a scan error, `2` setup error.
 
 ### `audit_drm.py` — flag DRM-locked files across every format (read-only)
@@ -516,7 +496,7 @@ Exit codes: `0` no disagreement, `1` at least one `MISMATCH`/`VARIANT`/`AMBIGUOU
 
 ### `validate_metadata.py` — lint database integrity (read-only)
 
-A linter for `metadata.db` with two layers. It is the database-side companion to `audit_epub.py` (which checks book *content*), and it is strictly `mode=ro`.
+A linter for `metadata.db` with two layers. It is the database-side companion to `audit_drm.py`, and it is strictly `mode=ro`.
 
 **Integrity layer (always on, zero config).** Taxonomy-agnostic, schema-level problems the UI and `--audit` leave alone: books with no language, one ISBN attached to two books, placeholder (`0101-01-01`) or unparseable publication dates, junk identifier types (`url`, `uri`, `guid`, `isbn13`, ...), an ISBN-10 misfiled under `amazon`/`mobi-asin` (checksum-verified, so genuine ASINs are left alone), and custom-column link rows orphaned by deleted books. Safe to point at any library; needs no configuration.
 

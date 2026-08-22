@@ -41,13 +41,13 @@ tests/
   test_helpers.py    unittest: rating/star, series gaps, JPEG/PNG sizing, read-only URI building
   test_modes.py      unittest: catalog-mode cache isolation against a temp DB
   test_tui.py        unittest: fallback menu generation, prompt/cancel semantics, session lifecycle
-  test_scripts.py    unittest: compress_pdf sync/guards, audit_epub analyzers, spot_check lints/review
+  test_scripts.py    unittest: compress_pdf sync/guards, spot_check lints/review
   test_reconcile.py  unittest: reconcile_file_metadata diff/parse paths
   test_audit_drm.py  unittest: audit_drm classification
   test_audit_isbns.py unittest: audit_isbns ISBN arithmetic, extraction, verdicts, scoping
 scripts/            standalone tools OUTSIDE the package contract (run with python3)
   compress_pdf.py        write-capable PDF shrinker (Ghostscript); updates metadata.db
-  audit_epub.py          read-only EPUB body-text auditor (content|pagenumbers|emptytext|ocr|all)
+
   audit_drm.py           read-only cross-format DRM scanner (EPUB/PDF/MOBI/AZW3)
   spot_check.py          read-only randomized metadata+file audit; ledger-backed --review judgement mode
   validate_metadata.py   read-only metadata.db integrity + optional taxonomy linter

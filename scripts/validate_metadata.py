@@ -17,8 +17,8 @@ Two layers:
     must be merged, and fiction should not be PDF-only. See
     `taxonomy.example.json` for a comprehensive, ready-to-adapt template.
 
-Companion to audit_epub_content.py. That script audits EPUB *content* (wrong
-language, injected notices); this one audits the *database* and never opens a
+Companion to audit_drm.py and external EPUB content auditors.
+This script audits the Calibre *database* (metadata.db); and never opens a
 book file. `cquarry --audit` covers curation gaps (untagged, unrated,
 coverless, duplicates, series gaps); this is scoped to what it does not, so the
 two do not overlap. Strictly read-only (`mode=ro`); it makes no changes.
@@ -76,7 +76,7 @@ from urllib.parse import quote
 import ui
 
 # ANSI colours; suppress when stdout isn't a TTY or NO_COLOR is set
-# (matches audit_epub_content.py / the cquarry package).
+# (matches the cquarry package).
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 RED = "\033[31m" if USE_COLOR else ""
 YELLOW = "\033[33m" if USE_COLOR else ""
