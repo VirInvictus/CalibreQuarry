@@ -1,19 +1,11 @@
+# CalibreQuarry — Patch Notes
+
 ## v3.12.0 (2026-08-23)
 
 ### Changed
 - **Shared Library Extraction (`cquarry`):** Extracted the core Calibre database reading layer and search expression grammar into a new, standalone Python library (`cquarry`). CalibreQuarry now depends on this shared library for all data access and search resolution, ensuring 100% parity across all tools in the workspace (like Hermitage and Wings).
 - **Project Renamed to `calibrequarry`:** To prevent pip namespace collisions with the newly extracted `cquarry` shared library, the CLI project has been formally renamed to `calibrequarry` in `pyproject.toml`, and its internal modules have been moved to `cquarry_cli`. The terminal command remains `cquarry`.
 
-### Changed
-- Graduated the core Calibre database and search grammar logic (`cquarry.db` and `cquarry.search`) into a new standalone shared library, `cquarry`.
-- Renamed the CLI project namespace to `cquarry_cli` (with the project name `calibrequarry`) to avoid collisions. The tool still runs as `cquarry`.
-- `CalibreQuarry` now strictly provides the CLI and TUI, depending on the `cquarry` package for database access.
-
-# CalibreQuarry — Patch Notes
-
-## v3.11.0 (2026-08-21)
-
-### Features
 
 **UI Upgrade:** CLI scripts now feature rich output (ANSI formatting, `tqdm` progress bars, and a clear summary block). The project is no longer strictly stdlib-only and now depends on `tqdm`.
 

@@ -12,11 +12,33 @@ import os
 import sqlite3
 import tempfile
 import unittest
+_SCHEMA = """ 
+CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT, 
+    timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT, 
+    series_index REAL DEFAULT 1.0, path TEXT, uuid TEXT); 
+CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT); 
+CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT); 
+CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT); 
+CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT); 
+CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT); 
+CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT); 
+CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT); 
+CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT, rating INT); 
+CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT); 
+CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT); 
+CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT); 
+CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT); 
+CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT); 
+CREATE TABLE identifiers (book INT, type TEXT, val TEXT); 
+CREATE TABLE comments (book INT, text TEXT); 
+CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT); 
+CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT, datatype TEXT, is_multiple BOOL); 
+"""
 
 from cquarry.db import CalibreDB
 from cquarry_cli.modes.audit import run_audit
 from cquarry_cli.modes.catalog import write_all_wings, write_catalog
-from tests.test_search import _SCHEMA
+
 
 
 class TestCatalogCacheIsolation(unittest.TestCase):

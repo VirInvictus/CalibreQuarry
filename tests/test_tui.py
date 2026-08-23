@@ -9,7 +9,7 @@ import os
 import tempfile
 import unittest
 
-from cquarry import tui
+from cquarry_cli import tui
 from cquarry_cli.tui import (
     _LETTER_KEYS,
     _MAIN_ALIASES,

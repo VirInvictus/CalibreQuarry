@@ -34,7 +34,7 @@ CalibreQuarry parses search expressions directly from the `preferences` table us
 
 ### 2.3 Search Engine
 
-The search engine in `src/cquarry/search.py` ports Calibre's grammar and matching semantics as closely as the standard library allows. It is the single source of truth for both `--search` and Wing resolution.
+The search engine provided by `cquarry` ports Calibre's grammar and matching semantics as closely as the standard library allows. It is the single source of truth for both `--search` and Wing resolution.
 
 **Supported:**
 
@@ -53,7 +53,7 @@ The search engine in `src/cquarry/search.py` ports Calibre's grammar and matchin
 ### 2.4 Database Access
 
 Read-only. Never writes. Opens with a `?mode=ro` URI, built by
-`helpers.db_uri_ro`, which percent-encodes the path: `?` and `#` are URI
+`cquarry.helpers.db_uri_ro`, which percent-encodes the path: `?` and `#` are URI
 syntax, so a library directory containing either would otherwise resolve to
 a different file. All data comes from standard Calibre tables — no custom
 columns required. Ratings are stored 0–10 internally (10 = 5 stars);
@@ -112,13 +112,13 @@ The path is saved to config on first successful resolution.
 - **Not a converter.** It does not touch book files themselves.
 - **Not a server.** It has no web interface and no network access.
 
-These guarantees apply to the `cquarry` package only. The companion scripts in §5 are explicitly outside this contract.
+These guarantees apply to the `cquarry_cli` package only. The companion scripts in §5 are explicitly outside this contract.
 
 ---
 
 ## 5. Companion Scripts
 
-The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry` package and do **not** share its read-only or import guarantees. They are minimal-dependency (uses tqdm) Python but shell out to external tools, and three of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
+The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry_cli` package and do **not** share its read-only or import guarantees. They are minimal-dependency (uses tqdm) Python but shell out to external tools, and three of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
 
 | Script | What it does | Writes? | External tools |
 |--------|--------------|---------|----------------|

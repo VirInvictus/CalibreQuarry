@@ -80,12 +80,12 @@ cquarry   # launches interactive TUI
 Or run without installing:
 
 ```bash
-PYTHONPATH=src python -m cquarry --stats
+PYTHONPATH=src python -m cquarry_cli --stats
 ```
 
 ## Requirements
 
-Python 3.14+. Zero external dependencies — uses only stdlib modules (`sqlite3`, `json`, `csv`, `argparse`, `curses`, `re`, `unicodedata`, `datetime`).
+Python 3.14+. Requires `cquarry` and `tqdm` (`sqlite3`, `json`, `csv`, `argparse`, `curses`, `re`, `unicodedata`, `datetime`).
 
 (3.14 is the tested floor, matching the development environment. The code does not lean on bleeding-edge language features, so it is likely fine on somewhat older interpreters, but only 3.14+ is supported.)
 
@@ -333,10 +333,6 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 The whole suite runs without a Calibre library (stdlib `unittest`, ~273 tests):
 
-- **Grammar** (`tests/test_search.py`): parser AST cases adapted from Calibre's own `search_query_parser_test.py`, covering quotes, escapes, colon handling in values, implicit `AND`, `OR`/`NOT`, and grouping.
-- **Matching** (`tests/test_search.py`): a battery against an in-memory provider, covering hierarchical tags, `=` exact, numeric/date relational, booleans, identifiers, `vl:` recursion, accent folding, and empty-query-is-all.
-- **Integration** (`tests/test_search.py`): a temporary SQLite fixture shaped like a Calibre `metadata.db`, exercising the full `CalibreDB` stack (search, `resolve_vl`, the Python-side series rollup).
-- **Helpers** (`tests/test_helpers.py`): rating-to-stars and the half-star glyph, series-gap detection, the read-only URI builder (a library path containing `?` or `#`), and the JPEG/PNG cover sizers (including a JPEG whose SOF sits past the first 1 KB).
 - **Modes** (`tests/test_modes.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, and the audit's cover checks, all against a temporary database.
 - **TUI** (`tests/test_tui.py`): fallback-menu generation, prompt/cancel semantics, non-ASCII prompt input, and the persistent-screen session lifecycle.
 - **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`, `tests/test_audit_isbns.py`): `compress_pdf.py` size-sync and backup guards, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, DRM classification, and the ISBN arithmetic, printed-ISBN extraction, and verdict rules behind `audit_isbns.py`.
@@ -433,7 +429,7 @@ The `scripts/` directory holds standalone maintenance tools. They are **not** pa
 
 Re-encodes a bloated PDF (think 1 GB TTRPG sourcebooks) through Ghostscript with a quality preset, but only after verifying the result: it aborts if the page count changes or the output isn't smaller, and it keeps the original as `<name>.pre-compress.pdf`. If the file lives in a Calibre library, it syncs the new size back to the database (core `data.uncompressed_size`, plus the Count Pages plugin's `books_pages_link.format_size` if present) so Calibre doesn't see a stale size. A busy or locked database is handled gracefully: the PDF is still replaced and you are told to re-run with Calibre closed.
 
-> **This script modifies files and `metadata.db`.** It is the reason the companion scripts live outside the read-only `cquarry` package. Back up before a bulk run; close Calibre first.
+> **This script modifies files and `metadata.db`.** It is the reason the companion scripts live outside the `calibrequarry` package. Back up before a bulk run; close Calibre first.
 
 Requires `gs` (Ghostscript); optionally uses `pdfinfo` / `pdfimages` / `pdfdetach` (poppler) for page-count verification and the `--inspect` report.
 
