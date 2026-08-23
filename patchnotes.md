@@ -1,3 +1,10 @@
+## [3.12.0] - 2026-08-23
+
+### Changed
+- Graduated the core Calibre database and search grammar logic (`cquarry.db` and `cquarry.search`) into a new standalone shared library, `cquarry`.
+- Renamed the CLI project namespace to `cquarry_cli` (with the project name `calibrequarry`) to avoid collisions. The tool still runs as `cquarry`.
+- `CalibreQuarry` now strictly provides the CLI and TUI, depending on the `cquarry` package for database access.
+
 # CalibreQuarry — Patch Notes
 
 ## v3.11.0 (2026-08-21)
@@ -552,7 +559,9 @@ the interactive menu banner.
 **Unused imports removed.** `defaultdict` and `Path` — imported, never
 referenced.
 
-**f-string with no placeholders.** `f"\nLanguages:"` → `"\nLanguages:"`.
+**f-string with no placeholders.** `f"
+Languages:"` → `"
+Languages:"`.
 
 **`show_wings` caught bare `Exception`.** Narrowed to `ValueError`, which is
 what `resolve_vl` actually raises.

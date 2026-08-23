@@ -3,7 +3,7 @@
 import unittest
 from pathlib import Path
 
-from cquarry.config import VERSION as CODE_VERSION
+from cquarry_cli import VERSION as CODE_VERSION
 
 
 class TestVersionSync(unittest.TestCase):

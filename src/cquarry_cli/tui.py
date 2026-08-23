@@ -6,20 +6,21 @@ import traceback
 from contextlib import contextmanager
 from typing import Any
 
-from cquarry.config import VERSION, get_db_path, set_db_path
+from cquarry_cli import VERSION
+from cquarry.config import get_db_path, set_db_path
 from cquarry.db import CalibreDB
-from cquarry.modes.analytics import (
+from cquarry_cli.modes.analytics import (
     show_author_stats,
     show_pace_stats,
     show_tag_tree,
     show_wing_overlap,
 )
-from cquarry.modes.audit import run_audit
-from cquarry.modes.catalog import write_all_wings, write_catalog
-from cquarry.modes.display import show_recent, show_series, show_wings
-from cquarry.modes.export import run_export, run_search_export
-from cquarry.modes.stats import show_stats
-from cquarry.modes.tags import show_tag_dump
+from cquarry_cli.modes.audit import run_audit
+from cquarry_cli.modes.catalog import write_all_wings, write_catalog
+from cquarry_cli.modes.display import show_recent, show_series, show_wings
+from cquarry_cli.modes.export import run_export, run_search_export
+from cquarry_cli.modes.stats import show_stats
+from cquarry_cli.modes.tags import show_tag_dump
 
 try:
     import curses

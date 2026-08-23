@@ -1,7 +1,7 @@
 import sys
 
-from cquarry.cli import main
-from cquarry.tui import _reset_terminal
+from cquarry_cli.cli import main
+from cquarry_cli.tui import _reset_terminal
 
 if __name__ == "__main__":
     try:

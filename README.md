@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="CalibreQuarry" width="680">
+  <img src="logo.svg" alt="CalibreQuarry (cquarry-cli)" width="680">
 </p>
 
 <p align="center">
@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/stats.png" alt="CalibreQuarry --stats output: hierarchical tag taxonomy, series with book counts, publishers, languages, and recent additions">
+  <img src="docs/screenshots/stats.png" alt="CalibreQuarry (cquarry-cli) --stats output: hierarchical tag taxonomy, series with book counts, publishers, languages, and recent additions">
 </p>
 
 A CLI toolkit for Calibre users who treat their libraries as curated collections. Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries, no external libraries. Pure Python stdlib.
@@ -137,7 +137,7 @@ cquarry --tags > ~/docs/catalogs/tags.txt
 cquarry --version
 ```
 
-If `metadata.db` is in the current directory or at `~/Calibre Library/metadata.db`, the `--db` flag can be omitted. On first run you'll be prompted for the path, which is saved to `~/.config/cquarry/config.json` for future sessions. If Calibre is running and has the database locked, CalibreQuarry will automatically read from a temporary snapshot.
+If `metadata.db` is in the current directory or at `~/Calibre Library/metadata.db`, the `--db` flag can be omitted. On first run you'll be prompted for the path, which is saved to `~/.config/cquarry/config.json` for future sessions. If Calibre is running and has the database locked, CalibreQuarry (cquarry-cli) will automatically read from a temporary snapshot.
 
 ## Recipes
 
@@ -260,7 +260,7 @@ Tag taxonomy (392 tags):
 
 ## Search Syntax & Virtual Library Resolution
 
-CalibreQuarry ships a pure-Python search engine (`src/cquarry/search.py`) that ports Calibre's grammar and matching semantics as closely as the standard library allows. The same engine resolves Virtual Libraries (Wings) directly from the `preferences` table and powers the `--search` CLI mode, so your existing wing definitions work unchanged.
+CalibreQuarry (cquarry-cli) ships a pure-Python search engine (`src/cquarry/search.py`) that ports Calibre's grammar and matching semantics as closely as the standard library allows. The same engine resolves Virtual Libraries (Wings) directly from the `preferences` table and powers the `--search` CLI mode, so your existing wing definitions work unchanged.
 
 ```
 # Virtual Library Definitions
@@ -286,7 +286,7 @@ cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'
 
 #### Parity scope (minimal-dependency (uses tqdm) deviations)
 
-Matching is near-complete but not bit-for-bit identical to Calibre, by design: CalibreQuarry has zero dependencies, while a few of Calibre's behaviors are tied to third-party libraries.
+Matching is near-complete but not bit-for-bit identical to Calibre, by design: CalibreQuarry (cquarry-cli) has zero dependencies, while a few of Calibre's behaviors are tied to third-party libraries.
 
 * `~` regex uses Python's stdlib `re`, not Calibre's `regex` module (`\X`, `VERSION1` semantics differ).
 * Accent/contains folding uses `unicodedata` (NFKD), not ICU, so it is accent- and case-insensitive but not punctuation-insensitive.
@@ -360,11 +360,11 @@ Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same co
 
 ## How it reads the database
 
-CalibreQuarry opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, `identifiers`, `comments`, and `preferences`. Custom columns are not required, but are read on demand for `--show-custom` and `#column` searches.
+CalibreQuarry (cquarry-cli) opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, `identifiers`, `comments`, and `preferences`. Custom columns are not required, but are read on demand for `--show-custom` and `#column` searches.
 
-If Calibre is running and holds a lock on the database, CalibreQuarry copies it (along with any WAL/SHM journal files) to a temporary snapshot and reads from that. A notice is printed to stderr; the temp files are cleaned up on exit.
+If Calibre is running and holds a lock on the database, CalibreQuarry (cquarry-cli) copies it (along with any WAL/SHM journal files) to a temporary snapshot and reads from that. A notice is printed to stderr; the temp files are cleaned up on exit.
 
-Calibre stores ratings on a 0–10 scale internally (where 10 = 5 stars). CalibreQuarry converts to the standard 0-5 star display automatically.
+Calibre stores ratings on a 0–10 scale internally (where 10 = 5 stars). CalibreQuarry (cquarry-cli) converts to the standard 0-5 star display automatically.
 
 ## Replacing shell-based catalog pipelines
 
@@ -644,7 +644,7 @@ Exit codes: `0` clean, N = number of books with hard failures (capped at 99), `1
 
 ## Support
 
-If CalibreQuarry's useful to you and you'd like to chip in:
+If CalibreQuarry (cquarry-cli)'s useful to you and you'd like to chip in:
 
 - liberapay · [liberapay.com/bdkl](https://liberapay.com/bdkl/)
 - bitcoin

@@ -14,8 +14,8 @@ import tempfile
 import unittest
 
 from cquarry.db import CalibreDB
-from cquarry.modes.audit import run_audit
-from cquarry.modes.catalog import write_all_wings, write_catalog
+from cquarry_cli.modes.audit import run_audit
+from cquarry_cli.modes.catalog import write_all_wings, write_catalog
 from tests.test_search import _SCHEMA
 
 

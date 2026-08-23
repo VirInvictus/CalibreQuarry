@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 from cquarry import tui
-from cquarry.tui import (
+from cquarry_cli.tui import (
     _LETTER_KEYS,
     _MAIN_ALIASES,
     _MAIN_FALLBACK_DISPLAY,

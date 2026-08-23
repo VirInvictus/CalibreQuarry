@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-CalibreQuarry (`cquarry`) — a CLI toolkit that reads Calibre's `metadata.db` directly. Pure Python stdlib, zero runtime dependencies. Considered complete software; the bar for new code is "match what's there."
+CalibreQuarry (cquarry-cli) (`cquarry`) — a CLI toolkit that reads Calibre's `metadata.db` directly. Pure Python stdlib, zero runtime dependencies. Considered complete software; the bar for new code is "match what's there."
 
 Authoritative project docs: `README.md`, `spec.md`, `roadmap.md`, `patchnotes.md`. `spec.md` is the contract — read it before changing semantics.
 
