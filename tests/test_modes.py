@@ -12,6 +12,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+
 _SCHEMA = """ 
 CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT, 
     timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT, 
@@ -36,9 +37,9 @@ CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT, data
 """
 
 from cquarry.db import CalibreDB
+
 from cquarry_cli.modes.audit import run_audit
 from cquarry_cli.modes.catalog import write_all_wings, write_catalog
-
 
 
 class TestCatalogCacheIsolation(unittest.TestCase):

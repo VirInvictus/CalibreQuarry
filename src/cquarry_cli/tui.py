@@ -6,9 +6,10 @@ import traceback
 from contextlib import contextmanager
 from typing import Any
 
-from cquarry_cli import VERSION
 from cquarry.config import get_db_path, set_db_path
 from cquarry.db import CalibreDB
+
+from cquarry_cli import VERSION
 from cquarry_cli.modes.analytics import (
     show_author_stats,
     show_pace_stats,

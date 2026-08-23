@@ -1,9 +1,10 @@
 import argparse
 import sys
 
-from cquarry_cli import VERSION
 from cquarry.db import CalibreDB
 from cquarry.helpers import find_db
+
+from cquarry_cli import VERSION
 from cquarry_cli.modes.analytics import (
     show_author_stats,
     show_pace_stats,
