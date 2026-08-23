@@ -13,6 +13,11 @@ import sqlite3
 import tempfile
 import unittest
 
+from cquarry.db import CalibreDB
+
+from cquarry_cli.modes.audit import run_audit
+from cquarry_cli.modes.catalog import write_all_wings, write_catalog
+
 _SCHEMA = """ 
 CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT, 
     timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT, 
@@ -35,11 +40,6 @@ CREATE TABLE comments (book INT, text TEXT);
 CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT); 
 CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT, datatype TEXT, is_multiple BOOL); 
 """
-
-from cquarry.db import CalibreDB
-
-from cquarry_cli.modes.audit import run_audit
-from cquarry_cli.modes.catalog import write_all_wings, write_catalog
 
 
 class TestCatalogCacheIsolation(unittest.TestCase):
