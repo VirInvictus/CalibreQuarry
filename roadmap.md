@@ -130,3 +130,23 @@ What's done, what's next. Updated as of v3.12.0.
 - [x] **Port Lattice T6 (widget-UX batch; shipped in Lattice v4.9.0): the shared widgets carry the same paper cuts.** The sub-items that live in cquarry's copy of the skeleton: (a) `_prompt_int` silently swallows bad input and returns the default (`tui.py:548-553`); echo "invalid, using N". (b) `_tui_select` clips blind below the box on short terminals (`_safe_addstr` hides the crash but off-screen items are simply invisible); show "terminal too small" or scroll with the selection, mirroring Lattice's scroll-follows-selection choice. (c) `_tui_scroll_text` recomputes `max_line_len` over all lines on every keypress (`tui.py:375`) and chops lines at `content_w - 4` with no truncation indicator (`tui.py:407`); precompute once, add an ellipsis marker. (d) Prompt editing is append/backspace only (`tui.py:286-295`); support Ctrl-U (clear field) at minimum. Plus the local analog of Lattice T5(d): the export format prompt is unvalidated free text (`Format (json/csv/ai)`, `tui.py:872`) where `cli.py` has `choices`; re-prompt unless the answer is one of the three. What does NOT carry over: T6(e) (`_TUIPbar` throttle; no progress machinery here), T6(g) (playlists; no such mode), and the rest of T5 (ffmpeg/layout/prefer prompts are Lattice modes). **Test:** `_prompt_int` invalid-input echo; format prompt rejects a bogus value; pager truncation marker on an over-wide line.
 - [x] **Port Lattice T7 (persistent curses screen; shipped in Lattice v4.10.0): one screen per session instead of one per widget.** Identical architecture here: menu, prompt, pause, and pager each run their own `curses.wrapper` (`tui.py:205`, `:297`, `:351`, `:437`), so a menu, prompt, mode, pager flow enters and leaves the terminal's alternate screen once per widget, visibly flashing to the shell in between. Lattice's fix: `interactive_menu` opens the screen once, widgets draw into it via `_with_screen`, a widget invoked outside a session keeps its own one-shot wrapper (nothing changes for direct callers), and a mid-session curses failure funnels through a single `_degrade_to_text` path that preserves the H7 no-silent-exit guarantee. Strictly simpler here than in Lattice (no `_TUIPbar` to re-home onto the shared screen). Purely a lifecycle change, no menu/prompt/mode behavior differs; port it as its own deliberate pass, after the behavior items above land. **Test:** under a pty, a full menu-to-quit session enters the alternate screen exactly once (Lattice measured seven entries before, one after).
 - [x] **Phase 13:** Extract cquarry shared library
+
+## Phase 12: Codebase Sweep & Robustness Hardening (2026-08-23)
+*Context: Based on a full-repo sweep, addressing edge-case crashes, documentation desyncs, and expanding multi-threaded capabilities.*
+
+### Bugs to Fix
+- [ ] **Custom Column Raw SQL:** Refactor `librarything.py` to use dynamic column mapping instead of hardcoding `books_custom_column_3_link`, preventing crashes on standard DBs.
+- [ ] **Test Script Invocation:** Update `test_queries.sh` to call `python -m cquarry_cli` instead of the extracted `cquarry` package.
+- [ ] **DB Lock Fallback in `audit_isbns.py`:** Implement `connect_ro()` with WAL/SHM snapshot fallback to prevent crashes when Calibre holds a lock.
+- [ ] **NULL Title Crash in `spot_check.py`:** Coalesce `None` titles to prevent `AttributeError` during linting.
+- [ ] **Series "of None":** Check for `max_idx is None` in `show_series` to fix formatting for unindexed series.
+- [ ] **Export Truncation:** Validate export format and custom columns *before* opening the output file to prevent 0-byte truncations.
+- [ ] **Lossy Title-Casing:** Stop using `str.title()` on duplicate book detection keys to prevent mangling proper nouns and apostrophes.
+- [ ] **Narrow Terminal Crash:** Enforce `visible_w = max(1, content_w - 4)` in the curses pager.
+
+### Refactoring & Growth
+- [ ] **Clean Up Imports:** Remove duplicate `sys` and `Path` imports across companion scripts.
+- [ ] **Unify DB Snapshot Helper:** Move the WAL/SHM fallback logic from individual scripts into a shared `scripts/db_util.py`.
+- [ ] **Expand CC Orphan Audit:** Extend `check_orphan_cc_links` to audit single-value tables.
+- [ ] **Multi-Threaded Audits:** Wrap file inspection in `reconcile_file_metadata.py`, `audit_isbns.py`, and `spot_check.py` with a `ThreadPoolExecutor` for a 5-10x speedup.
+- [ ] **Docs Sync:** Bump versions in `spec.md` and `roadmap.md` to 3.13.0 to match the code.
