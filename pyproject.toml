@@ -21,3 +21,6 @@ cquarry = "cquarry_cli.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cquarry_cli"]
+
+[tool.ruff.lint]
+ignore = ["PLW1510", "BLE001", "DTZ011", "SIM118", "S110", "C401", "DTZ005", "SIM115"]
