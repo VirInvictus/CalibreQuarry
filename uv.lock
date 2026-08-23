@@ -3,6 +3,21 @@ revision = 3
 requires-python = ">=3.14"
 
 [[package]]
+name = "calibrequarry"
+version = "3.12.0"
+source = { editable = "." }
+dependencies = [
+    { name = "cquarry" },
+    { name = "tqdm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cquarry", git = "https://github.com/VirInvictus/cquarry.git" },
+    { name = "tqdm" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -13,14 +28,8 @@ wheels = [
 
 [[package]]
 name = "cquarry"
-version = "3.11.0"
-source = { editable = "." }
-dependencies = [
-    { name = "tqdm" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "tqdm" }]
+version = "1.0.0"
+source = { git = "https://github.com/VirInvictus/cquarry.git#1526a5f53b2fc2da4251aebbbe2704bbb1653ae2" }
 
 [[package]]
 name = "tqdm"

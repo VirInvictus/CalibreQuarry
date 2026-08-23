@@ -14,7 +14,7 @@ authors = [
 ]
 dependencies = [
   "tqdm",
-  "cquarry",]
+  "cquarry @ git+https://github.com/VirInvictus/cquarry.git",]
 
 [project.scripts]
 cquarry = "cquarry_cli.cli:main"
@@ -24,3 +24,6 @@ packages = ["src/cquarry_cli"]
 
 [tool.ruff.lint]
 ignore = ["PLW1510", "BLE001", "DTZ011", "SIM118", "S110", "C401", "DTZ005", "SIM115"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
