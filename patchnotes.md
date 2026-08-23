@@ -1,4 +1,8 @@
-## [3.12.0] - 2026-08-23
+## v3.12.0 (2026-08-23)
+
+### Changed
+- **Shared Library Extraction (`cquarry`):** Extracted the core Calibre database reading layer and search expression grammar into a new, standalone Python library (`cquarry`). CalibreQuarry now depends on this shared library for all data access and search resolution, ensuring 100% parity across all tools in the workspace (like Hermitage and Wings).
+- **Project Renamed to `calibrequarry`:** To prevent pip namespace collisions with the newly extracted `cquarry` shared library, the CLI project has been formally renamed to `calibrequarry` in `pyproject.toml`, and its internal modules have been moved to `cquarry_cli`. The terminal command remains `cquarry`.
 
 ### Changed
 - Graduated the core Calibre database and search grammar logic (`cquarry.db` and `cquarry.search`) into a new standalone shared library, `cquarry`.

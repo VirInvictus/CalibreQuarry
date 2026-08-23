@@ -11,7 +11,12 @@
   <img src="docs/screenshots/stats.png" alt="CalibreQuarry (cquarry-cli) --stats output: hierarchical tag taxonomy, series with book counts, publishers, languages, and recent additions">
 </p>
 
-A CLI toolkit for Calibre users who treat their libraries as curated collections. Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries, no external libraries. Pure Python stdlib.
+A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. 
+
+> **Architecture Note:** CalibreQuarry acts as the frontend interface for the [cquarry](../cquarry/) shared library. The database connection logic and the Calibre search grammar engine were extracted into the `cquarry` package so that other tools in the ecosystem (like Hermitage and Carrel-calibre-web) can guarantee identical behavior and query resolution.
+
+Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries.
+
 
 > **Note:** This is considered completed software. It is effectively feature complete; bug fixes will be addressed as they come, but no new features are planned. It has been thoroughly tested and is known to be fully functional on the primary development environment: **Fedora Linux 44 (Workstation Edition)**, kernel `7.0.9-205.fc44.x86_64`, using **Calibre 9.8** on **Python 3.14**. While it is pure Python and should be cross-platform, this specific setup is the only officially tested environment.
 

@@ -1,8 +1,8 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.8.1  
+**Version:** 3.12.0  
 **Language:** Python 3.14+  
-**Dependencies:** None (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -17,16 +17,18 @@ Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a s
 
 ## 2. Architecture
 
-### 2.1 Modular Package Design
-The toolkit is structured as a Python package in `src/cquarry/`, ensuring separation of concerns:
+### 2.1 Decoupled Shared Library Architecture
+The CalibreQuarry architecture relies on a strict separation of concerns, decoupling the CLI/TUI frontend from the database and search logic. 
+
+**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem.
+
+**`cquarry_cli` (Internal Package)**: The frontend modules live in `src/cquarry_cli/`:
 
 | Module | Responsibility |
 |--------|----------------|
-| `db.py` | Read-only SQLite interface to Calibre's internal schema. |
-| `tui.py` | Curses-based terminal interface and interactive pager. |
-| `modes/` | Discrete logic for catalogs, stats, audits, and exports. |
-| `config.py` | Path resolution and persistent settings management. |
-
+| `cli.py` | Argument parsing and dispatch. |
+| `tui.py` | Curses-based interactive terminal UI. |
+| `modes/*.py` | Feature-specific implementations (e.g., `catalog.py`, `export.py`, `stats.py`). |
 ### 2.2 Virtual Library (Wing) Resolution
 CalibreQuarry parses search expressions directly from the `preferences` table using the same engine that backs `--search` (`search.py`). It supports hierarchical tag matching (`tags:Fic.Fantasy`), boolean operators, and `vl:` cross-references.
 
