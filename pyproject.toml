@@ -36,4 +36,4 @@ dev = [
 allow-direct-references = true
 
 [tool.uv.sources]
-vir-tui = { path = "../vir-tui", editable = true }
+vir-tui = { git = "https://github.com/VirInvictus/vir-tui.git", branch = "main" }
