@@ -131,6 +131,9 @@ What's done, what's next. Updated as of v3.12.0.
 - [x] **Port Lattice T7 (persistent curses screen; shipped in Lattice v4.10.0): one screen per session instead of one per widget.** Identical architecture here: menu, prompt, pause, and pager each run their own `curses.wrapper` (`tui.py:205`, `:297`, `:351`, `:437`), so a menu, prompt, mode, pager flow enters and leaves the terminal's alternate screen once per widget, visibly flashing to the shell in between. Lattice's fix: `interactive_menu` opens the screen once, widgets draw into it via `_with_screen`, a widget invoked outside a session keeps its own one-shot wrapper (nothing changes for direct callers), and a mid-session curses failure funnels through a single `_degrade_to_text` path that preserves the H7 no-silent-exit guarantee. Strictly simpler here than in Lattice (no `_TUIPbar` to re-home onto the shared screen). Purely a lifecycle change, no menu/prompt/mode behavior differs; port it as its own deliberate pass, after the behavior items above land. **Test:** under a pty, a full menu-to-quit session enters the alternate screen exactly once (Lattice measured seven entries before, one after).
 - [x] **Phase 13:** Extract cquarry shared library
 
+## Phase 13: Extraction (2026-08-23)
+- [x] Extract `vir-tui` core into a standalone repository and replace local primitives with the shared dependency.
+
 ## Phase 12: Codebase Sweep & Robustness Hardening (2026-08-23)
 *Context: Based on a full-repo sweep, addressing edge-case crashes, documentation desyncs, and expanding multi-threaded capabilities.*
 
