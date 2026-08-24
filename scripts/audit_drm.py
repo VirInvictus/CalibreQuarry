@@ -202,7 +202,7 @@ def classify_epub(path: Path) -> Verdict:
             return Verdict(CLEAN)
     except zipfile.BadZipFile as e:
         return Verdict(ERROR, "unreadable", f"bad zip: {e}")
-    except Exception as e:  # noqa: BLE001 - report, don't crash the scan
+    except Exception as e:
         return Verdict(ERROR, "unreadable", f"{type(e).__name__}: {e}")
 
 

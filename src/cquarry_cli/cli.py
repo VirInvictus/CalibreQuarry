@@ -155,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
                 if args.search is not None:
                     try:
                         matching_ids = set(db.search(args.search))
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         print(f"Error parsing search query: {e}", file=sys.stderr)
                         return 1
                     if not matching_ids:

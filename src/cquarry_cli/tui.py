@@ -1,19 +1,32 @@
 import os
-import sys
 
 from cquarry.config import get_db_path, set_db_path
 from cquarry.db import CalibreDB
-from cquarry_cli.modes.analytics import show_author_stats, show_pace_stats, show_tag_tree, show_wing_overlap
+from vir_tui import (
+    _Cancelled,
+    _close_screen,
+    _open_screen,
+    _reset_terminal,
+    ask,
+    ask_yn,
+    prompt_int,
+    prompt_out,
+    run_with_capture,
+    tui_select,
+)
+
+from cquarry_cli.modes.analytics import (
+    show_author_stats,
+    show_pace_stats,
+    show_tag_tree,
+    show_wing_overlap,
+)
 from cquarry_cli.modes.audit import run_audit
 from cquarry_cli.modes.catalog import write_all_wings, write_catalog
 from cquarry_cli.modes.display import show_recent, show_series, show_wings
 from cquarry_cli.modes.export import run_export, run_search_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
-
-from vir_tui import tui_select, _reset_terminal, _open_screen, _close_screen
-from vir_tui import ask, ask_yn, prompt_int, prompt_out, run_with_capture, _Cancelled
-from vir_tui import info, warn, error, success
 
 _SCREEN = None
 _USE_CURSES = True
