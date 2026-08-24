@@ -14,7 +14,7 @@ authors = [
 ]
 dependencies = [
   "tqdm",
-   "vir-tui",
+   "vir-tui @ git+https://github.com/VirInvictus/vir-tui.git@main",
   "cquarry @ git+https://github.com/VirInvictus/cquarry.git",]
 
 [project.scripts]
@@ -35,5 +35,3 @@ dev = [
 [tool.hatch.metadata]
 allow-direct-references = true
 
-[tool.uv.sources]
-vir-tui = { git = "https://github.com/VirInvictus/vir-tui.git", branch = "main" }
