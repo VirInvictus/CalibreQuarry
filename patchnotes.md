@@ -1,5 +1,10 @@
 # CalibreQuarry — Patch Notes
 
+## v3.13.0 (2026-08-23)
+
+### Changed
+- **TUI Extraction (`vir-tui`):** Extracted the generic CLI formatting (`core.py`) and curses menu primitives (`tui.py`) into the `vir-tui` shared repository. CalibreQuarry now depends on `vir-tui` for all UI logic, ensuring perfect parity and centralized updates for all interactive prompts across the workspace.
+
 ## v3.12.0 (2026-08-23)
 
 ### Changed
