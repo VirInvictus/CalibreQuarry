@@ -1,3 +1,7 @@
+# 3.14.0 (2026-08-24)
+- **Refactor**: Adapted to `vir-tui` v2.0.0 public API and decoupled menu fallbacks.
+- **Fix**: The non-curses fallback text menu now functions properly for CalibreQuarry by passing custom `letter_keys` and `aliases` during initialization.
+
 # CalibreQuarry — Patch Notes
 
 ## v3.13.0 (2026-08-23)
