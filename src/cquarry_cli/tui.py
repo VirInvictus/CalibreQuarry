@@ -3,10 +3,10 @@ import os
 from cquarry.config import get_db_path, set_db_path
 from cquarry.db import CalibreDB
 from vir_tui import (
-    _Cancelled,
-    _close_screen,
-    _open_screen,
-    _reset_terminal,
+    CancelledError,
+    close_screen,
+    open_screen,
+    reset_terminal,
     ask,
     ask_yn,
     prompt_int,
@@ -39,7 +39,7 @@ def _prompt_path(prompt: str, default: str = "") -> str | None:
     while True:
         try:
             ans = ask(prompt, default)
-        except _Cancelled:
+        except CancelledError:
             return None
         if not ans:
             continue
@@ -104,7 +104,16 @@ def _select_main() -> tuple | str | None:
             ],
         ),
     ]
-    return tui_select("CalibreQuarry", sections)
+    letter_keys = {
+        "Change Database": ("s", "self"),
+        "Quit": ("q", None)
+    }
+    aliases = {
+        "s": (4, 0),
+        "q": None,
+        "quit": None
+    }
+    return tui_select("CalibreQuarry", sections, aliases=aliases, letter_keys=letter_keys)
 
 _SEL_CHANGE_DB = (4, 0)
 _SEL_QUIT = (4, 1)
@@ -133,7 +142,7 @@ def _resolve_db_for_tui() -> str | None:
 
 def interactive_menu() -> int:
     global _SCREEN, _USE_CURSES
-    stdscr = _open_screen() if _USE_CURSES else None
+    stdscr = open_screen() if _USE_CURSES else None
     if _USE_CURSES and stdscr is None:
         _USE_CURSES = False
     _SCREEN = stdscr
@@ -145,7 +154,7 @@ def interactive_menu() -> int:
         return 130
     finally:
         if stdscr is not None:
-            _close_screen()
+            close_screen()
 
 def _menu_session() -> int:
     db_path = _resolve_db_for_tui()
@@ -158,7 +167,7 @@ def _menu_session() -> int:
             if not db_path:
                 return 1
             continue
-        _reset_terminal()
+        reset_terminal()
         result = _select_main()
         if result == "fallback":
             continue
@@ -186,59 +195,59 @@ def _menu_session() -> int:
                     tags = ask_yn("Show tags instead of ratings? (y/N)")
                     ids = ask_yn("Show book IDs? (y/N)")
                     output = prompt_out("Output file", "catalog.txt")
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Catalog", lambda o=output, w=wing, p=primary, t=tags, i=ids: write_catalog(db, o, wing=w, primary_only=p, show_tags=t, show_id=i), footer=_out_note(output))
                 elif result == (0, 1):
                     outdir = prompt_out("Output directory", "catalogs")
                     primary = ask_yn("Primary author only? (y/N)")
                     tags = ask_yn("Show tags instead of ratings? (y/N)")
                     ids = ask_yn("Show book IDs? (y/N)")
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Generate Wings", lambda o=outdir, p=primary, t=tags, i=ids: write_all_wings(db, o, primary_only=p, show_tags=t, show_id=i), footer=f"Wings written to {os.path.abspath(outdir)}")
                 elif result == (0, 2):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Statistics", lambda: show_stats(db))
                 elif result == (0, 3):
                     output = prompt_out("Output CSV", "audit.csv")
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Audit", lambda o=output: run_audit(db, o), footer=_out_note(output))
                 elif result == (0, 4):
                     query = ask("Search query (Calibre format)", "")
                     if query:
                         output = prompt_out("Output file", "search_results.txt")
-                        _reset_terminal()
+                        reset_terminal()
                         run_with_capture("Search Results", lambda q=query, o=output: run_search_export(db, q, o), footer=_out_note(output))
                 elif result == (1, 0):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Author Stats", lambda: show_author_stats(db))
                 elif result == (1, 1):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Reading Pace", lambda: show_pace_stats(db))
                 elif result == (1, 2):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Tag Tree", lambda: show_tag_tree(db))
                 elif result == (1, 3):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Wing Overlap", lambda: show_wing_overlap(db))
                 elif result == (2, 0):
                     count = prompt_int("How many", 20)
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Recently Added", lambda c=count: show_recent(db, c))
                 elif result == (2, 1):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Series List", lambda: show_series(db))
                 elif result == (2, 2):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Virtual Libraries", lambda: show_wings(db))
                 elif result == (2, 3):
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Tag Dump", lambda: show_tag_dump(db))
                 elif result == (3, 0):
                     fmt = ask("Format (json/csv/ai)", "json").strip().lower()
                     while fmt not in ("json", "csv", "ai"):
                         fmt = ask("Format must be json, csv or ai", "json").strip().lower()
                     output = prompt_out("Output file", f"library.{fmt}")
-                    _reset_terminal()
+                    reset_terminal()
                     run_with_capture("Export", lambda o=output, f=fmt: run_export(db, o, f), footer=_out_note(output))
-        except _Cancelled:
+        except CancelledError:
             continue

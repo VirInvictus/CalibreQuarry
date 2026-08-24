@@ -22,7 +22,7 @@ dev = [
 requires-dist = [
     { name = "cquarry", git = "https://github.com/VirInvictus/cquarry.git" },
     { name = "tqdm" },
-    { name = "vir-tui", git = "https://github.com/VirInvictus/vir-tui.git" },
+    { name = "vir-tui", editable = "../vir-tui" },
 ]
 
 [package.metadata.requires-dev]
@@ -124,4 +124,4 @@ wheels = [
 [[package]]
 name = "vir-tui"
 version = "1.0.0"
-source = { git = "https://github.com/VirInvictus/vir-tui.git#c6e2af67517a11cb57336af3027bfe48b016df3e" }
+source = { editable = "../vir-tui" }
