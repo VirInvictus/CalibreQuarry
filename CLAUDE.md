@@ -7,7 +7,7 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 ## Hard constraints
 - **Frontend Only.** The core database logic and search evaluation are delegated to the external `cquarry` shared library. Do not add database reads or search parsing logic here; contribute them to `cquarry` instead.
-- **Minimal Dependencies.** Only `cquarry` and `tqdm`. No `calibredb` required.
+- **Minimal Dependencies.** Only `cquarry`, `vir-tui`, and `tqdm`. No `calibredb` required.
 - **Immersive Output.** All commands that dump extensive output must be wrapped in `_run_with_capture()` so they display in the curses pager, unless redirected.
 
 ## Layout
@@ -15,7 +15,7 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - `src/cquarry_cli/modes/`: Implementations for each CLI flag (`catalog.py`, `export.py`, `stats.py`, etc).
 - `tests/`: End-to-end integration tests using `cquarry_cli` directly against the database (the unit tests for `cquarry.db` and `cquarry.search` were moved to the `cquarry` library).
 
-> **Important:** The core database logic (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library package. CalibreQuarry relies on this external dependency.
+> **Important:** The core database logic (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library. Additionally, the generic UI formatting and Curses menu primitives have been extracted to the `vir-tui` shared repository. CalibreQuarry relies on both of these external dependencies. (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library package. CalibreQuarry relies on this external dependency.
 
 ## Conventions
 - Single source of truth for version is `src/cquarry_cli/__init__.py`.
