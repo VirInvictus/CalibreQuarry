@@ -4,13 +4,13 @@ from cquarry.config import get_db_path, set_db_path
 from cquarry.db import CalibreDB
 from vir_tui import (
     CancelledError,
-    close_screen,
-    open_screen,
-    reset_terminal,
     ask,
     ask_yn,
+    close_screen,
+    open_screen,
     prompt_int,
     prompt_out,
+    reset_terminal,
     run_with_capture,
     tui_select,
 )
@@ -31,9 +31,11 @@ from cquarry_cli.modes.tags import show_tag_dump
 _SCREEN = None
 _USE_CURSES = True
 
+
 def _notify(msg: str) -> None:
     print(msg)
     ask("Press Enter to continue...", "")
+
 
 def _prompt_path(prompt: str, default: str = "") -> str | None:
     while True:
@@ -44,6 +46,7 @@ def _prompt_path(prompt: str, default: str = "") -> str | None:
         if not ans:
             continue
         return ans
+
 
 def _resolve_db_input(raw_path: str) -> str | None:
     path = os.path.abspath(raw_path)
@@ -57,8 +60,10 @@ def _resolve_db_input(raw_path: str) -> str | None:
                 return path
     return None
 
+
 def _out_note(path: str) -> str:
     return f"Output written to {os.path.abspath(path)}"
+
 
 def _select_main() -> tuple | str | None:
     sections = [
@@ -104,19 +109,16 @@ def _select_main() -> tuple | str | None:
             ],
         ),
     ]
-    letter_keys = {
-        "Change Database": ("s", "self"),
-        "Quit": ("q", None)
-    }
-    aliases = {
-        "s": (4, 0),
-        "q": None,
-        "quit": None
-    }
-    return tui_select("CalibreQuarry", sections, aliases=aliases, letter_keys=letter_keys)
+    letter_keys = {"Change Database": ("s", "self"), "Quit": ("q", None)}
+    aliases = {"s": (4, 0), "q": None, "quit": None}
+    return tui_select(
+        "CalibreQuarry", sections, aliases=aliases, letter_keys=letter_keys
+    )
+
 
 _SEL_CHANGE_DB = (4, 0)
 _SEL_QUIT = (4, 1)
+
 
 def _resolve_db_for_tui() -> str | None:
     DEFAULT_DB_PATHS = [
@@ -140,6 +142,7 @@ def _resolve_db_for_tui() -> str | None:
             return resolved
         _notify(f"Not found: {raw_path}")
 
+
 def interactive_menu() -> int:
     global _SCREEN, _USE_CURSES
     stdscr = open_screen() if _USE_CURSES else None
@@ -155,6 +158,7 @@ def interactive_menu() -> int:
     finally:
         if stdscr is not None:
             close_screen()
+
 
 def _menu_session() -> int:
     db_path = _resolve_db_for_tui()
@@ -196,27 +200,49 @@ def _menu_session() -> int:
                     ids = ask_yn("Show book IDs? (y/N)")
                     output = prompt_out("Output file", "catalog.txt")
                     reset_terminal()
-                    run_with_capture("Catalog", lambda o=output, w=wing, p=primary, t=tags, i=ids: write_catalog(db, o, wing=w, primary_only=p, show_tags=t, show_id=i), footer=_out_note(output))
+                    run_with_capture(
+                        "Catalog",
+                        lambda o=output, w=wing, p=primary, t=tags, i=ids: (
+                            write_catalog(
+                                db, o, wing=w, primary_only=p, show_tags=t, show_id=i
+                            )
+                        ),
+                        footer=_out_note(output),
+                    )
                 elif result == (0, 1):
                     outdir = prompt_out("Output directory", "catalogs")
                     primary = ask_yn("Primary author only? (y/N)")
                     tags = ask_yn("Show tags instead of ratings? (y/N)")
                     ids = ask_yn("Show book IDs? (y/N)")
                     reset_terminal()
-                    run_with_capture("Generate Wings", lambda o=outdir, p=primary, t=tags, i=ids: write_all_wings(db, o, primary_only=p, show_tags=t, show_id=i), footer=f"Wings written to {os.path.abspath(outdir)}")
+                    run_with_capture(
+                        "Generate Wings",
+                        lambda o=outdir, p=primary, t=tags, i=ids: write_all_wings(
+                            db, o, primary_only=p, show_tags=t, show_id=i
+                        ),
+                        footer=f"Wings written to {os.path.abspath(outdir)}",
+                    )
                 elif result == (0, 2):
                     reset_terminal()
                     run_with_capture("Statistics", lambda: show_stats(db))
                 elif result == (0, 3):
                     output = prompt_out("Output CSV", "audit.csv")
                     reset_terminal()
-                    run_with_capture("Audit", lambda o=output: run_audit(db, o), footer=_out_note(output))
+                    run_with_capture(
+                        "Audit",
+                        lambda o=output: run_audit(db, o),
+                        footer=_out_note(output),
+                    )
                 elif result == (0, 4):
                     query = ask("Search query (Calibre format)", "")
                     if query:
                         output = prompt_out("Output file", "search_results.txt")
                         reset_terminal()
-                        run_with_capture("Search Results", lambda q=query, o=output: run_search_export(db, q, o), footer=_out_note(output))
+                        run_with_capture(
+                            "Search Results",
+                            lambda q=query, o=output: run_search_export(db, q, o),
+                            footer=_out_note(output),
+                        )
                 elif result == (1, 0):
                     reset_terminal()
                     run_with_capture("Author Stats", lambda: show_author_stats(db))
@@ -232,7 +258,9 @@ def _menu_session() -> int:
                 elif result == (2, 0):
                     count = prompt_int("How many", 20)
                     reset_terminal()
-                    run_with_capture("Recently Added", lambda c=count: show_recent(db, c))
+                    run_with_capture(
+                        "Recently Added", lambda c=count: show_recent(db, c)
+                    )
                 elif result == (2, 1):
                     reset_terminal()
                     run_with_capture("Series List", lambda: show_series(db))
@@ -245,9 +273,17 @@ def _menu_session() -> int:
                 elif result == (3, 0):
                     fmt = ask("Format (json/csv/ai)", "json").strip().lower()
                     while fmt not in ("json", "csv", "ai"):
-                        fmt = ask("Format must be json, csv or ai", "json").strip().lower()
+                        fmt = (
+                            ask("Format must be json, csv or ai", "json")
+                            .strip()
+                            .lower()
+                        )
                     output = prompt_out("Output file", f"library.{fmt}")
                     reset_terminal()
-                    run_with_capture("Export", lambda o=output, f=fmt: run_export(db, o, f), footer=_out_note(output))
+                    run_with_capture(
+                        "Export",
+                        lambda o=output, f=fmt: run_export(db, o, f),
+                        footer=_out_note(output),
+                    )
         except CancelledError:
             continue
