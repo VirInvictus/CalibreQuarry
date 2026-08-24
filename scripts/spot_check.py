@@ -61,7 +61,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-import ui
+from vir_tui import core as ui
 
 FMT_EXT = {
     "EPUB": ".epub",

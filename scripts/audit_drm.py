@@ -68,7 +68,7 @@ from pathlib import Path
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
-import ui
+from vir_tui import core as ui
 
 # ANSI colours; suppress when stdout isn't a TTY.
 USE_COLOR = sys.stdout.isatty()

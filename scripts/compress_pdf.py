@@ -38,7 +38,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import ui
+from vir_tui import core as ui
 
 # Ghostscript pdfwrite quality presets:
 #   screen   72 dpi  smallest, low quality (web preview)

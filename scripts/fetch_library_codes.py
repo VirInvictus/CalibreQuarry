@@ -62,7 +62,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
 
-import ui
+from vir_tui import core as ui
 
 SRU_BASE = "http://lx2.loc.gov:210/LCDB"
 MODS_NS = {"mods": "http://www.loc.gov/mods/v3"}

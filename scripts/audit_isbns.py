@@ -106,7 +106,7 @@ import unicodedata
 import zipfile
 from urllib.parse import quote
 
-import ui
+from vir_tui import core as ui
 
 # A number only counts when the book introduces it as an ISBN. Bare 10-13 digit
 # runs are everywhere in printed matter (dates, part numbers, phone numbers).

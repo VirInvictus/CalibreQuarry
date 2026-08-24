@@ -75,7 +75,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
-import ui
+from vir_tui import core as ui
 
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 RED = "\033[31m" if USE_COLOR else ""

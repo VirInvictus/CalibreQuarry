@@ -73,7 +73,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-import ui
+from vir_tui import core as ui
 
 # ANSI colours; suppress when stdout isn't a TTY or NO_COLOR is set
 # (matches the cquarry package).
