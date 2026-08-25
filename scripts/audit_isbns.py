@@ -104,9 +104,9 @@ import subprocess
 import sys
 import unicodedata
 import zipfile
-from db_util import connect_ro, cleanup_tmp
 from urllib.parse import quote
 
+from db_util import cleanup_tmp, connect_ro
 from vir_tui import core as ui
 
 # A number only counts when the book introduces it as an ISBN. Bare 10-13 digit

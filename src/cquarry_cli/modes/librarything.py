@@ -112,7 +112,7 @@ def build_rows(
     db: CalibreDB, want_call_number: bool, matching_ids: set[int] | None = None
 ) -> tuple[list, list]:
     cols = db.get_custom_columns()
-    
+
     def _col_sql(name: str, is_mult: bool) -> str:
         c = cols.get(name)
         if not c:
@@ -125,7 +125,7 @@ def build_rows(
         return f"(SELECT value FROM custom_column_{cid} WHERE book=b.id)"
 
     trans_sql = _col_sql("#translators", True)
-    status_sql = _col_sql("#reading_status", False) # Fallback to #status if not found
+    status_sql = _col_sql("#reading_status", False)  # Fallback to #status if not found
     if status_sql == "NULL":
         status_sql = _col_sql("#status", False)
     date_sql = _col_sql("#date_read", False)

@@ -53,15 +53,12 @@ import os
 import random
 import re
 import shutil
-import sqlite3
 import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
-from db_util import connect_ro, cleanup_tmp
-from concurrent.futures import ThreadPoolExecutor
-
+from db_util import cleanup_tmp, connect_ro
 from vir_tui import core as ui
 
 FMT_EXT = {
