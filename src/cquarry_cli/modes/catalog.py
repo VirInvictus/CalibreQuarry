@@ -24,9 +24,15 @@ def write_catalog(
     show_tags: bool = False,
     show_id: bool = False,
     show_custom: str | None = None,
+    plugin_data: str | None = None,
     quiet: bool = False,
 ) -> None:
-    """Write a formatted text catalog, optionally filtered to a virtual library."""
+    """Write a formatted text catalog, optionally filtered to a virtual library.
+
+    With ``plugin_data`` (a ``books_plugin_data`` name such as
+    ``goodreads_id`` or ``wordcount``), each book line gains a
+    ``<name: value>`` segment for books that carry that data.
+    """
     # Copy: get_all_books() hands out the shared cache, and the sort below
     # must not reorder it for every later consumer in the session.
     books = list(db.get_all_books())
@@ -60,6 +66,13 @@ def write_catalog(
         except ValueError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return
+    plugin_map: dict[int, str] = {}
+    if plugin_data:
+        plugin_map = {
+            row["book"]: row["val"]
+            for row in db.get_plugin_data(name=plugin_data)
+            if row.get("val")
+        }
 
     # Create the parent directory the way run_audit/run_export already do, so
     # --output reports/catalog.txt writes instead of exiting 1.
@@ -92,9 +105,7 @@ def write_catalog(
             title = book["title"] or "Unknown Title"
 
             if show_tags:
-                tag_list = [
-                    t.strip() for t in (book["tags"] or "").split(",") if t.strip()
-                ]
+                tag_list = [t.strip() for t in (book["tags"] or []) if t.strip()]
                 meta_str = f" [{', '.join(tag_list)}]" if tag_list else ""
             else:
                 rating = calibre_rating_to_stars(book["rating"])
@@ -110,8 +121,8 @@ def write_catalog(
                 else:
                     series_str = f" ({book['series']})"
 
-            formats = book["formats"] or ""
-            fmt_str = f" [{formats}]" if formats else ""
+            formats = [str(f) for f in (book["formats"] or [])]
+            fmt_str = f" [{','.join(formats)}]" if formats else ""
 
             id_str = f"[{book['id']}] " if show_id else ""
 
@@ -121,7 +132,13 @@ def write_catalog(
                 if val:
                     custom_str = f" <{show_custom}: {val}>"
 
-            f.write(f"  * {id_str}{title}{series_str}{fmt_str}{meta_str}{custom_str}\n")
+            plugin_str = ""
+            if plugin_data and book["id"] in plugin_map:
+                plugin_str = f" <{plugin_data}: {plugin_map[book['id']]}>"
+
+            f.write(
+                f"  * {id_str}{title}{series_str}{fmt_str}{meta_str}{custom_str}{plugin_str}\n"
+            )
             book_count += 1
 
         f.write(f"\n{'=' * 40}\n")
@@ -139,6 +156,7 @@ def write_all_wings(
     show_tags: bool = False,
     show_id: bool = False,
     show_custom: str | None = None,
+    plugin_data: str | None = None,
     quiet: bool = False,
 ) -> None:
     """Generate a catalog file for each virtual library wing."""
@@ -175,6 +193,7 @@ def write_all_wings(
             show_tags=show_tags,
             show_id=show_id,
             show_custom=show_custom,
+            plugin_data=plugin_data,
             quiet=True,
         )
 

@@ -52,12 +52,13 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Analytics** | `--analytics {author,pace,tags,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, Wing-overlap analysis |
 | **Export** | `--export` | Full library export to JSON, CSV, or an AI-readable flat format |
 | **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
+| **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
 | **Search** | `--search QUERY` | Books matching a Calibre search expression; prints to stdout, or to a file with `--output` |
 | **Wings** | `--wings` | List all virtual libraries with book counts |
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
 | **Version** | `--version` | Show version and exit |
 
-Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column, `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search`, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
+Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column, `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search`, `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
 
 Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager, or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions.
 
@@ -134,6 +135,20 @@ cquarry --catalog --show-custom "Status" --db ~/Calibre/metadata.db
 
 # List all virtual library wings with counts
 cquarry --wings --db ~/Calibre/metadata.db
+
+# Run a named saved search straight from Calibre's preferences
+cquarry --search 'search:"Needs Filtering"' --db ~/Calibre/metadata.db
+
+# Count-operator queries: books with more than two formats, or zero identifiers
+cquarry --search 'formats:#>2' --db ~/Calibre/metadata.db
+cquarry --search 'identifiers:#=0' --db ~/Calibre/metadata.db
+
+# Export e-reader highlights and notes as JSON (whole library or one book)
+cquarry --export-annotations --db ~/Calibre/metadata.db --output highlights.json
+cquarry --export-annotations --id 42 --db ~/Calibre/metadata.db
+
+# Show Goodreads IDs / word counts recorded by plugins next to each book
+cquarry --catalog --plugin-data goodreads_id --db ~/Calibre/metadata.db
 
 # Dump every tag with its book count (replaces `calibredb list_categories -r tags`)
 cquarry --tags > ~/docs/catalogs/tags.txt

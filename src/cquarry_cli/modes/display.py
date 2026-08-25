@@ -19,8 +19,8 @@ def show_recent(db: CalibreDB, count: int = 20, *, quiet: bool = False) -> None:
         author = normalize_author_display(b["authors"], primary_only=True)
         rating = calibre_rating_to_stars(b["rating"])
         rating_str = format_stars(rating)
-        tags = b["tags"] or ""
-        tag_str = f" ({tags.split(',')[0].strip()})" if tags else ""
+        tags = b["tags"] or []
+        tag_str = f" ({tags[0]})" if tags else ""
         series_str = ""
         if b["series"]:
             idx = b["series_index"]

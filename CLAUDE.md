@@ -5,6 +5,12 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (cquarry >= 1.1)
+- `db.get_all_books()` rows expose `authors`, `tags`, `languages`, and `formats` as native `list[str]`. Never `.split(",")` them; comma-containing author/tag names are preserved by the link-table hydration. `normalize_author_display()` accepts both the legacy joined string and the list form.
+- Every book row also carries `size` (total `data.uncompressed_size` bytes, may be None).
+- `search()` raises `ParseException` for unknown virtual libraries or saved searches; only `resolve_vl()` / `resolve_saved_search()` raise `ValueError` (with an available-names message).
+- Raw comments payloads are HTML; run them through `cquarry.helpers.strip_html()` before terminal output.
+
 ## Hard constraints
 - **Frontend Only.** The core database logic and search evaluation are delegated to the external `cquarry` shared library. Do not add database reads or search parsing logic here; contribute them to `cquarry` instead.
 - **Minimal Dependencies.** Only `cquarry`, `vir-tui`, and `tqdm`. No `calibredb` required.

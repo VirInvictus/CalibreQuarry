@@ -15,9 +15,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     # Format breakdown
     format_counts: Counter = Counter()
     for b in books:
-        if b["formats"]:
-            for fmt in b["formats"].split(","):
-                format_counts[fmt.strip()] += 1
+        for fmt in b["formats"] or []:
+            format_counts[fmt.strip()] += 1
     print("Formats:")
     for fmt, count in format_counts.most_common():
         bar = "\u2588" * (count * 40 // total) if total else ""
@@ -55,9 +54,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     # Top tags
     tag_counts: Counter = Counter()
     for b in books:
-        if b["tags"]:
-            for t in b["tags"].split(","):
-                tag_counts[t.strip()] += 1
+        for t in b["tags"] or []:
+            tag_counts[t.strip()] += 1
     print(f"\nTop tags ({len(tag_counts)} distinct):")
     for tag, count in tag_counts.most_common(15):
         print(f"  {tag}: {count}")
@@ -92,9 +90,8 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
     # Language
     lang_counts: Counter = Counter()
     for b in books:
-        if b["languages"]:
-            for lang in b["languages"].split(","):
-                lang_counts[lang.strip()] += 1
+        for lang in b["languages"] or []:
+            lang_counts[lang.strip()] += 1
     if len(lang_counts) > 1:
         print("\nLanguages:")
         for lang, count in lang_counts.most_common():

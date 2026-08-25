@@ -14,7 +14,11 @@ from cquarry_cli.modes.analytics import (
 from cquarry_cli.modes.audit import run_audit
 from cquarry_cli.modes.catalog import write_all_wings, write_catalog
 from cquarry_cli.modes.display import show_recent, show_series, show_wings
-from cquarry_cli.modes.export import run_export, run_search_export
+from cquarry_cli.modes.export import (
+    run_annotations_export,
+    run_export,
+    run_search_export,
+)
 from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
@@ -87,6 +91,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--export-annotations",
+        dest="export_annotations",
+        action="store_true",
+        help="Dump e-reader highlights/bookmarks/notes as JSON "
+        "(optionally scoped with --id)",
+    )
+
+    p.add_argument(
+        "--id",
+        dest="book_id",
+        type=int,
+        default=None,
+        metavar="BOOK_ID",
+        help="Scope --export-annotations to a single Calibre book id",
+    )
+
+    p.add_argument(
+        "--plugin-data",
+        dest="plugin_data",
+        default=None,
+        metavar="NAME",
+        help="With --catalog or --search: append a books_plugin_data value "
+        "(e.g. goodreads_id, wordcount) to each book line",
+    )
+
+    p.add_argument(
         "--db",
         default=None,
         help="Path to Calibre metadata.db (auto-detected if omitted)",
@@ -149,6 +179,11 @@ def main(argv: list[str] | None = None) -> int:
         db_path = find_db(args.db)
 
         with CalibreDB(db_path) as db:
+            if args.export_annotations:
+                return run_annotations_export(
+                    db, args.book_id, args.output, quiet=args.quiet
+                )
+
             if args.exportlt:
                 outdir = args.outdir or args.output or "librarything_export"
                 matching_ids = None
@@ -180,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
                     show_tags=args.show_tags,
                     show_id=args.show_id,
                     show_custom=args.show_custom,
+                    plugin_data=args.plugin_data,
                     quiet=args.quiet,
                 )
                 return 0
@@ -244,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.output,
                     fmt=args.format,
                     show_custom=args.show_custom,
+                    plugin_data=args.plugin_data,
                     quiet=args.quiet,
                 )
                 return 0
@@ -267,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
                     show_tags=args.show_tags,
                     show_id=args.show_id,
                     show_custom=args.show_custom,
+                    plugin_data=args.plugin_data,
                     quiet=args.quiet,
                 )
                 return 0

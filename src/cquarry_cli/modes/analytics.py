@@ -22,7 +22,7 @@ def show_author_stats(db: CalibreDB, *, quiet: bool = False) -> None:
             if stars is not None:
                 ad["ratings"].append(stars)
             if b["formats"]:
-                ad["formats"].update(f.strip() for f in b["formats"].split(","))
+                ad["formats"].update(f.strip() for f in b["formats"])
             if b["series"]:
                 ad["series"].add(b["series"])
 
@@ -74,23 +74,19 @@ def show_pace_stats(db: CalibreDB, *, quiet: bool = False) -> None:
 
 def show_tag_tree(db: CalibreDB, *, quiet: bool = False) -> None:
     """Display the full hierarchical tag taxonomy as a tree."""
+    from cquarry.helpers import tags_to_tree
+
     tags = db.get_all_tags()
 
     if not quiet:
         print("=== Tag Taxonomy Tree ===\n")
 
-    tree = {}
-    for tag in tags:
-        parts = tag.split(".")
-        current = tree
-        for part in parts:
-            if part not in current:
-                current[part] = {}
-            current = current[part]
+    # cquarry's shared builder: one taxonomy parser for the whole ecosystem.
+    tree = tags_to_tree(tags)
 
     def _print_tree(node, indent=0):
         for key in sorted(node.keys()):
-            print("  " * indent + f"\u2514\u2500 {key}")
+            print("  " * indent + "\u2514\u2500 " + key)
             _print_tree(node[key], indent + 1)
 
     _print_tree(tree, indent=1)

@@ -170,13 +170,16 @@ def run_search_export(
     *,
     fmt: str | None = None,
     show_custom: str | None = None,
+    plugin_data: str | None = None,
     quiet: bool = False,
 ) -> None:
     """Evaluate a search query and write matching books.
 
     Writes to ``output`` if given, otherwise to stdout. With ``fmt`` (json/csv/
     ai) the matches are serialized in that structured format; otherwise a plain
-    text listing is produced. An empty query matches the whole library.
+    text listing is produced. An empty query matches the whole library. With
+    ``plugin_data`` (a ``books_plugin_data`` name such as ``goodreads_id`` or
+    ``wordcount``), each plain-text line gains a ``<name: value>`` segment.
     """
     try:
         matching_ids = db.search(query)
@@ -195,6 +198,13 @@ def run_search_export(
     custom_data = _load_custom(db, show_custom)
     if custom_data is None:
         return
+    plugin_map: dict[int, str] = {}
+    if plugin_data:
+        plugin_map = {
+            row["book"]: row["val"]
+            for row in db.get_plugin_data(name=plugin_data)
+            if row.get("val")
+        }
 
     if fmt is not None and fmt not in ("json", "csv", "ai"):
         print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
@@ -215,10 +225,65 @@ def run_search_export(
                     val = custom_data.get(b["id"])
                     if val:
                         custom_str = f" <{show_custom}: {val}>"
-                stream.write(f"  * {title} - {author}{custom_str}\n")
+                plugin_str = ""
+                if plugin_data and b["id"] in plugin_map:
+                    plugin_str = f" <{plugin_data}: {plugin_map[b['id']]}>"
+                stream.write(f"  * {title} - {author}{custom_str}{plugin_str}\n")
 
     if not quiet:
         if out_path:
             print(f"Exported {len(books)} matches to: {out_path}")
         else:
             print(f"\n{len(books)} matches.", file=sys.stderr)
+
+
+def run_annotations_export(
+    db: CalibreDB,
+    book_id: int | None,
+    output: str | None = None,
+    *,
+    quiet: bool = False,
+) -> int:
+    """Dump e-reader highlights/bookmarks/notes as a JSON payload.
+
+    Reads the ``annotations`` table through cquarry. With ``book_id`` only
+    that book's annotations are written; otherwise every annotated book is
+    included. Returns a process exit code.
+    """
+    annotations = db.get_annotations(book_id)
+    if not annotations:
+        scope = f"book {book_id}" if book_id is not None else "the library"
+        print(f"No annotations found for {scope}.", file=sys.stderr)
+        return 0
+
+    # Group by book so consumers get one object per annotated title.
+    by_book: dict[int, dict] = {}
+    titles = {b["id"]: b for b in db.get_all_books()}
+    for row in annotations:
+        entry = by_book.setdefault(
+            row["book"],
+            {
+                "book_id": row["book"],
+                "title": (titles.get(row["book"], {}) or {}).get("title", ""),
+                "annotations": [],
+            },
+        )
+        entry["annotations"].append(row)
+
+    payload = list(by_book.values())
+    with _open_out(output) as (stream, out_path):
+        json.dump(payload, stream, indent=2, default=str)
+        stream.write("\n")
+
+    total = sum(len(e["annotations"]) for e in payload)
+    if not quiet:
+        if out_path:
+            print(
+                f"Exported {total} annotations across {len(payload)} books to: {out_path}"
+            )
+        else:
+            print(
+                f"{total} annotations across {len(payload)} books.",
+                file=sys.stderr,
+            )
+    return 0

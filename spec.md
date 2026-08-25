@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.13.0  
+**Version:** 3.15.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -20,7 +20,7 @@ Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a s
 ### 2.1 Decoupled Shared Library Architecture
 The CalibreQuarry architecture relies on a strict separation of concerns, decoupling the CLI/TUI frontend from the database and search logic. 
 
-**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem.
+**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.1: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, and unknown virtual libraries raise instead of matching nothing.
 
 **`cquarry_cli` (Internal Package)**: The frontend modules live in `src/cquarry_cli/`:
 
@@ -87,6 +87,7 @@ The path is saved to config on first successful resolution.
 | Analytics | `--analytics {author,pace,tags,overlap}` | Per-author stats, reading-pace trend, tag tree, Wing overlap |
 | Export | `--export` | Full library to JSON, CSV, or AI-readable format |
 | Search | `--search QUERY` | Books matching a search expression; prints to stdout, or a file with `--output` |
+| Annotations | `--export-annotations` | E-reader highlights/bookmarks/notes as JSON; `--id N` scopes to one book |
 | Wings | `--wings` | List virtual libraries with book counts |
 | Tags | `--tags` | Flat dump of every tag in the library with its book count |
 | Interactive | (no args) | Launch the Curses TUI with scrollable output pager |
@@ -100,6 +101,7 @@ The path is saved to config on first successful resolution.
 | `--show-custom COL` | Load and display a Calibre custom column |
 | `--primary-only` | Collapse multi-author entries to first author |
 | `--format {json,csv,ai}` | Output format for `--export` (default json) and `--search` (default: text listing) |
+| `--plugin-data NAME` | Append a `books_plugin_data` value (e.g. `goodreads_id`, `wordcount`) to catalog/search book lines |
 | `--output PATH` | Write to a file instead of stdout |
 | `--quiet` | Suppress decorative output |
 

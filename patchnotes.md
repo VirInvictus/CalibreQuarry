@@ -1,3 +1,11 @@
+# 3.15.0 (2026-08-25)
+- **Feature**: New `--export-annotations` command dumps e-reader highlights, bookmarks, and notes as JSON (via cquarry's `annotations` reader), optionally scoped to one book with `--id <BOOK_ID>`.
+- **Feature**: New `--plugin-data NAME` flag (works with `--catalog`, `--all-wings`, and `--search`) appends third-party plugin values — e.g. `goodreads_id` or `wordcount` from `books_plugin_data` — as `<name: value>` segments on each book line.
+- **Upgrade**: Migrated every mode off the retired string-typed `get_all_books()` fields. `authors`, `tags`, `formats`, and `languages` are consumed as the native `list[str]` arrays cquarry 1.1+ exposes; author names containing literal commas no longer risk splitting.
+- **Upgrade**: Requires `cquarry>=1.1`. Search gains saved-search interpolation (`--search 'search:"Name"'`), multi-valued count operators (`tags:#>2`), language canonicalization (`languages:English`), slash date separators, tristate boolean keywords (`checked`/`blank`/...), strict errors on unknown virtual libraries, and new `size:`/`pages:` locations — all available through the existing `--search` flag with no CLI changes.
+- **Note**: `scripts/reconcile_file_metadata.py` already fetches per-book records without a full-library scan, so the roadmap's single-record fast path was satisfied by design; no change was needed.
+- **Feature**: New `scripts/audit_conversion_overrides.py` lists books carrying manual conversion recipes — cquarry’s extractor, which never unpickles the blobs.
+
 # 3.14.1 (2026-08-24)
 - **Fix**: Replaced hardcoded custom columns logic in `librarything.py` with dynamic ID resolution from the database schema.
 - **Fix**: Restored functionality in `test_queries.sh` by targeting `cquarry_cli` instead of the extracted `cquarry` module.

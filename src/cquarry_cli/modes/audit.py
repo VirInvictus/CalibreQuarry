@@ -33,12 +33,12 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
             problems.append("no_tags")
         if b["rating"] is None or b["rating"] == 0:
             problems.append("unrated")
-        if not b["authors"] or b["authors"] == "Unknown":
+        if not b["authors"] or b["authors"] == ["Unknown"]:
             problems.append("no_author")
         if not b["formats"]:
             problems.append("no_file")
         else:
-            formats = set(f.strip().upper() for f in b["formats"].split(","))
+            formats = set(f.strip().upper() for f in b["formats"])
             if formats and formats.issubset(DEPRECATED_FORMATS):
                 problems.append("deprecated_format_only")
 
