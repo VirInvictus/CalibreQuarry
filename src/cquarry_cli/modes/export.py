@@ -54,17 +54,15 @@ def _book_to_dict(b, custom_data, show_custom) -> dict:
     d = {
         "id": b["id"],
         "title": b["title"],
-        "authors": [a.strip() for a in b["authors"].split(",")] if b["authors"] else [],
+        "authors": b["authors"],
         "author_sort": b["author_sort"],
-        "tags": [t.strip() for t in b["tags"].split(",")] if b["tags"] else [],
+        "tags": b["tags"],
         "series": b["series"],
         "series_index": b["series_index"],
-        "formats": [f.strip() for f in b["formats"].split(",")] if b["formats"] else [],
+        "formats": b["formats"],
         "rating": calibre_rating_to_stars(b["rating"]),
         "publisher": b["publisher"],
-        "languages": [lang.strip() for lang in b["languages"].split(",")]
-        if b["languages"]
-        else [],
+        "languages": b["languages"],
         "added": (b["timestamp"] or "")[:10],
         "has_cover": bool(b["has_cover"]),
     }
@@ -94,17 +92,17 @@ def _serialize(books, stream, fmt, custom_data, show_custom) -> bool:
             row = {
                 "id": b["id"],
                 "title": b["title"],
-                "authors": b["authors"] or "",
+                "authors": ", ".join(b["authors"]),
                 "author_sort": b["author_sort"] or "",
-                "tags": b["tags"] or "",
+                "tags": ", ".join(b["tags"]),
                 "series": b["series"] or "",
                 "series_index": b["series_index"]
                 if b["series_index"] is not None
                 else "",
-                "formats": b["formats"] or "",
+                "formats": ", ".join(b["formats"]),
                 "rating": stars if stars is not None else "",
                 "publisher": b["publisher"] or "",
-                "languages": b["languages"] or "",
+                "languages": ", ".join(b["languages"]),
                 "added": (b["timestamp"] or "")[:10],
                 "has_cover": b["has_cover"],
             }
@@ -122,7 +120,7 @@ def _serialize(books, stream, fmt, custom_data, show_custom) -> bool:
                 idx = f" #{b['series_index']}" if b["series_index"] is not None else ""
                 line.append(f"({b['series']}{idx})")
             if b["tags"]:
-                line.append(f"[{b['tags']}]")
+                line.append(f"[{', '.join(b['tags'])}]")
             stars = calibre_rating_to_stars(b["rating"])
             if stars is not None:
                 line.append(f"{stars}/5")
@@ -150,12 +148,12 @@ def run_export(
     if custom_data is None:
         return
 
+    if fmt not in ("json", "csv", "ai"):
+        print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
+        return
+
     with _open_out(output) as (stream, out_path):
-        if not _serialize(books, stream, fmt, custom_data, show_custom):
-            print(
-                f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr
-            )
-            return
+        _serialize(books, stream, fmt, custom_data, show_custom)
 
     if not quiet:
         dest = out_path or "stdout"
@@ -196,6 +194,10 @@ def run_search_export(
     books = [b for b in db.get_all_books() if b["id"] in matching_ids]
     custom_data = _load_custom(db, show_custom)
     if custom_data is None:
+        return
+
+    if fmt is not None and fmt not in ("json", "csv", "ai"):
+        print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
         return
 
     with _open_out(output) as (stream, out_path):

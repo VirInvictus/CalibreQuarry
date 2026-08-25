@@ -111,7 +111,26 @@ def tag_list(taxonomy: str | None, translators: str | None) -> str:
 def build_rows(
     db: CalibreDB, want_call_number: bool, matching_ids: set[int] | None = None
 ) -> tuple[list, list]:
-    query = """
+    cols = db.get_custom_columns()
+    
+    def _col_sql(name: str, is_mult: bool) -> str:
+        c = cols.get(name)
+        if not c:
+            return "NULL"
+        cid = c["id"]
+        if is_mult:
+            return f"(SELECT GROUP_CONCAT(v.value, '|') FROM books_custom_column_{cid}_link l JOIN custom_column_{cid} v ON v.id=l.value WHERE l.book=b.id)"
+        if c["datatype"] in ("text", "enumeration", "series"):
+            return f"(SELECT v.value FROM books_custom_column_{cid}_link l JOIN custom_column_{cid} v ON v.id=l.value WHERE l.book=b.id)"
+        return f"(SELECT value FROM custom_column_{cid} WHERE book=b.id)"
+
+    trans_sql = _col_sql("#translators", True)
+    status_sql = _col_sql("#reading_status", False) # Fallback to #status if not found
+    if status_sql == "NULL":
+        status_sql = _col_sql("#status", False)
+    date_sql = _col_sql("#date_read", False)
+
+    query = f"""
             SELECT b.id, b.title, b.author_sort, b.pubdate,
                    (SELECT val FROM identifiers WHERE book=b.id AND type='isbn'),
                    (SELECT p.name FROM books_publishers_link pl
@@ -120,12 +139,9 @@ def build_rows(
                      JOIN tags t ON t.id=tl.tag WHERE tl.book=b.id),
                    (SELECT r.rating FROM books_ratings_link rl
                      JOIN ratings r ON r.id=rl.rating WHERE rl.book=b.id),
-                   (SELECT GROUP_CONCAT(v.value, '|')
-                      FROM books_custom_column_3_link l
-                      JOIN custom_column_3 v ON v.id=l.value WHERE l.book=b.id),
-                   (SELECT v.value FROM books_custom_column_2_link l
-                      JOIN custom_column_2 v ON v.id=l.value WHERE l.book=b.id),
-                   (SELECT value FROM custom_column_5 WHERE book=b.id),
+                   {trans_sql},
+                   {status_sql},
+                   {date_sql},
                    (SELECT val FROM identifiers WHERE book=b.id AND type='lcc'),
                    (SELECT pages FROM books_pages_link WHERE book=b.id)
               FROM books b ORDER BY b.author_sort, b.title

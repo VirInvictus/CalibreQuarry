@@ -138,18 +138,18 @@ What's done, what's next. Updated as of v3.12.0.
 *Context: Based on a full-repo sweep, addressing edge-case crashes, documentation desyncs, and expanding multi-threaded capabilities.*
 
 ### Bugs to Fix
-- [ ] **Custom Column Raw SQL:** Refactor `librarything.py` to use dynamic column mapping instead of hardcoding `books_custom_column_3_link`, preventing crashes on standard DBs.
-- [ ] **Test Script Invocation:** Update `test_queries.sh` to call `python -m cquarry_cli` instead of the extracted `cquarry` package.
-- [ ] **DB Lock Fallback in `audit_isbns.py`:** Implement `connect_ro()` with WAL/SHM snapshot fallback to prevent crashes when Calibre holds a lock.
-- [ ] **NULL Title Crash in `spot_check.py`:** Coalesce `None` titles to prevent `AttributeError` during linting.
-- [ ] **Series "of None":** Check for `max_idx is None` in `show_series` to fix formatting for unindexed series.
-- [ ] **Export Truncation:** Validate export format and custom columns *before* opening the output file to prevent 0-byte truncations.
-- [ ] **Lossy Title-Casing:** Stop using `str.title()` on duplicate book detection keys to prevent mangling proper nouns and apostrophes.
-- [ ] **Narrow Terminal Crash:** Enforce `visible_w = max(1, content_w - 4)` in the curses pager.
+- [x] **Custom Column Raw SQL:** Refactor `librarything.py` to use dynamic column mapping instead of hardcoding `books_custom_column_3_link`, preventing crashes on standard DBs.
+- [x] **Test Script Invocation:** Update `test_queries.sh` to call `python -m cquarry_cli` instead of the extracted `cquarry` package.
+- [x] **DB Lock Fallback in `audit_isbns.py`:** Implement `connect_ro()` with WAL/SHM snapshot fallback to prevent crashes when Calibre holds a lock.
+- [x] **NULL Title Crash in `spot_check.py`:** Coalesce `None` titles to prevent `AttributeError` during linting.
+- [x] **Series "of None":** Check for `max_idx is None` in `show_series` to fix formatting for unindexed series.
+- [x] **Export Truncation:** Validate export format and custom columns *before* opening the output file to prevent 0-byte truncations.
+- [x] **Lossy Title-Casing:** Stop using `str.title()` on duplicate book detection keys to prevent mangling proper nouns and apostrophes.
+- [x] **Narrow Terminal Crash:** Enforce `visible_w = max(1, content_w - 4)` in the curses pager.
 
 ### Refactoring & Growth
-- [ ] **Clean Up Imports:** Remove duplicate `sys` and `Path` imports across companion scripts.
-- [ ] **Unify DB Snapshot Helper:** Move the WAL/SHM fallback logic from individual scripts into a shared `scripts/db_util.py`.
-- [ ] **Expand CC Orphan Audit:** Extend `check_orphan_cc_links` to audit single-value tables.
-- [ ] **Multi-Threaded Audits:** Wrap file inspection in `reconcile_file_metadata.py`, `audit_isbns.py`, and `spot_check.py` with a `ThreadPoolExecutor` for a 5-10x speedup.
-- [ ] **Docs Sync:** Bump versions in `spec.md` and `roadmap.md` to 3.13.0 to match the code.
+- [x] **Clean Up Imports:** Remove duplicate `sys` and `Path` imports across companion scripts.
+- [x] **Unify DB Snapshot Helper:** Move the WAL/SHM fallback logic from individual scripts into a shared `scripts/db_util.py`.
+- [x] **Expand CC Orphan Audit:** Extend `check_orphan_cc_links` to audit single-value tables.
+- [x] **Multi-Threaded Audits:** Wrap file inspection in `reconcile_file_metadata.py`, `audit_isbns.py`, and `spot_check.py` with a `ThreadPoolExecutor` for a 5-10x speedup.
+- [x] **Docs Sync:** Bump versions in `spec.md` and `roadmap.md` to 3.13.0 to match the code.

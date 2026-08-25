@@ -55,11 +55,12 @@ import re
 import shutil
 import sqlite3
 import subprocess
-import sys
 import xml.etree.ElementTree as ET
 import zipfile
-from pathlib import Path
 from urllib.parse import quote, unquote
+
+from db_util import connect_ro, cleanup_tmp
+from concurrent.futures import ThreadPoolExecutor
 
 from vir_tui import core as ui
 
@@ -632,7 +633,7 @@ def main() -> int:
     library = db.parent
     # quote(): '?' and '#' are URI syntax, so a library path containing either
     # would open some other file and fail with "no such table: books".
-    con = sqlite3.connect(f"file:{quote(str(db))}?mode=ro", uri=True)
+    con, tmp = connect_ro(str(db))
     cur = con.cursor()
 
     all_ids = [r[0] for r in cur.execute("SELECT id FROM books")]
@@ -667,7 +668,7 @@ def main() -> int:
         rep.write("id\tflags\ttitle\n")
         for bid in sample:
             title, path = cur.execute(
-                "SELECT title, path FROM books WHERE id=?", (bid,)
+                "SELECT COALESCE(title, ''), path FROM books WHERE id=?", (bid,)
             ).fetchone()
             authors = [
                 r[0]
@@ -762,6 +763,8 @@ def main() -> int:
 
     print(f"flagged: {flagged}/{n} ({hard_failures} hard failures)")
     print(f"report: {args.report}\nbundle: {args.bundle}")
+    con.close()
+    cleanup_tmp(tmp)
     return min(hard_failures, 99)
 
 

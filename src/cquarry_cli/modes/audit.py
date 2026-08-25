@@ -85,8 +85,8 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
             issues.append(
                 {
                     "id": ", ".join(ids),
-                    "title": title.title(),
-                    "author": author.title(),
+                    "title": title,
+                    "author": author,
                     "issue_type": "duplicate",
                     "issues": "duplicate_books",
                 }

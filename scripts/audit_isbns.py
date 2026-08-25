@@ -104,6 +104,7 @@ import subprocess
 import sys
 import unicodedata
 import zipfile
+from db_util import connect_ro, cleanup_tmp
 from urllib.parse import quote
 
 from vir_tui import core as ui
@@ -421,7 +422,7 @@ def display_tag(tags: list[str], prefixes: list[str] | None) -> str:
 def load_targets(
     db_path: str, ids: list[int] | None, prefixes: list[str] | None
 ) -> list[dict]:
-    con = sqlite3.connect(db_uri_ro(db_path), uri=True)
+    con, tmp = connect_ro(db_path)
     try:
         rows = con.execute(
             """
@@ -438,6 +439,7 @@ def load_targets(
             booktags.setdefault(bid, []).append(tname)
     finally:
         con.close()
+        cleanup_tmp(tmp)
 
     wanted = set(ids) if ids else None
     out = []

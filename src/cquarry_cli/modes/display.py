@@ -58,7 +58,7 @@ def show_series(db: CalibreDB, *, quiet: bool = False) -> None:
         # has more books than its top index yet can still be complete.
         if gaps:
             status = "incomplete"
-        elif raw_max is not None:
+        elif max_idx is not None:
             status = "complete"
         else:
             status = ""

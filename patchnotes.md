@@ -1,3 +1,12 @@
+# 3.14.1 (2026-08-24)
+- **Fix**: Replaced hardcoded custom columns logic in `librarything.py` with dynamic ID resolution from the database schema.
+- **Fix**: Restored functionality in `test_queries.sh` by targeting `cquarry_cli` instead of the extracted `cquarry` module.
+- **Fix**: Migrated `spot_check.py` and `audit_isbns.py` to use `connect_ro()` with WAL/SHM fallback for safe read-only locking against active Calibre DBs.
+- **Fix**: Corrected NULL title bug in `spot_check.py` by coalescing absent titles.
+- **Fix**: Fixed logical gap check in `display.py` series output.
+- **Fix**: Reordered argument validation in `export.py` to prevent 0-byte file truncations on invalid format flags.
+- **Fix**: Removed `.title()` enforcement during duplication checks in `audit.py` to preserve original casing.
+
 # 3.14.0 (2026-08-24)
 - **Refactor**: Adapted to `vir-tui` v2.0.0 public API and decoupled menu fallbacks.
 - **Fix**: The non-curses fallback text menu now functions properly for CalibreQuarry by passing custom `letter_keys` and `aliases` during initialization.

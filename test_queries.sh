@@ -27,7 +27,7 @@ queries=(
 )
 
 for q in "${queries[@]}"; do
-  out=$(python -m cquarry --search "$q" --db "$DB_PATH" --quiet 2>/dev/null)
+  out=$(python -m cquarry_cli --search "$q" --db "$DB_PATH" --quiet 2>/dev/null)
   rc=$?
   if [ $rc -ne 0 ]; then
     echo "FAILED: $q (exit $rc)"
