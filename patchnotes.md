@@ -1,3 +1,8 @@
+# 3.18.0 (2026-08-26)
+- **Feature**: `--show-author-details` — opt-in enrichment for `--catalog`, `--all-wings`, `--export`, and structured `--search` output. Catalog lines gain a `{sort; link}` segment and JSON/CSV exports gain `author_sorts`/`author_links` fields, sourced from cquarry ≥1.4's entity secondary columns (each author's true sort key and author-page URL).
+- **Upgrade**: `--search` now resolves custom grouped-search terms (`GroupName:query`, from Calibre's `grouped_search_terms` preference, with upstream union/false-inversion semantics) and the new `annotations:` location (full-text over e-reader highlights) — both inherited automatically via cquarry 1.4's engine; no flags needed.
+- **Upgrade**: Requires `cquarry>=1.4`.
+
 # 3.17.0 (2026-08-26)
 - **Feature**: Page counts flow through exports — `--export` JSON gains a `pages` key per book, CSV a `pages` column, and the AI format a `<N>p` segment — sourced from Calibre's native `books_pages_link` table via cquarry ≥1.3.
 - **Feature**: Library provenance stamping — text catalogs (`--catalog`, `--all-wings`) carry the library's identity UUID in their header line, and `--audit`'s summary names it, so any output can be traced back to its source library after moves/restores (cquarry `get_library_uuid()`).

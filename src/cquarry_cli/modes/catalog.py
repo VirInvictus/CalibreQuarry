@@ -25,6 +25,7 @@ def write_catalog(
     show_id: bool = False,
     show_custom: str | None = None,
     plugin_data: str | None = None,
+    author_details: bool = False,
     quiet: bool = False,
 ) -> None:
     """Write a formatted text catalog, optionally filtered to a virtual library.
@@ -141,8 +142,18 @@ def write_catalog(
             if plugin_data and book["id"] in plugin_map:
                 plugin_str = f" <{plugin_data}: {plugin_map[book['id']]}>"
 
+            details_str = ""
+            if author_details:
+                sorts = book.get("author_sorts") or []
+                links = book.get("author_links") or []
+                bits = [s for s in sorts if s]
+                bits += [u for u in links if u]
+                if bits:
+                    details_str = " {" + "; ".join(bits) + "}"
+
             f.write(
-                f"  * {id_str}{title}{series_str}{fmt_str}{meta_str}{custom_str}{plugin_str}\n"
+                f"  * {id_str}{title}{series_str}{fmt_str}{meta_str}"
+                f"{custom_str}{plugin_str}{details_str}\n"
             )
             book_count += 1
 
@@ -162,6 +173,7 @@ def write_all_wings(
     show_id: bool = False,
     show_custom: str | None = None,
     plugin_data: str | None = None,
+    author_details: bool = False,
     quiet: bool = False,
 ) -> None:
     """Generate a catalog file for each virtual library wing."""
@@ -199,6 +211,7 @@ def write_all_wings(
             show_id=show_id,
             show_custom=show_custom,
             plugin_data=plugin_data,
+            author_details=author_details,
             quiet=True,
         )
 

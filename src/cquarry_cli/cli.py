@@ -75,7 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="QUERY",
         help="Show/export books matching a Calibre search expression "
-        "(prints to stdout unless --output is given; empty query = whole library)",
+        "(prints to stdout unless --output is given; empty query = whole "
+        "library). Supports custom grouped-search terms (GroupName:query) "
+        "and annotations: full-text over e-reader highlights",
     )
     group.add_argument(
         "--wings", action="store_true", help="List all virtual library wings"
@@ -173,6 +175,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="COL_NAME",
         help="Load and display a specific custom column",
     )
+    p.add_argument(
+        "--show-author-details",
+        dest="show_author_details",
+        action="store_true",
+        help="With --catalog/--all-wings/--export/--search: append each "
+        "author's true sort key and link URL (from cquarry's entity "
+        "secondary columns) to the output",
+    )
+
     p.add_argument("--quiet", action="store_true", help="Minimize output")
 
     return p
@@ -266,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
                     show_id=args.show_id,
                     show_custom=args.show_custom,
                     plugin_data=args.plugin_data,
+                    author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
                 return 0
@@ -279,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
                     show_tags=args.show_tags,
                     show_id=args.show_id,
                     show_custom=args.show_custom,
+                    author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
                 return 0
@@ -331,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
                     fmt=args.format,
                     show_custom=args.show_custom,
                     plugin_data=args.plugin_data,
+                    author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
                 return 0
@@ -355,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
                     show_id=args.show_id,
                     show_custom=args.show_custom,
                     plugin_data=args.plugin_data,
+                    author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
                 return 0

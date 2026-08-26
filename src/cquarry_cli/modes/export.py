@@ -51,7 +51,7 @@ def _open_out(output: str | None):
         yield sys.stdout, None
 
 
-def _book_to_dict(b, custom_data, show_custom) -> dict:
+def _book_to_dict(b, custom_data, show_custom, author_details=False) -> dict:
     d = {
         "id": b["id"],
         "title": b["title"],
@@ -68,16 +68,21 @@ def _book_to_dict(b, custom_data, show_custom) -> dict:
         "added": (b["timestamp"] or "")[:10],
         "has_cover": bool(b["has_cover"]),
     }
+    if author_details:
+        d["author_sorts"] = list(b.get("author_sorts") or [])
+        d["author_links"] = list(b.get("author_links") or [])
     if show_custom:
         d[show_custom] = custom_data.get(b["id"])
     return d
 
 
-def _serialize(books, stream, fmt, custom_data, show_custom) -> bool:
+def _serialize(
+    books, stream, fmt, custom_data, show_custom, author_details=False
+) -> bool:
     """Write books to a stream as json/csv/ai. Returns False for unknown fmt."""
     if fmt == "json":
         json.dump(
-            [_book_to_dict(b, custom_data, show_custom) for b in books],
+            [_book_to_dict(b, custom_data, show_custom, author_details) for b in books],
             stream,
             indent=2,
             ensure_ascii=False,
@@ -85,6 +90,8 @@ def _serialize(books, stream, fmt, custom_data, show_custom) -> bool:
         stream.write("\n")
     elif fmt == "csv":
         fieldnames = list(_CSV_FIELDS)
+        if author_details:
+            fieldnames += ["author_sorts", "author_links"]
         if show_custom:
             fieldnames.append(show_custom)
         w = csv.DictWriter(stream, fieldnames=fieldnames)
@@ -109,6 +116,13 @@ def _serialize(books, stream, fmt, custom_data, show_custom) -> bool:
                 "added": (b["timestamp"] or "")[:10],
                 "has_cover": b["has_cover"],
             }
+            if author_details:
+                row["author_sorts"] = "; ".join(
+                    s for s in (b.get("author_sorts") or []) if s
+                )
+                row["author_links"] = "; ".join(
+                    u for u in (b.get("author_links") or []) if u
+                )
             if show_custom:
                 row[show_custom] = custom_data.get(b["id"], "")
             w.writerow(row)
@@ -145,6 +159,7 @@ def run_export(
     fmt: str = "json",
     *,
     show_custom: str | None = None,
+    author_details: bool = False,
     quiet: bool = False,
 ) -> None:
     """Export full library to JSON, CSV, or AI-readable format."""
@@ -158,7 +173,7 @@ def run_export(
         return
 
     with _open_out(output) as (stream, out_path):
-        _serialize(books, stream, fmt, custom_data, show_custom)
+        _serialize(books, stream, fmt, custom_data, show_custom, author_details)
 
     if not quiet:
         dest = out_path or "stdout"
@@ -176,6 +191,7 @@ def run_search_export(
     fmt: str | None = None,
     show_custom: str | None = None,
     plugin_data: str | None = None,
+    author_details: bool = False,
     quiet: bool = False,
 ) -> None:
     """Evaluate a search query and write matching books.
@@ -217,7 +233,7 @@ def run_search_export(
 
     with _open_out(output) as (stream, out_path):
         if fmt in ("json", "csv", "ai"):
-            _serialize(books, stream, fmt, custom_data, show_custom)
+            _serialize(books, stream, fmt, custom_data, show_custom, author_details)
         else:
             stream.write(f"Search Query: {query}\n")
             stream.write(f"Matches: {len(books)}\n")
