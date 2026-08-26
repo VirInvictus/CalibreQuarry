@@ -1,3 +1,8 @@
+# 3.16.0 (2026-08-26)
+- **Feature**: First write flow — `--set-title BOOK_ID TITLE` renames a book through cquarry's separate `WritableCalibreDB` module (trigger-safe: registers Calibre's `title_sort`/`uuid4` SQL functions, refreshes the sort key, bumps `last_modified`). Every mutation also records the book id in Calibre's `metadata_dirtied` queue (requires cquarry 1.2), which is what upstream consumes to regenerate the book's sidecar `.opf` and re-push metadata to wireless readers on its next startup — external edits finally propagate. Requires closing Calibre first; lock contention fails cleanly with exit code 1.
+- **Feature**: `--audit` output now includes a "Pending OPF sync" section listing the books queued in `metadata_dirtied` (via cquarry's read-only `get_dirtied_books()`), so you can see exactly what Calibre will resync next time it starts. Absent when the queue is empty.
+- **Upgrade**: Requires `cquarry>=1.2`.
+
 # 3.15.0 (2026-08-25)
 - **Feature**: New `--export-annotations` command dumps e-reader highlights, bookmarks, and notes as JSON (via cquarry's `annotations` reader), optionally scoped to one book with `--id <BOOK_ID>`.
 - **Feature**: New `--plugin-data NAME` flag (works with `--catalog`, `--all-wings`, and `--search`) appends third-party plugin values — e.g. `goodreads_id` or `wordcount` from `books_plugin_data` — as `<name: value>` segments on each book line.

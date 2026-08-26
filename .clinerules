@@ -1,0 +1,32 @@
+<!-- .clinerules for CalibreQuarry — converted from CLAUDE.md on 2026-08-25 during the Cline migration. -->
+<!-- The original CLAUDE.md is kept untouched alongside this file (provenance + deep reference). -->
+<!-- Claude Code machinery was neutralized: self-references point at this file; global rules are ~/.clinerules/. -->
+
+# .clinerules (CalibreQuarry)
+
+Per-project guidance. Overrides the global file where they conflict.
+
+## What this is
+A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
+
+## Programmer-facing contract notes (cquarry >= 1.1)
+- `db.get_all_books()` rows expose `authors`, `tags`, `languages`, and `formats` as native `list[str]`. Never `.split(",")` them; comma-containing author/tag names are preserved by the link-table hydration. `normalize_author_display()` accepts both the legacy joined string and the list form.
+- Every book row also carries `size` (total `data.uncompressed_size` bytes, may be None).
+- `search()` raises `ParseException` for unknown virtual libraries or saved searches; only `resolve_vl()` / `resolve_saved_search()` raise `ValueError` (with an available-names message).
+- Raw comments payloads are HTML; run them through `cquarry.helpers.strip_html()` before terminal output.
+
+## Hard constraints
+- **Frontend Only.** The core database logic and search evaluation are delegated to the external `cquarry` shared library. Do not add database reads or search parsing logic here; contribute them to `cquarry` instead.
+- **Minimal Dependencies.** Only `cquarry`, `vir-tui`, and `tqdm`. No `calibredb` required.
+- **Immersive Output.** All commands that dump extensive output must be wrapped in `_run_with_capture()` so they display in the curses pager, unless redirected.
+
+## Layout
+- `src/cquarry_cli/cli.py` & `tui.py`: Core CLI arguments and the Curses UI menu.
+- `src/cquarry_cli/modes/`: Implementations for each CLI flag (`catalog.py`, `export.py`, `stats.py`, etc).
+- `tests/`: End-to-end integration tests using `cquarry_cli` directly against the database (the unit tests for `cquarry.db` and `cquarry.search` were moved to the `cquarry` library).
+
+> **Important:** The core database logic (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library. Additionally, the generic UI formatting and Curses menu primitives have been extracted to the `vir-tui` shared repository. CalibreQuarry relies on both of these external dependencies. (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library package. CalibreQuarry relies on this external dependency.
+
+## Conventions
+- Single source of truth for version is `src/cquarry_cli/__init__.py`.
+- Run tests with `./run_tests.sh`. Test the CLI, not just the functions.

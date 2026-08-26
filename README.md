@@ -46,13 +46,14 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Catalog** | `--catalog` | Formatted text catalog grouped by author, with ratings and series info |
 | **All wings** | `--all-wings` | Generate a separate catalog file for every virtual library |
 | **Statistics** | `--stats` | Format breakdown, rating distribution, tag taxonomy, publisher counts |
-| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps |
+| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with pending OPF sync |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
 | **Analytics** | `--analytics {author,pace,tags,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, Wing-overlap analysis |
 | **Export** | `--export` | Full library export to JSON, CSV, or an AI-readable flat format |
 | **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
 | **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
+| **Set title** | `--set-title BOOK_ID TITLE` | Rename a book through cquarry's opt-in write module (trigger-safe; refreshes the sort key and queues an OPF regeneration). Close Calibre first |
 | **Search** | `--search QUERY` | Books matching a Calibre search expression; prints to stdout, or to a file with `--output` |
 | **Wings** | `--wings` | List all virtual libraries with book counts |
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
@@ -110,6 +111,10 @@ cquarry --stats --db ~/Calibre/metadata.db
 
 # Audit: find unrated books, missing tags, series gaps
 cquarry --audit --db ~/Calibre/metadata.db --output audit.csv
+
+# Rename a book in place (writes via cquarry's WritableCalibreDB; queues an
+# OPF regeneration so Calibre picks the change up on its next startup)
+cquarry --set-title 42 "Dune Messiah" --db ~/Calibre/metadata.db
 
 # Recently added books
 cquarry --recent 10 --db ~/Calibre/metadata.db

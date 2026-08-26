@@ -117,6 +117,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--set-title",
+        dest="set_title",
+        nargs=2,
+        default=None,
+        metavar=("BOOK_ID", "TITLE"),
+        help="Rename a book via cquarry's opt-in write module (trigger-safe; "
+        "queues an OPF regeneration in metadata_dirtied). Calibre must be "
+        "closed so the write does not fight its lock",
+    )
+
+    p.add_argument(
         "--db",
         default=None,
         help="Path to Calibre metadata.db (auto-detected if omitted)",
@@ -177,6 +188,45 @@ def main(argv: list[str] | None = None) -> int:
         parser = build_parser()
         args = parser.parse_args(argv)
         db_path = find_db(args.db)
+
+        if args.set_title:
+            # The library's first write flow, behind an explicit opt-in flag.
+            # Imported lazily so every read-only mode never even loads the
+            # write module. WritableCalibreDB registers Calibre's trigger
+            # UDFs, bumps last_modified, and queues the book in
+            # metadata_dirtied so Calibre regenerates its sidecar .opf.
+            import sqlite3 as _sqlite3
+
+            from cquarry.write import WritableCalibreDB
+
+            book_id, new_title = args.set_title[0], args.set_title[1]
+            try:
+                book_id = int(book_id)
+            except ValueError:
+                print(
+                    f"ERROR: BOOK_ID must be an integer, got {book_id!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            try:
+                with WritableCalibreDB(db_path) as wdb:
+                    wdb.update_title(book_id, new_title)
+            except ValueError as e:
+                print(f"ERROR: {e}", file=sys.stderr)
+                return 1
+            except _sqlite3.OperationalError as e:
+                print(
+                    f"ERROR: could not acquire the database write lock ({e}). "
+                    "Is Calibre running? Close it first.",
+                    file=sys.stderr,
+                )
+                return 1
+            if not args.quiet:
+                print(
+                    f"Renamed book {book_id} to {new_title!r} "
+                    "(queued for OPF regeneration on Calibre's next startup)."
+                )
+            return 0
 
         with CalibreDB(db_path) as db:
             if args.export_annotations:
