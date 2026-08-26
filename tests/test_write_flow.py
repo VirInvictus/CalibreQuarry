@@ -166,3 +166,88 @@ class TestAuditPendingOPFSync(_TempDBCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWriteVerbs(_TempDBCase):
+    """The v3.19 write-verb surface: authors/rating/comments/column/remove,
+    all through _run_write's clean error paths."""
+
+    def test_set_authors(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--set-authors",
+                    "1",
+                    "Leckie, Ann; Second Author",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        names = [
+            r[0]
+            for r in con.execute(
+                "SELECT a.name FROM books_authors_link l JOIN authors a "
+                "ON a.id=l.author WHERE l.book=1 ORDER BY l.id"
+            )
+        ]
+        asort = con.execute("SELECT author_sort FROM books WHERE id=1").fetchone()[0]
+        dirtied = [r[0] for r in con.execute("SELECT book FROM metadata_dirtied")]
+        con.close()
+        self.assertEqual(names, ["Leckie, Ann", "Second Author"])
+        self.assertEqual(asort, "Leckie, Ann & Second Author")
+        self.assertEqual(dirtied, [1])
+
+    def test_set_rating_and_range_check(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--set-rating", "1", "4.5", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        val = (
+            sqlite3.connect(self.db_path)
+            .execute(
+                "SELECT r.rating FROM books_ratings_link l "
+                "JOIN ratings r ON r.id = l.rating WHERE l.book = 1"
+            )
+            .fetchone()
+        )
+        self.assertEqual(val[0], 9)  # stored x2
+        out2, err2 = io.StringIO(), io.StringIO()
+        with redirect_stdout(out2), redirect_stderr(err2):
+            rc = main(["--set-rating", "1", "7", "--db", self.db_path])
+        self.assertEqual(rc, 2)  # range rejected before any write opens
+
+    def test_set_column_enum_validation_surfaces_as_error(self):
+        # Fixture lacks the enum display config; set_custom_column accepts
+        # unvalidated text columns but this proves the plumbing end-to-end.
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--set-column", "1", "#missing", "x", "--db", self.db_path])
+        self.assertEqual(rc, 1)  # unknown column -> ValueError -> exit 1
+
+    def test_remove_book_dry_run_then_confirm(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--remove-book", "1", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        text = out.getvalue()
+        self.assertIn("DRY RUN", text)
+        still_there = (
+            sqlite3.connect(self.db_path)
+            .execute("SELECT COUNT(*) FROM books WHERE id=1")
+            .fetchone()[0]
+        )
+        self.assertEqual(still_there, 1)
+
+        out2, err2 = io.StringIO(), io.StringIO()
+        with redirect_stdout(out2), redirect_stderr(err2):
+            rc = main(["--remove-book", "1", "--confirm-remove", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        gone = (
+            sqlite3.connect(self.db_path)
+            .execute("SELECT COUNT(*) FROM books WHERE id=1")
+            .fetchone()[0]
+        )
+        self.assertEqual(gone, 0)

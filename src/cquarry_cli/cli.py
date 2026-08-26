@@ -119,17 +119,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
-        "--set-title",
-        dest="set_title",
-        nargs=2,
-        default=None,
-        metavar=("BOOK_ID", "TITLE"),
-        help="Rename a book via cquarry's opt-in write module (trigger-safe; "
-        "queues an OPF regeneration in metadata_dirtied). Calibre must be "
-        "closed so the write does not fight its lock",
-    )
-
-    p.add_argument(
         "--db",
         default=None,
         help="Path to Calibre metadata.db (auto-detected if omitted)",
@@ -186,7 +175,119 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--quiet", action="store_true", help="Minimize output")
 
+    # --- Write verbs (opt-in; each goes through cquarry.write) ---
+    w = p.add_argument_group("write verbs (Calibre must be closed)")
+    w.add_argument(
+        "--set-title",
+        dest="set_title",
+        nargs=2,
+        metavar=("BOOK_ID", "TITLE"),
+        default=None,
+        help="Rename a book",
+    )
+    w.add_argument(
+        "--set-authors",
+        dest="set_authors",
+        nargs=2,
+        metavar=("BOOK_ID", "NAMES"),
+        default=None,
+        help='Replace authors ("Name One; Name Two"; ; = separator)',
+    )
+    w.add_argument(
+        "--set-rating",
+        dest="set_rating",
+        nargs=2,
+        metavar=("BOOK_ID", "STARS"),
+        default=None,
+        help="Set rating (0-5, halves allowed)",
+    )
+    w.add_argument(
+        "--set-comments",
+        dest="set_comments",
+        nargs=2,
+        metavar=("BOOK_ID", "HTML"),
+        default=None,
+        help="Set the comments/description HTML",
+    )
+    w.add_argument(
+        "--clear-comments",
+        dest="clear_comments",
+        metavar="BOOK_ID",
+        default=None,
+        help="Clear the comments/description",
+    )
+    w.add_argument(
+        "--set-column",
+        dest="set_column",
+        nargs=3,
+        metavar=("BOOK_ID", "LABEL", "VALUE"),
+        default=None,
+        help="Write a custom-column value (#label; enumerations are "
+        "validated against the column's configured values)",
+    )
+    w.add_argument(
+        "--clear-column",
+        dest="clear_column",
+        nargs=2,
+        metavar=("BOOK_ID", "LABEL"),
+        default=None,
+        help="Clear a custom-column value",
+    )
+    w.add_argument(
+        "--remove-book",
+        dest="remove_book",
+        metavar="BOOK_ID",
+        default=None,
+        help="Permanently remove a book (dry run unless --confirm-remove)",
+    )
+    w.add_argument(
+        "--confirm-remove",
+        dest="confirm_remove",
+        action="store_true",
+        help="With --remove-book: actually delete instead of dry-running",
+    )
+    w.add_argument(
+        "--format-stats",
+        dest="format_stats",
+        action="store_true",
+        help="Show per-format book counts and total bytes",
+    )
+
     return p
+
+
+def _parse_book_id(raw) -> int | None:
+    try:
+        return int(raw)
+    except TypeError, ValueError:
+        print(f"ERROR: BOOK_ID must be an integer, got {raw!r}", file=sys.stderr)
+        return None
+
+
+def _run_write(db_path: str, action) -> int:
+    """Execute ``action(wdb)`` inside a WritableCalibreDB.
+
+    Every write verb funnels through here so trigger UDFs get registered,
+    transactions stay atomic, and lock/validation errors map to clean exit
+    codes instead of tracebacks.
+    """
+    import sqlite3 as _sqlite3
+
+    from cquarry.write import WritableCalibreDB
+
+    try:
+        with WritableCalibreDB(db_path) as wdb:
+            return action(wdb)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    except _sqlite3.OperationalError as e:
+        print(
+            f"ERROR: could not acquire the database write lock ({e}). "
+            "Is Calibre running? Close it first.",
+            file=sys.stderr,
+        )
+        return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -201,42 +302,165 @@ def main(argv: list[str] | None = None) -> int:
         db_path = find_db(args.db)
 
         if args.set_title:
-            # The library's first write flow, behind an explicit opt-in flag.
-            # Imported lazily so every read-only mode never even loads the
-            # write module. WritableCalibreDB registers Calibre's trigger
-            # UDFs, bumps last_modified, and queues the book in
-            # metadata_dirtied so Calibre regenerates its sidecar .opf.
-            import sqlite3 as _sqlite3
+            book_id = _parse_book_id(args.set_title[0])
+            if book_id is None:
+                return 2
+            new_title = args.set_title[1]
 
-            from cquarry.write import WritableCalibreDB
+            def _do_set_title(wdb):
+                wdb.update_title(book_id, new_title)
+                if not args.quiet:
+                    print(
+                        f"Renamed book {book_id} to {new_title!r} "
+                        "(queued for OPF regeneration on Calibre's next startup)."
+                    )
+                return 0
 
-            book_id, new_title = args.set_title[0], args.set_title[1]
+            return _run_write(db_path, _do_set_title)
+
+        if args.set_authors:
+            book_id = _parse_book_id(args.set_authors[0])
+            if book_id is None:
+                return 2
+            names = [n.strip() for n in args.set_authors[1].split(";") if n.strip()]
+
+            def _do_set_authors(wdb):
+                wdb.set_authors(book_id, names)
+                if not args.quiet:
+                    print(
+                        f"Set authors of book {book_id} to {' & '.join(names)} "
+                        "(queued for OPF regeneration)."
+                    )
+                return 0
+
+            return _run_write(db_path, _do_set_authors)
+
+        if args.set_rating:
+            book_id = _parse_book_id(args.set_rating[0])
+            if book_id is None:
+                return 2
             try:
-                book_id = int(book_id)
+                stars = float(args.set_rating[1])
             except ValueError:
                 print(
-                    f"ERROR: BOOK_ID must be an integer, got {book_id!r}",
+                    f"ERROR: STARS must be a number 0-5, got {args.set_rating[1]!r}",
                     file=sys.stderr,
                 )
                 return 2
-            try:
-                with WritableCalibreDB(db_path) as wdb:
-                    wdb.update_title(book_id, new_title)
-            except ValueError as e:
-                print(f"ERROR: {e}", file=sys.stderr)
-                return 1
-            except _sqlite3.OperationalError as e:
-                print(
-                    f"ERROR: could not acquire the database write lock ({e}). "
-                    "Is Calibre running? Close it first.",
-                    file=sys.stderr,
-                )
-                return 1
-            if not args.quiet:
-                print(
-                    f"Renamed book {book_id} to {new_title!r} "
-                    "(queued for OPF regeneration on Calibre's next startup)."
-                )
+            if not 0 <= stars <= 5:
+                print("ERROR: STARS must be within 0-5.", file=sys.stderr)
+                return 2
+
+            def _do_set_rating(wdb):
+                wdb.set_rating(book_id, stars)
+                if not args.quiet:
+                    print(f"Rated book {book_id} at {stars:g} stars.")
+                return 0
+
+            return _run_write(db_path, _do_set_rating)
+
+        if args.set_comments:
+            book_id = _parse_book_id(args.set_comments[0])
+            if book_id is None:
+                return 2
+            text = args.set_comments[1]
+
+            def _do_set_comments(wdb):
+                wdb.set_comments(book_id, text)
+                if not args.quiet:
+                    print(f"Comments updated on book {book_id}.")
+                return 0
+
+            return _run_write(db_path, _do_set_comments)
+
+        if args.clear_comments:
+            book_id = _parse_book_id(args.clear_comments)
+            if book_id is None:
+                return 2
+
+            def _do_clear_comments(wdb):
+                wdb.set_comments(book_id, None)
+                if not args.quiet:
+                    print(f"Comments cleared on book {book_id}.")
+                return 0
+
+            return _run_write(db_path, _do_clear_comments)
+
+        if args.set_column:
+            book_id = _parse_book_id(args.set_column[0])
+            label = args.set_column[1]
+            value = args.set_column[2]
+            if book_id is None:
+                return 2
+
+            def _do_set_column(wdb):
+                # set_custom_column refuses non-editable/composite columns
+                # and validates enumerations itself.
+                wdb.set_custom_column(book_id, label, value)
+                if not args.quiet:
+                    print(f"Set #{label.lstrip('#')} = {value!r} on book {book_id}.")
+                return 0
+
+            return _run_write(db_path, _do_set_column)
+
+        if args.clear_column:
+            book_id = _parse_book_id(args.clear_column[0])
+            label = args.clear_column[1]
+            if book_id is None:
+                return 2
+
+            def _do_clear_column(wdb):
+                wdb.set_custom_column(book_id, label, None)
+                if not args.quiet:
+                    print(f"Cleared #{label.lstrip('#')} on book {book_id}.")
+                return 0
+
+            return _run_write(db_path, _do_clear_column)
+
+        if args.remove_book is not None:
+            book_id = _parse_book_id(args.remove_book)
+            if book_id is None:
+                return 2
+            if not args.confirm_remove:
+
+                def _describe(wdb):
+                    row = wdb.conn.execute(
+                        "SELECT title FROM books WHERE id = ?", (book_id,)
+                    ).fetchone()
+                    title = row["title"] if row else "<unknown>"
+                    fmts = [
+                        r[0]
+                        for r in wdb.conn.execute(
+                            "SELECT format FROM data WHERE book = ?", (book_id,)
+                        )
+                    ]
+                    print(
+                        f"DRY RUN — would permanently remove book {book_id} "
+                        f"({title!r}, formats: {', '.join(fmts) or 'none'})."
+                    )
+                    print("Re-run with --confirm-remove to delete.")
+                    return 0
+
+                return _run_write(db_path, _describe)
+
+            def _do_remove(wdb):
+                wdb.remove_book(book_id)
+                if not args.quiet:
+                    print(f"Book {book_id} removed.")
+                return 0
+
+            return _run_write(db_path, _do_remove)
+
+        if args.format_stats:
+            with CalibreDB(db_path) as db:
+                stats = db.get_format_stats()
+                total = sum(s["bytes"] for s in stats.values())
+                count_total = sum(s["count"] for s in stats.values())
+                print(f"{'Format':<10}{'Books':>8}{'Bytes':>16}")
+                for fmt, s in sorted(stats.items()):
+                    print(f"{fmt:<10}{s['count']:>8}{s['bytes']:>16,}")
+                print("-" * 34)
+                print(f"{'TOTAL':<10}{count_total:>8}{total:>16,}")
             return 0
 
         with CalibreDB(db_path) as db:

@@ -54,7 +54,9 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
 | **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
 | **Set title** | `--set-title BOOK_ID TITLE` | Rename a book through cquarry's opt-in write module (trigger-safe; refreshes the sort key and queues an OPF regeneration). Close Calibre first |
-| **Search** | `--search QUERY` | Books matching a Calibre search expression; prints to stdout, or to a file with `--output` |
+| **Write verbs** | `--set-authors`, `--set-rating`, `--set-comments` / `--clear-comments`, `--set-column` / `--clear-column`, `--remove-book [--confirm-remove]` | Full opt-in write surface via cquarry ≥1.5: authors (author_sort recomputed), ratings (0–5), comments HTML, generic custom columns (enum-validated, non-editable refused) and guarded book removal (dry-run by default) |
+| **Format stats** | `--format-stats` | Per-format book counts and total catalogued bytes |
+| **Search** | `--search QUERY` | Books matching a Calibre search expression; prints to stdout, or to a file with `--output`. Grouped-search terms and `annotations:` work too |
 | **Wings** | `--wings` | List all virtual libraries with book counts |
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
 | **Version** | `--version` | Show version and exit |

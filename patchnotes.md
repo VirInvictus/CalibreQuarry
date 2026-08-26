@@ -1,3 +1,9 @@
+# 3.19.0 (2026-08-26)
+- **Feature**: Write-verb surface completed on cquarry ≥1.5's expanded module — `--set-authors ID "A; B"` (semicolon-separated; author_sort recomputed), `--set-rating ID STARS` (0–5), `--set-comments` / `--clear-comments`, `--set-column ID #LABEL VALUE` / `--clear-column` (layout auto-detected, enumerations validated against configured values, non-editable columns refused), and `--remove-book ID [--confirm-remove]` (dry-run by default printing title+formats; irreversible with the flag). All verbs queue OPF regeneration via `metadata_dirtied`.
+- **Feature**: `--format-stats` prints per-format book counts and total bytes (`get_format_stats()`).
+- **Upgrade**: All write verbs funnel through a shared `_run_write` dispatcher with uniform lock/validation error handling (exit 1) and argument validation (exit 2).
+- **Upgrade**: Requires `cquarry>=1.5`.
+
 # 3.18.0 (2026-08-26)
 - **Feature**: `--show-author-details` — opt-in enrichment for `--catalog`, `--all-wings`, `--export`, and structured `--search` output. Catalog lines gain a `{sort; link}` segment and JSON/CSV exports gain `author_sorts`/`author_links` fields, sourced from cquarry ≥1.4's entity secondary columns (each author's true sort key and author-page URL).
 - **Upgrade**: `--search` now resolves custom grouped-search terms (`GroupName:query`, from Calibre's `grouped_search_terms` preference, with upstream union/false-inversion semantics) and the new `annotations:` location (full-text over e-reader highlights) — both inherited automatically via cquarry 1.4's engine; no flags needed.
