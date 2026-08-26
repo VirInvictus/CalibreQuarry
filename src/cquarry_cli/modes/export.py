@@ -16,6 +16,7 @@ _CSV_FIELDS = [
     "series",
     "series_index",
     "formats",
+    "pages",
     "rating",
     "publisher",
     "languages",
@@ -60,6 +61,7 @@ def _book_to_dict(b, custom_data, show_custom) -> dict:
         "series": b["series"],
         "series_index": b["series_index"],
         "formats": b["formats"],
+        "pages": b.get("pages"),
         "rating": calibre_rating_to_stars(b["rating"]),
         "publisher": b["publisher"],
         "languages": b["languages"],
@@ -100,6 +102,7 @@ def _serialize(books, stream, fmt, custom_data, show_custom) -> bool:
                 if b["series_index"] is not None
                 else "",
                 "formats": ", ".join(b["formats"]),
+                "pages": b.get("pages") if b.get("pages") is not None else "",
                 "rating": stars if stars is not None else "",
                 "publisher": b["publisher"] or "",
                 "languages": ", ".join(b["languages"]),
@@ -119,6 +122,8 @@ def _serialize(books, stream, fmt, custom_data, show_custom) -> bool:
             if b["series"]:
                 idx = f" #{b['series_index']}" if b["series_index"] is not None else ""
                 line.append(f"({b['series']}{idx})")
+            if b.get("pages"):
+                line.append(f"{b['pages']}p")
             if b["tags"]:
                 line.append(f"[{', '.join(b['tags'])}]")
             stars = calibre_rating_to_stars(b["rating"])

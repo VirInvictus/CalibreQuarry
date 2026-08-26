@@ -85,6 +85,11 @@ def write_catalog(
         )
         if wing:
             header += f" [{wing}]"
+        # Library provenance: the identity UUID survives moves/restores, so a
+        # catalog can always be traced back to its source library (cquarry 1.3).
+        lib_uuid = db.get_library_uuid()
+        if lib_uuid:
+            header += f" — library {lib_uuid}"
         f.write(header + "\n")
         f.write("=" * len(header) + "\n\n")
 

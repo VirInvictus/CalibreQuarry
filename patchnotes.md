@@ -1,3 +1,9 @@
+# 3.17.0 (2026-08-26)
+- **Feature**: Page counts flow through exports — `--export` JSON gains a `pages` key per book, CSV a `pages` column, and the AI format a `<N>p` segment — sourced from Calibre's native `books_pages_link` table via cquarry ≥1.3.
+- **Feature**: Library provenance stamping — text catalogs (`--catalog`, `--all-wings`) carry the library's identity UUID in their header line, and `--audit`'s summary names it, so any output can be traced back to its source library after moves/restores (cquarry `get_library_uuid()`).
+- **Upgrade**: The audit's cover checks now resolve through cquarry's `get_cover_path()` (canonical `cover.jpg`/`cover.png` layout logic) instead of hand-built paths.
+- **Upgrade**: Requires `cquarry>=1.3`.
+
 # 3.16.0 (2026-08-26)
 - **Feature**: First write flow — `--set-title BOOK_ID TITLE` renames a book through cquarry's separate `WritableCalibreDB` module (trigger-safe: registers Calibre's `title_sort`/`uuid4` SQL functions, refreshes the sort key, bumps `last_modified`). Every mutation also records the book id in Calibre's `metadata_dirtied` queue (requires cquarry 1.2), which is what upstream consumes to regenerate the book's sidecar `.opf` and re-push metadata to wireless readers on its next startup — external edits finally propagate. Requires closing Calibre first; lock contention fails cleanly with exit code 1.
 - **Feature**: `--audit` output now includes a "Pending OPF sync" section listing the books queued in `metadata_dirtied` (via cquarry's read-only `get_dirtied_books()`), so you can see exactly what Calibre will resync next time it starts. Absent when the queue is empty.

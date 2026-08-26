@@ -22,7 +22,6 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
     issues: list[dict[str, str]] = []
 
     DEPRECATED_FORMATS = {"MOBI", "LIT", "LRF", "DJVU", "PDB", "AZW"}
-    db_dir = os.path.dirname(db.db_path)
 
     title_author_groups = defaultdict(list)
 
@@ -45,12 +44,10 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         if not b["has_cover"]:
             problems.append("no_cover")
         elif b["path"]:
-            # Calibre writes cover.jpg, but tolerate a cover.png too.
-            cover_path = os.path.join(db_dir, b["path"], "cover.jpg")
-            if not os.path.exists(cover_path):
-                png = os.path.join(db_dir, b["path"], "cover.png")
-                cover_path = png if os.path.exists(png) else cover_path
-            if os.path.exists(cover_path):
+            # Canonical cover resolution via cquarry 1.3 (cover.jpg with a
+            # cover.png fallback, verified on disk).
+            cover_path = db.get_cover_path(b["id"])
+            if cover_path:
                 size = get_image_size(cover_path)
                 if size:
                     w, h = size
@@ -124,7 +121,9 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
             for problem in i["issues"].split(", "):
                 issue_counts[problem] += 1
 
-        print(f"Audited {len(books)} books, {len(all_series)} series.")
+        lib_uuid = db.get_library_uuid()
+        provenance = f" (library {lib_uuid})" if lib_uuid else ""
+        print(f"Audited {len(books)} books, {len(all_series)} series.{provenance}")
 
         issue_str = f"{len(issues)} issues"
         if len(issues) > 0:
