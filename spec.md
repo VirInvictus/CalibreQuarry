@@ -110,7 +110,7 @@ The path is saved to config on first successful resolution.
 ## 4. What CalibreQuarry Is Not
 
 - **Not a Calibre replacement.** It reads the database — it does not manage it.
-- **Not an editor.** It never writes to `metadata.db`.
+- **Read-only by default; writes are explicit, opt-in verbs only.** Every read mode (`--catalog`, `--stats`, `--search`, `--export`, …) opens `metadata.db` strictly `mode=ro`. The only write paths are the explicit `--set-*` / `--remove-book` verbs, which route through cquarry's separate `WritableCalibreDB` module and require Calibre to be closed. Nothing in the read path can ever mutate the database.
 - **Not a converter.** It does not touch book files themselves.
 - **Not a server.** It has no web interface and no network access.
 
