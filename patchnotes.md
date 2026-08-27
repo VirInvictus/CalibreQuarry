@@ -1,3 +1,17 @@
+# 3.20.0 (2026-08-26)
+- **Upgrade**: `--search` inherits cquarry 1.6's `@Name:query` user-category location — Calibre's
+  `get_user_category_matches` parity (exact member matching per member location, `@Name:.query`
+  for subcategories, `false` inversion, upstream's `@...:` lexer word rule so spaced category
+  names work). No flags needed; unknown `@Names` match nothing instead of degrading to an
+  `all:` text sweep.
+- **Upgrade**: Inherited v1.6 read-side completeness — `get_book()` rows are now
+  shape-identical to `get_all_books()` rows (both carry `uuid`, `identifiers`, `size`),
+  `languages` follow `books_languages_link.item_order` like Calibre, `get_entities()` gained a
+  `ratings` kind, and `get_feeds()` / `get_annotations_dirtied_books()` /
+  `get_tag_browser_counts()` (Calibre's own `tag_browser_*` sidebar rollups with `avg_rating`)
+  are available for future verbs.
+- **Upgrade**: Requires `cquarry>=1.6`.
+
 # 3.19.0 (2026-08-26)
 - **Feature**: Write-verb surface completed on cquarry ≥1.5's expanded module — `--set-authors ID "A; B"` (semicolon-separated; author_sort recomputed), `--set-rating ID STARS` (0–5), `--set-comments` / `--clear-comments`, `--set-column ID #LABEL VALUE` / `--clear-column` (layout auto-detected, enumerations validated against configured values, non-editable columns refused), and `--remove-book ID [--confirm-remove]` (dry-run by default printing title+formats; irreversible with the flag). All verbs queue OPF regeneration via `metadata_dirtied`.
 - **Feature**: `--format-stats` prints per-format book counts and total bytes (`get_format_stats()`).
