@@ -101,7 +101,7 @@ PYTHONPATH=src python -m cquarry_cli --stats
 
 ## Requirements
 
-Python 3.14+. Requires `cquarry` and `tqdm` (`sqlite3`, `json`, `csv`, `argparse`, `curses`, `re`, `unicodedata`, `datetime`).
+Python 3.14+. Requires `cquarry`, `vir-tui` (shared TUI primitives, tracked at `@main`), and `tqdm` (`sqlite3`, `json`, `csv`, `argparse`, `curses`, `re`, `unicodedata`, `datetime`).
 
 (3.14 is the tested floor, matching the development environment. The code does not lean on bleeding-edge language features, so it is likely fine on somewhat older interpreters, but only 3.14+ is supported.)
 

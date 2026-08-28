@@ -1,3 +1,8 @@
+# 3.22.0 (2026-08-28)
+- **Upgrade**: The TUI now delegates to vir-tui 2.2.0's Phase-3 primitives — `interactive_session()` owns the curses session lifecycle (open, degrade-to-text, close, KeyboardInterrupt → exit 130), `prompt_float()` replaces the hand-rolled rating loop (blank now means 0/clear rather than cancel), `prompt_path()` powers the first-run and change-database flows (existence loop with a notice built in; the change-database cancel path keeps the "database unchanged" behavior), `confirm(danger=True)` gates the Remove Book flow, and report footers use the public `out_note()`.
+- **Chore**: Dropped the private `_USE_CURSES`/`_SCREEN` module globals in favor of vir-tui's public `text_mode()`.
+- **Dependency**: `vir-tui` tracks `@main`; requires 2.2.0.
+
 # 3.21.0 (2026-08-27)
 - **Feature**: `--book BOOK_ID` — full single-book dossier composing cquarry's read APIs: identifiers, per-format files with catalogued sizes and on-disk paths (missing files flagged), cover resolution, comments rendered through `strip_html`, custom columns (via the search-engine `field()` hook), e-reader annotations, per-device reading positions, plugin data, and conversion overrides. Unknown ids exit 1 cleanly.
 - **Feature**: `--entities {authors,series,publishers,tags,languages,ratings}` — cquarry's `get_entities()` listing with per-entity book counts and the sort/link secondary columns for authors/series/publishers (ratings render as stars).

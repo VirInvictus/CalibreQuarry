@@ -6,12 +6,16 @@ from vir_tui import (
     CancelledError,
     ask,
     ask_yn,
-    close_screen,
-    open_screen,
+    confirm,
+    interactive_session,
+    out_note,
+    prompt_float,
     prompt_int,
     prompt_out,
+    prompt_path,
     reset_terminal,
     run_with_capture,
+    text_mode,
     tui_select,
 )
 
@@ -42,24 +46,10 @@ from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
 
-_SCREEN = None
-_USE_CURSES = True
-
 
 def _notify(msg: str) -> None:
     print(msg)
     ask("Press Enter to continue...", "")
-
-
-def _prompt_path(prompt: str, default: str = "") -> str | None:
-    while True:
-        try:
-            ans = ask(prompt, default)
-        except CancelledError:
-            return None
-        if not ans:
-            continue
-        return ans
 
 
 def _resolve_db_input(raw_path: str) -> str | None:
@@ -73,10 +63,6 @@ def _resolve_db_input(raw_path: str) -> str | None:
             if path.endswith("metadata.db"):
                 return path
     return None
-
-
-def _out_note(path: str) -> str:
-    return f"Output written to {os.path.abspath(path)}"
 
 
 def _select_main() -> tuple | str | None:
@@ -161,51 +147,25 @@ def _resolve_db_for_tui() -> str | None:
             set_db_path(path)
             return path
     while True:
-        raw_path = _prompt_path("First run: path to Calibre metadata.db")
-        if raw_path is None:
+        try:
+            raw_path = prompt_path(
+                "First run: path to Calibre metadata.db (or its library folder)"
+            )
+        except CancelledError:
             return None
         resolved = _resolve_db_input(raw_path)
         if resolved is not None:
             set_db_path(resolved)
             return resolved
-        _notify(f"Not found: {raw_path}")
+        _notify(f"Not a Calibre database: {raw_path}")
 
 
 def interactive_menu() -> int:
-    global _SCREEN, _USE_CURSES
-    stdscr = open_screen() if _USE_CURSES else None
-    if _USE_CURSES and stdscr is None:
-        _USE_CURSES = False
-    _SCREEN = stdscr
     try:
-        return _menu_session()
+        with interactive_session():
+            return _menu_session()
     except KeyboardInterrupt:
-        if _SCREEN is None:
-            print()
         return 130
-    finally:
-        if stdscr is not None:
-            close_screen()
-
-
-def _ask_rating() -> float | None:
-    """Prompt until a valid 0-5 rating is entered. None on cancel."""
-    while True:
-        try:
-            raw = ask("Rating 0-5 (halves ok, blank cancels)", "")
-        except CancelledError:
-            return None
-        if not raw.strip():
-            return None
-        try:
-            stars = float(raw)
-        except ValueError:
-            _notify(f"Not a number: {raw!r}")
-            continue
-        if not 0 <= stars <= 5:
-            _notify("Rating must be within 0-5.")
-            continue
-        return stars
 
 
 def _edit_book_session(db_path: str) -> None:
@@ -260,12 +220,14 @@ def _edit_book_session(db_path: str) -> None:
                     lambda p=parsed: writeops.op_set_authors(db_path, bid, p),
                 )
         elif idx == 2:
-            stars = _ask_rating()
-            if stars is not None:
-                run_with_capture(
-                    "Set Rating",
-                    lambda s=stars: writeops.op_set_rating(db_path, bid, s),
-                )
+            try:
+                stars = prompt_float("Rating 0-5 (halves ok; 0 clears)", 0.0, 0.0, 5.0)
+            except CancelledError:
+                continue
+            run_with_capture(
+                "Set Rating",
+                lambda s=stars: writeops.op_set_rating(db_path, bid, s),
+            )
         elif idx == 3:
             tag = ask("Tag to add", "")
             if tag:
@@ -405,8 +367,8 @@ def _remove_book_session(db_path: str) -> None:
         "Dry Run",
         lambda b=bid: writeops.op_remove_book(db_path, b, confirm=False),
     )
-    if ask_yn(f"Permanently delete book {bid}? This cannot be undone!"):
-        if ask_yn("Really delete? (y/N)"):
+    if confirm(f"Permanently delete book {bid}? This cannot be undone", danger=True):
+        if confirm("Really delete"):
             run_with_capture(
                 "Remove Book",
                 lambda b=bid: writeops.op_remove_book(db_path, b, confirm=True),
@@ -429,20 +391,21 @@ def _menu_session() -> int:
         if result == "fallback":
             continue
         if result == "invalid":
-            if not _USE_CURSES:
+            if text_mode():
                 print("  Invalid selection.")
             continue
         if result is None or result == _SEL_QUIT:
             return 0
         if result == _SEL_CHANGE_DB:
-            new_path = _prompt_path(f"Change database (current: {db_path})", db_path)
-            if new_path is None:
+            try:
+                new_path = prompt_path(f"Change database (current: {db_path})", db_path)
+            except CancelledError:
                 continue
             resolved = _resolve_db_input(new_path)
             if resolved is not None:
                 set_db_path(resolved)
             else:
-                _notify(f"Not found: {new_path} (database unchanged)")
+                _notify(f"Not a Calibre database: {new_path} (database unchanged)")
             continue
         try:
             with CalibreDB(db_path) as db:
@@ -460,7 +423,7 @@ def _menu_session() -> int:
                                 db, o, wing=w, primary_only=p, show_tags=t, show_id=i
                             )
                         ),
-                        footer=_out_note(output),
+                        footer=out_note(output),
                     )
                 elif result == (0, 1):
                     outdir = prompt_out("Output directory", "catalogs")
@@ -484,7 +447,7 @@ def _menu_session() -> int:
                     run_with_capture(
                         "Audit",
                         lambda o=output: run_audit(db, o),
-                        footer=_out_note(output),
+                        footer=out_note(output),
                     )
                 elif result == (0, 4):
                     query = ask("Search query (Calibre format)", "")
@@ -494,7 +457,7 @@ def _menu_session() -> int:
                         run_with_capture(
                             "Search Results",
                             lambda q=query, o=output: run_search_export(db, q, o),
-                            footer=_out_note(output),
+                            footer=out_note(output),
                         )
                 elif result == (1, 0):
                     reset_terminal()
@@ -566,7 +529,7 @@ def _menu_session() -> int:
                     run_with_capture(
                         "Export",
                         lambda o=output, f=fmt: run_export(db, o, f),
-                        footer=_out_note(output),
+                        footer=out_note(output),
                     )
                 elif result == (3, 1):
                     bid = prompt_int("Book ID (0 for the whole library)", 0)
@@ -577,7 +540,7 @@ def _menu_session() -> int:
                         lambda b=bid, o=output: run_annotations_export(
                             db, b if b else None, o
                         ),
-                        footer=_out_note(output),
+                        footer=out_note(output),
                     )
                 elif result == (3, 2):
                     outdir = prompt_out("Output directory", "librarything")
