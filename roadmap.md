@@ -236,6 +236,13 @@ closes a version/docs desync the repo's own tests currently cannot see.*
       parse the top `# X.Y.Z` heading of patchnotes.md and pin it equal to
       `cquarry_cli.VERSION`, so the patchnotes-vs-code desync class is caught by
       CI instead of by the next agent to notice.
+- [ ] **Skill sync**: phase-1-import (Brandon's library,
+      `~/docs/Calibre Library/.claude/skills/`) should name `screen_duplicate.py`
+      in its duplicate-screen step and `stamp_pdf.py` in its pre-stamp section
+      once shipped. **Floor, not ceiling**: any behavior-affecting discovery made
+      while building these scripts — a flag that landed differently, a failure
+      mode the tests surfaced — gets documented in the affected skill in the same
+      release, even when this phase didn't predict it.
 
 Non-goals: no EPUB pre-stamping (Calibre reads EPUB OPF natively; the skill forbids
 it); no in-`~/Downloads` backups or writes beyond the stamped file itself; no
@@ -270,7 +277,15 @@ it batch-shaped and closes the two write gaps the batch exposed.*
 - [ ] **Skill sync**: the phase-3-import skill in Brandon's library
   (`~/docs/Calibre Library/.claude/skills/`) should name the `--book` batch
   form in its "read EVERY field" step, and soften its LoC-sequencing warning
-  once the guard fix above stops the false positives.
+  once the guard fix above stops the false positives. **This item is a floor,
+  not a ceiling**: any behavior-affecting discovery made while building — a
+  flag that landed differently, a default that changed, a new failure mode the
+  tests surfaced — gets documented in the affected skills in the same release,
+  even when this phase didn't predict it.
+- [ ] **`fetch_library_codes.py` misses worklist**: when the hit rate is under
+  100%, emit a worklist file (id, title, identifiers) of the misses so the
+  skill's mandatory manual-research pass starts from a file instead of terminal
+  scrollback (2026-08-27: 3 misses were tracked by hand).
 
 Non-goals: no `--get-id` alias (the verb is `--book` and it shipped in 3.22.0);
 no new read APIs (they belong to cquarry per the frontend-only split).
