@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "calibrequarry"
-version = "3.19.0"
+version = "3.21.0"
 description = "Calibre library toolkit: catalog, stats, audit, export"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -15,7 +15,10 @@ authors = [
 dependencies = [
   "tqdm",
    "vir-tui @ git+https://github.com/VirInvictus/vir-tui.git@main",
-  "cquarry @ git+https://github.com/VirInvictus/cquarry.git",]
+  # Front-end of cquarry: always track its main branch so every install
+  # (pip, uv without a lock, CI) picks up the newest cquarry. Never pin a
+  # tag or commit here, and keep uv.lock out of the repo (see .gitignore).
+  "cquarry @ git+https://github.com/VirInvictus/cquarry.git@main",]
 
 [project.scripts]
 cquarry = "cquarry_cli.cli:main"

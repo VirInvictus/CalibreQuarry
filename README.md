@@ -54,7 +54,13 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
 | **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
 | **Set title** | `--set-title BOOK_ID TITLE` | Rename a book through cquarry's opt-in write module (trigger-safe; refreshes the sort key and queues an OPF regeneration). Close Calibre first |
-| **Write verbs** | `--set-authors`, `--set-rating`, `--set-comments` / `--clear-comments`, `--set-column` / `--clear-column`, `--remove-book [--confirm-remove]` | Full opt-in write surface via cquarry ≥1.5: authors (author_sort recomputed), ratings (0–5), comments HTML, generic custom columns (enum-validated, non-editable refused) and guarded book removal (dry-run by default) |
+| **Write verbs** | `--set-authors`, `--set-rating`, `--set-comments` / `--clear-comments`, `--set-column` / `--clear-column`, `--remove-book [--confirm-remove]` | Core opt-in write surface via cquarry ≥1.5: authors (author_sort recomputed), ratings (0–5), comments HTML, generic custom columns (enum-validated, non-editable refused) and guarded book removal (dry-run by default) |
+| **Write verbs, expanded** | `--add-tag` / `--remove-tag`, `--set-identifier` / `--clear-identifier`, `--set-series` (+ `--series-index`) / `--clear-series`, `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages`, `--add-format` / `--remove-format`, `--set-cover` | Full coverage of cquarry ≥1.5's write module: tags (orphaned rows pruned), identifier EAV upserts, series assignment with index, publisher, language lists (canonicalized `English` → `eng`), format registration/removal, and the has-cover flag. All queue OPF regeneration via `metadata_dirtied` |
+| **Book detail** | `--book BOOK_ID` | Full dossier for one book: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides |
+| **Entities** | `--entities KIND` | List `authors`/`series`/`publishers`/`tags`/`languages`/`ratings` with book counts; authors/series/publishers carry their sort and link columns |
+| **Reading progress** | `--reading-progress` | Every recorded reading position across devices with progress bars, newest first |
+| **Custom columns** | `--columns` | Custom-column schema: label, search location, datatype, editability, enum values |
+| **Library info** | `--info` | Library dossier: identity UUID, wings with their defining expressions, saved searches, `@Name` user categories, grouped search terms, news feeds, conversion overrides, and the sync queues Calibre will consume |
 | **Format stats** | `--format-stats` | Per-format book counts and total catalogued bytes |
 | **Search** | `--search QUERY` | Books matching a Calibre search expression; prints to stdout, or to a file with `--output`. Grouped-search terms and `annotations:` work too |
 | **Wings** | `--wings` | List all virtual libraries with book counts |
@@ -63,7 +69,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 
 Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column, `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search`, `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
 
-Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager, or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions.
+Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager, or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions. Its menu covers every read mode above plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats — all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
 
 ## Installation
 
@@ -72,6 +78,12 @@ pip install .
 # or
 pipx install .
 ```
+
+`cquarry` (the library) and `vir-tui` are git dependencies tracked at `@main` —
+every fresh install picks up the newest upstream, never a pinned release. There
+is deliberately no committed `uv.lock`: `uv sync` re-resolves the latest on
+every run. If you want a frozen environment anyway, generate a lock locally
+(`uv lock`) and keep it out of version control.
 
 This gives you the `cquarry` command:
 
@@ -400,11 +412,27 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 ```
 usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
                --analytics {author,pace,tags,overlap} | --audit |
-               --recent [RECENT] | --series | --export | --exportlt |
-               --search QUERY | --wings | --tags] [--db DB] [--wing WING]
-               [--output OUTPUT] [--outdir OUTDIR] [--format {json,csv,ai}]
-               [--primary-only] [--show-tags] [--show-id]
-               [--show-custom COL_NAME] [--quiet]
+               --recent [RECENT] | --series | --export | --search QUERY |
+               --wings | --tags | --book BOOK_ID | --entities KIND |
+               --reading-progress | --columns | --info] [--exportlt]
+               [--export-annotations] [--id BOOK_ID] [--plugin-data NAME]
+               [--db DB] [--wing WING] [--output OUTPUT] [--outdir OUTDIR]
+               [--format {json,csv,ai}] [--primary-only] [--show-tags]
+               [--show-id] [--show-custom COL_NAME] [--show-author-details]
+               [--quiet] [--set-title BOOK_ID TITLE]
+               [--set-authors BOOK_ID NAMES] [--set-rating BOOK_ID STARS]
+               [--set-comments BOOK_ID HTML] [--clear-comments BOOK_ID]
+               [--set-column BOOK_ID LABEL VALUE]
+               [--clear-column BOOK_ID LABEL] [--add-tag BOOK_ID TAG]
+               [--remove-tag BOOK_ID TAG]
+               [--set-identifier BOOK_ID TYPE VALUE]
+               [--clear-identifier BOOK_ID TYPE] [--set-series BOOK_ID NAME]
+               [--series-index NUM] [--clear-series BOOK_ID]
+               [--set-publisher BOOK_ID NAME] [--clear-publisher BOOK_ID]
+               [--set-languages BOOK_ID LANGS] [--clear-languages BOOK_ID]
+               [--add-format BOOK_ID FORMAT NAME SIZE]
+               [--remove-format BOOK_ID FORMAT] [--set-cover BOOK_ID YES/NO]
+               [--remove-book BOOK_ID] [--confirm-remove] [--format-stats]
 
 Calibre library toolkit: catalog, stats, audit, export
 
@@ -420,16 +448,37 @@ options:
   --recent [RECENT]     Show N most recently added books (default: 20)
   --series              List all series with completeness and gap detection
   --export              Export library to JSON, CSV, or AI format
-  --exportlt            Export to LibraryThing CSV format (can be used alone or with --search)
   --search QUERY        Show/export books matching a Calibre search expression
                         (prints to stdout unless --output is given; empty
-                        query = whole library)
+                        query = whole library). Supports custom grouped-search
+                        terms (GroupName:query) and annotations: full-text
+                        over e-reader highlights
   --wings               List all virtual library wings
   --tags                Dump every tag with its book count
+  --book BOOK_ID        Show the full record for one book: identifiers, format
+                        files, cover, comments, custom columns, annotations,
+                        reading progress
+  --entities KIND       List an entity class with book counts
+                        (authors/series/publishers include sort and link
+                        columns)
+  --reading-progress    Show per-device reading positions with progress bars,
+                        newest first
+  --columns             List custom columns: type, editability, enum values
+  --info                Library dossier: identity, wings + expressions, saved
+                        searches, @Name user categories, grouped search terms,
+                        feeds, sync queues
+  --exportlt            Export to LibraryThing CSV format (can be used alone
+                        or with --search)
+  --export-annotations  Dump e-reader highlights/bookmarks/notes as JSON
+                        (optionally scoped with --id)
+  --id BOOK_ID          Scope --export-annotations to a single Calibre book id
+  --plugin-data NAME    With --catalog or --search: append a books_plugin_data
+                        value (e.g. goodreads_id, wordcount) to each book line
   --db DB               Path to Calibre metadata.db (auto-detected if omitted)
   --wing WING           Filter to a specific virtual library wing
   --output OUTPUT       Output file path
-  --outdir OUTDIR       Output directory for --all-wings (default: current dir)
+  --outdir OUTDIR       Output directory for --all-wings (default: current
+                        dir)
   --format {json,csv,ai}
                         Output format. --export defaults to json; --search
                         defaults to a plain-text listing unless a format is
@@ -440,7 +489,65 @@ options:
   --show-id             Prefix each book with its Calibre ID for scripting
   --show-custom COL_NAME
                         Load and display a specific custom column
+  --show-author-details
+                        With --catalog/--all-wings/--export/--search: append
+                        each author's true sort key and link URL (from
+                        cquarry's entity secondary columns) to the output
   --quiet               Minimize output
+
+write verbs (Calibre must be closed):
+  --set-title BOOK_ID TITLE
+                        Rename a book
+  --set-authors BOOK_ID NAMES
+                        Replace authors ("Name One; Name Two"; ; = separator)
+  --set-rating BOOK_ID STARS
+                        Set rating (0-5, halves allowed)
+  --set-comments BOOK_ID HTML
+                        Set the comments/description HTML
+  --clear-comments BOOK_ID
+                        Clear the comments/description
+  --set-column BOOK_ID LABEL VALUE
+                        Write a custom-column value (#label; enumerations are
+                        validated against the column's configured values)
+  --clear-column BOOK_ID LABEL
+                        Clear a custom-column value
+  --add-tag BOOK_ID TAG
+                        Attach a tag (repeat the flag for several)
+  --remove-tag BOOK_ID TAG
+                        Detach a tag (repeat the flag for several)
+  --set-identifier BOOK_ID TYPE VALUE
+                        Upsert an identifier (isbn, goodreads, ...); empty
+                        VALUE deletes it
+  --clear-identifier BOOK_ID TYPE
+                        Delete one identifier type
+  --set-series BOOK_ID NAME
+                        Assign the series (index 1.0 unless --series-index; ""
+                        clears)
+  --series-index NUM    With --set-series: the book's number in the series
+  --clear-series BOOK_ID
+                        Remove the book from its series
+  --set-publisher BOOK_ID NAME
+                        Replace the publisher
+  --clear-publisher BOOK_ID
+                        Remove the publisher
+  --set-languages BOOK_ID LANGS
+                        Replace languages ("en, fr" — English names or ISO
+                        codes)
+  --clear-languages BOOK_ID
+                        Remove all languages from the book
+  --add-format BOOK_ID FORMAT NAME SIZE
+                        Register a format row (metadata only — the file must
+                        already sit in the book's folder as NAME.format)
+  --remove-format BOOK_ID FORMAT
+                        Drop a format row (leaves the file on disk untouched)
+  --set-cover BOOK_ID YES/NO
+                        Toggle the catalogued has_cover flag
+  --remove-book BOOK_ID
+                        Permanently remove a book (dry run unless --confirm-
+                        remove)
+  --confirm-remove      With --remove-book: actually delete instead of dry-
+                        running
+  --format-stats        Show per-format book counts and total bytes
 ```
 
 ## Companion scripts

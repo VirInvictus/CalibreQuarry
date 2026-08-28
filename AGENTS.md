@@ -1,8 +1,4 @@
-<!-- .clinerules for CalibreQuarry — converted from CLAUDE.md on 2026-08-25 during the Cline migration. -->
-<!-- The original CLAUDE.md is kept untouched alongside this file (provenance + deep reference). -->
-<!-- Claude Code machinery was neutralized: self-references point at this file; global rules are ~/.clinerules/. -->
-
-# .clinerules (CalibreQuarry)
+# AGENTS.md (CalibreQuarry)
 
 Per-project guidance. Overrides the global file where they conflict.
 
@@ -11,9 +7,11 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 ## Programmer-facing contract notes (cquarry >= 1.6)
 - `db.get_all_books()` rows expose `authors`, `tags`, `languages`, and `formats` as native `list[str]`. Never `.split(",")` them; comma-containing author/tag names are preserved by the link-table hydration. `normalize_author_display()` accepts both the legacy joined string and the list form.
-- Every book row also carries `size` (total `data.uncompressed_size` bytes, may be None).
+- Every book row also carries `size` (total `data.uncompressed_size` bytes, may be None) and, since cquarry >= 1.3/1.4, `pages` (native `books_pages_link`), `author_sorts`, and `author_links`.
 - `search()` raises `ParseException` for unknown virtual libraries or saved searches; only `resolve_vl()` / `resolve_saved_search()` raise `ValueError` (with an available-names message).
 - Raw comments payloads are HTML; run them through `cquarry.helpers.strip_html()` before terminal output.
+- **Write verbs** (`--set-*`, `--add-tag`, `--remove-tag`, `--clear-*`, `--remove-book`, ...) are opt-in and funnel through `run_write()` in `cquarry_cli/writeops.py` — dispatched by `cli.py` for flags and called directly by `tui.py` for menu flows — which owns the WritableCalibreDB lifecycle and error-to-exit-code mapping (argument problems exit 2, lock/write errors exit 1). Read modes never import `cquarry.write` or `writeops`; keep it that way.
+- **Dependency policy**: cquarry and vir-tui are tracked at `@main` and must never be pinned to a tag or commit, and `uv.lock` stays out of the repo — installs always pull the latest.
 
 ## Hard constraints
 - **Frontend Only.** The core database logic and search evaluation are delegated to the external `cquarry` shared library. Do not add database reads or search parsing logic here; contribute them to `cquarry` instead.

@@ -1,3 +1,14 @@
+# 3.21.0 (2026-08-27)
+- **Feature**: `--book BOOK_ID` — full single-book dossier composing cquarry's read APIs: identifiers, per-format files with catalogued sizes and on-disk paths (missing files flagged), cover resolution, comments rendered through `strip_html`, custom columns (via the search-engine `field()` hook), e-reader annotations, per-device reading positions, plugin data, and conversion overrides. Unknown ids exit 1 cleanly.
+- **Feature**: `--entities {authors,series,publishers,tags,languages,ratings}` — cquarry's `get_entities()` listing with per-entity book counts and the sort/link secondary columns for authors/series/publishers (ratings render as stars).
+- **Feature**: `--reading-progress` — every `last_read_positions` row across devices with progress-fraction bars, newest first.
+- **Feature**: `--columns` — the custom-column schema (label, datatype, editability, normalized flag, enum values, composite templates) via `get_custom_columns()`.
+- **Feature**: `--info` — library dossier: identity UUID, virtual libraries with their defining expressions, saved searches, `@Name` user categories, grouped search terms, news feeds, conversion overrides, `metadata_dirtied`/`annotations_dirtied` queue depth, and tag-browser layout state.
+- **Feature**: Write-verb expansion completing cquarry ≥1.5's write module — `--add-tag` / `--remove-tag` (repeatable; orphaned entity rows pruned), `--set-identifier` / `--clear-identifier` (EAV upsert, empty VALUE deletes), `--set-series` + `--series-index` / `--clear-series` (clear nulls `books.series_index` and prunes), `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages` (canonicalized through Calibre's language map), `--add-format` / `--remove-format` (metadata-only `data` rows), and `--set-cover` (has-cover flag). All funnel through the shared dispatcher: argument problems exit 2 before the DB opens, lock/validation errors exit 1.
+- **Upgrade**: All write plumbing (previously inline in `cli.py`) moved to `cquarry_cli/writeops.py` so the TUI reuses the exact same executors; the TUI gains Display/Info entries, Annotations + LibraryThing exports, an *Edit Book* submenu covering every write verb, and a dry-run-first *Remove Book* flow.
+- **Upgrade**: Dependency policy — cquarry (and vir-tui) now tracked explicitly at `@main`; the committed `uv.lock` (which pinned cquarry 1.0.0 at an old commit) is removed and gitignored so every `pip`/`uv`/CI install pulls the latest cquarry.
+- **Upgrade**: Requires the latest cquarry (1.6.x).
+
 # 3.20.0 (2026-08-26)
 - **Upgrade**: `--search` inherits cquarry 1.6's `@Name:query` user-category location — Calibre's
   `get_user_category_matches` parity (exact member matching per member location, `@Name:.query`

@@ -2,6 +2,10 @@
 DB_PATH="/home/bdkl/docs/Calibre Library/metadata.db"
 export PYTHONPATH=src
 
+# A real book id for the --book smoke test, resolved from the library itself.
+python -m cquarry_cli --search "" --format json --db "$DB_PATH" --output /tmp/test_ids.json
+BID=$(python -c "import json;print(json.load(open('/tmp/test_ids.json'))[0]['id'])")
+
 commands=(
   "python -m cquarry_cli --catalog --db \"$DB_PATH\" --output /tmp/test_catalog.txt"
   "python -m cquarry_cli --all-wings --db \"$DB_PATH\" --outdir /tmp/test_all_wings"
@@ -11,6 +15,13 @@ commands=(
   "python -m cquarry_cli --series --db \"$DB_PATH\" > /tmp/test_series.txt"
   "python -m cquarry_cli --wings --db \"$DB_PATH\" > /tmp/test_wings.txt"
   "python -m cquarry_cli --tags --db \"$DB_PATH\" > /tmp/test_tags.txt"
+  "python -m cquarry_cli --book \"$BID\" --db \"$DB_PATH\" > /tmp/test_book.txt"
+  "python -m cquarry_cli --info --db \"$DB_PATH\" > /tmp/test_info.txt"
+  "python -m cquarry_cli --columns --db \"$DB_PATH\" > /tmp/test_columns.txt"
+  "python -m cquarry_cli --entities authors --db \"$DB_PATH\" > /tmp/test_entities.txt"
+  "python -m cquarry_cli --entities ratings --db \"$DB_PATH\" >> /tmp/test_entities.txt"
+  "python -m cquarry_cli --reading-progress --db \"$DB_PATH\" > /tmp/test_progress.txt"
+  "python -m cquarry_cli --format-stats --db \"$DB_PATH\" > /tmp/test_format_stats.txt"
   "python -m cquarry_cli --export --format json --db \"$DB_PATH\" --output /tmp/test_export.json"
   "python -m cquarry_cli --export --format csv --db \"$DB_PATH\" --output /tmp/test_export.csv"
   "python -m cquarry_cli --export --format ai --db \"$DB_PATH\" --output /tmp/test_export.ai"

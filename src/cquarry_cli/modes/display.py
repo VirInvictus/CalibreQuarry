@@ -1,6 +1,9 @@
 from cquarry.db import CalibreDB
 from cquarry.helpers import (
+    C_DIM,
+    C_TITLE,
     calibre_rating_to_stars,
+    color,
     detect_series_gaps,
     format_stars,
     normalize_author_display,
@@ -83,3 +86,85 @@ def show_wings(db: CalibreDB) -> None:
             print(f"  {name}: (error resolving: {e})")
 
     print(f"\n  Total library: {db.count_books()} books")
+
+
+def show_entities(db: CalibreDB, kind: str, *, quiet: bool = False) -> None:
+    """List an entity class with per-entity book counts.
+
+    Backed by cquarry's ``get_entities()``: authors/series/publishers carry
+    their sort and link secondary columns; ratings surface the half-star
+    integer as their name. Unknown kinds raise ValueError upstream.
+    """
+    rows = db.get_entities(kind)
+    if not rows:
+        print(f"No {kind} in this library.")
+        return
+
+    if not quiet:
+        print(color(f"=== {kind.title()} ({len(rows)}) ===", C_TITLE))
+        print()
+
+    def _display_name(row) -> str:
+        if kind == "ratings":
+            try:
+                stars = int(row["name"]) / 2
+            except TypeError, ValueError:
+                return row["name"]
+            return format_stars(stars).strip()
+        return row["name"] or "(unnamed)"
+
+    width = max(len(_display_name(r)) for r in rows)
+    total_links = 0
+    for row in rows:
+        total_links += row["count"]
+        line = f"  {_display_name(row):<{width}}  {row['count']:>4}"
+        extras = []
+        if kind in ("authors", "series", "publishers"):
+            if row.get("sort") and row["sort"] != row["name"]:
+                extras.append(f"sort: {row['sort']}")
+            if row.get("link"):
+                extras.append(row["link"])
+        if extras:
+            line += color("  · " + "  · ".join(extras), C_DIM)
+        print(line)
+
+    if not quiet:
+        print()
+        print(f"  {len(rows)} {kind}, {total_links} linked book-instances")
+
+
+def show_reading_progress(db: CalibreDB, *, quiet: bool = False) -> None:
+    """Show per-device reading positions, most recent first."""
+    positions = db.get_last_read_positions()
+    if not positions:
+        print("No recorded reading positions in this library.")
+        return
+
+    titles = {b["id"]: b for b in db.get_all_books()}
+    positions.sort(key=lambda r: r.get("epoch") or 0, reverse=True)
+
+    if not quiet:
+        print(color(f"=== Reading Progress ({len(positions)} positions) ===", C_TITLE))
+        print()
+
+    from datetime import datetime
+
+    for row in positions:
+        book = titles.get(row["book"])
+        if book:
+            author = normalize_author_display(book["authors"], primary_only=True)
+            title = book["title"]
+        else:
+            author, title = "", f"book {row['book']}"
+        frac = row.get("pos_frac")
+        if isinstance(frac, (int, float)):
+            pct = f"{frac * 100:5.1f}%"
+            bar = "█" * round(max(0.0, min(1.0, frac)) * 20)
+        else:
+            pct, bar = "    ?", ""
+        epoch = row.get("epoch")
+        when = f"[{datetime.fromtimestamp(epoch):%Y-%m-%d}] " if epoch else ""
+        who = row.get("device") or row.get("user") or "?"
+        fmt = row.get("format") or "?"
+        name = f"{author} — {title}" if author else title
+        print(f"  {when}{pct} |{bar:<20}| {name}  ({who}, {fmt})")

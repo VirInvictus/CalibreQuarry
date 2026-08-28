@@ -13,16 +13,25 @@ from cquarry_cli.modes.analytics import (
 )
 from cquarry_cli.modes.audit import run_audit
 from cquarry_cli.modes.catalog import write_all_wings, write_catalog
-from cquarry_cli.modes.display import show_recent, show_series, show_wings
+from cquarry_cli.modes.detail import show_book
+from cquarry_cli.modes.display import (
+    show_entities,
+    show_reading_progress,
+    show_recent,
+    show_series,
+    show_wings,
+)
 from cquarry_cli.modes.export import (
     run_annotations_export,
     run_export,
     run_search_export,
 )
+from cquarry_cli.modes.info import show_columns, show_info
 from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
 from cquarry_cli.tui import interactive_menu
+from cquarry_cli.writeops import dispatch_write
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +93,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     group.add_argument(
         "--tags", action="store_true", help="Dump every tag with its book count"
+    )
+    group.add_argument(
+        "--book",
+        dest="book",
+        type=int,
+        default=None,
+        metavar="BOOK_ID",
+        help="Show the full record for one book: identifiers, format files, "
+        "cover, comments, custom columns, annotations, reading progress",
+    )
+    group.add_argument(
+        "--entities",
+        dest="entities",
+        choices=["authors", "series", "publishers", "tags", "languages", "ratings"],
+        default=None,
+        metavar="KIND",
+        help="List an entity class with book counts (authors/series/publishers "
+        "include sort and link columns)",
+    )
+    group.add_argument(
+        "--reading-progress",
+        dest="reading_progress",
+        action="store_true",
+        help="Show per-device reading positions with progress bars, newest first",
+    )
+    group.add_argument(
+        "--columns",
+        dest="columns",
+        action="store_true",
+        help="List custom columns: type, editability, enum values",
+    )
+    group.add_argument(
+        "--info",
+        dest="info",
+        action="store_true",
+        help="Library dossier: identity, wings + expressions, saved searches, "
+        "@Name user categories, grouped search terms, feeds, sync queues",
     )
 
     p.add_argument(
@@ -175,7 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--quiet", action="store_true", help="Minimize output")
 
-    # --- Write verbs (opt-in; each goes through cquarry.write) ---
+    # --- Write verbs (opt-in; all funnel through writeops/cquarry.write) ---
     w = p.add_argument_group("write verbs (Calibre must be closed)")
     w.add_argument(
         "--set-title",
@@ -234,6 +280,118 @@ def build_parser() -> argparse.ArgumentParser:
         help="Clear a custom-column value",
     )
     w.add_argument(
+        "--add-tag",
+        dest="add_tag",
+        nargs=2,
+        metavar=("BOOK_ID", "TAG"),
+        action="append",
+        default=None,
+        help="Attach a tag (repeat the flag for several)",
+    )
+    w.add_argument(
+        "--remove-tag",
+        dest="remove_tag",
+        nargs=2,
+        metavar=("BOOK_ID", "TAG"),
+        action="append",
+        default=None,
+        help="Detach a tag (repeat the flag for several)",
+    )
+    w.add_argument(
+        "--set-identifier",
+        dest="set_identifier",
+        nargs=3,
+        metavar=("BOOK_ID", "TYPE", "VALUE"),
+        default=None,
+        help="Upsert an identifier (isbn, goodreads, ...); empty VALUE deletes it",
+    )
+    w.add_argument(
+        "--clear-identifier",
+        dest="clear_identifier",
+        nargs=2,
+        metavar=("BOOK_ID", "TYPE"),
+        default=None,
+        help="Delete one identifier type",
+    )
+    w.add_argument(
+        "--set-series",
+        dest="set_series",
+        nargs=2,
+        metavar=("BOOK_ID", "NAME"),
+        default=None,
+        help='Assign the series (index 1.0 unless --series-index; "" clears)',
+    )
+    w.add_argument(
+        "--series-index",
+        dest="series_index",
+        type=float,
+        default=None,
+        metavar="NUM",
+        help="With --set-series: the book's number in the series",
+    )
+    w.add_argument(
+        "--clear-series",
+        dest="clear_series",
+        metavar="BOOK_ID",
+        default=None,
+        help="Remove the book from its series",
+    )
+    w.add_argument(
+        "--set-publisher",
+        dest="set_publisher",
+        nargs=2,
+        metavar=("BOOK_ID", "NAME"),
+        default=None,
+        help="Replace the publisher",
+    )
+    w.add_argument(
+        "--clear-publisher",
+        dest="clear_publisher",
+        metavar="BOOK_ID",
+        default=None,
+        help="Remove the publisher",
+    )
+    w.add_argument(
+        "--set-languages",
+        dest="set_languages",
+        nargs=2,
+        metavar=("BOOK_ID", "LANGS"),
+        default=None,
+        help='Replace languages ("en, fr" — English names or ISO codes)',
+    )
+    w.add_argument(
+        "--clear-languages",
+        dest="clear_languages",
+        metavar="BOOK_ID",
+        default=None,
+        help="Remove all languages from the book",
+    )
+    w.add_argument(
+        "--add-format",
+        dest="add_format",
+        nargs=4,
+        metavar=("BOOK_ID", "FORMAT", "NAME", "SIZE"),
+        default=None,
+        help="Register a format row (metadata only — the file must already "
+        "sit in the book's folder as NAME.format)",
+    )
+    w.add_argument(
+        "--remove-format",
+        dest="remove_format",
+        nargs=2,
+        metavar=("BOOK_ID", "FORMAT"),
+        default=None,
+        help="Drop a format row (leaves the file on disk untouched)",
+    )
+    w.add_argument(
+        "--set-cover",
+        dest="set_cover",
+        nargs=2,
+        metavar=("BOOK_ID", "YES/NO"),
+        default=None,
+        help="Toggle the catalogued has_cover flag",
+    )
+    w.add_argument(
         "--remove-book",
         dest="remove_book",
         metavar="BOOK_ID",
@@ -256,40 +414,6 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _parse_book_id(raw) -> int | None:
-    try:
-        return int(raw)
-    except TypeError, ValueError:
-        print(f"ERROR: BOOK_ID must be an integer, got {raw!r}", file=sys.stderr)
-        return None
-
-
-def _run_write(db_path: str, action) -> int:
-    """Execute ``action(wdb)`` inside a WritableCalibreDB.
-
-    Every write verb funnels through here so trigger UDFs get registered,
-    transactions stay atomic, and lock/validation errors map to clean exit
-    codes instead of tracebacks.
-    """
-    import sqlite3 as _sqlite3
-
-    from cquarry.write import WritableCalibreDB
-
-    try:
-        with WritableCalibreDB(db_path) as wdb:
-            return action(wdb)
-    except ValueError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    except _sqlite3.OperationalError as e:
-        print(
-            f"ERROR: could not acquire the database write lock ({e}). "
-            "Is Calibre running? Close it first.",
-            file=sys.stderr,
-        )
-        return 1
-
-
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
@@ -299,157 +423,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser()
         args = parser.parse_args(argv)
+        if args.series_index is not None and not args.set_series:
+            print(
+                "ERROR: --series-index is only valid together with --set-series.",
+                file=sys.stderr,
+            )
+            return 2
         db_path = find_db(args.db)
 
-        if args.set_title:
-            book_id = _parse_book_id(args.set_title[0])
-            if book_id is None:
-                return 2
-            new_title = args.set_title[1]
-
-            def _do_set_title(wdb):
-                wdb.update_title(book_id, new_title)
-                if not args.quiet:
-                    print(
-                        f"Renamed book {book_id} to {new_title!r} "
-                        "(queued for OPF regeneration on Calibre's next startup)."
-                    )
-                return 0
-
-            return _run_write(db_path, _do_set_title)
-
-        if args.set_authors:
-            book_id = _parse_book_id(args.set_authors[0])
-            if book_id is None:
-                return 2
-            names = [n.strip() for n in args.set_authors[1].split(";") if n.strip()]
-
-            def _do_set_authors(wdb):
-                wdb.set_authors(book_id, names)
-                if not args.quiet:
-                    print(
-                        f"Set authors of book {book_id} to {' & '.join(names)} "
-                        "(queued for OPF regeneration)."
-                    )
-                return 0
-
-            return _run_write(db_path, _do_set_authors)
-
-        if args.set_rating:
-            book_id = _parse_book_id(args.set_rating[0])
-            if book_id is None:
-                return 2
-            try:
-                stars = float(args.set_rating[1])
-            except ValueError:
-                print(
-                    f"ERROR: STARS must be a number 0-5, got {args.set_rating[1]!r}",
-                    file=sys.stderr,
-                )
-                return 2
-            if not 0 <= stars <= 5:
-                print("ERROR: STARS must be within 0-5.", file=sys.stderr)
-                return 2
-
-            def _do_set_rating(wdb):
-                wdb.set_rating(book_id, stars)
-                if not args.quiet:
-                    print(f"Rated book {book_id} at {stars:g} stars.")
-                return 0
-
-            return _run_write(db_path, _do_set_rating)
-
-        if args.set_comments:
-            book_id = _parse_book_id(args.set_comments[0])
-            if book_id is None:
-                return 2
-            text = args.set_comments[1]
-
-            def _do_set_comments(wdb):
-                wdb.set_comments(book_id, text)
-                if not args.quiet:
-                    print(f"Comments updated on book {book_id}.")
-                return 0
-
-            return _run_write(db_path, _do_set_comments)
-
-        if args.clear_comments:
-            book_id = _parse_book_id(args.clear_comments)
-            if book_id is None:
-                return 2
-
-            def _do_clear_comments(wdb):
-                wdb.set_comments(book_id, None)
-                if not args.quiet:
-                    print(f"Comments cleared on book {book_id}.")
-                return 0
-
-            return _run_write(db_path, _do_clear_comments)
-
-        if args.set_column:
-            book_id = _parse_book_id(args.set_column[0])
-            label = args.set_column[1]
-            value = args.set_column[2]
-            if book_id is None:
-                return 2
-
-            def _do_set_column(wdb):
-                # set_custom_column refuses non-editable/composite columns
-                # and validates enumerations itself.
-                wdb.set_custom_column(book_id, label, value)
-                if not args.quiet:
-                    print(f"Set #{label.lstrip('#')} = {value!r} on book {book_id}.")
-                return 0
-
-            return _run_write(db_path, _do_set_column)
-
-        if args.clear_column:
-            book_id = _parse_book_id(args.clear_column[0])
-            label = args.clear_column[1]
-            if book_id is None:
-                return 2
-
-            def _do_clear_column(wdb):
-                wdb.set_custom_column(book_id, label, None)
-                if not args.quiet:
-                    print(f"Cleared #{label.lstrip('#')} on book {book_id}.")
-                return 0
-
-            return _run_write(db_path, _do_clear_column)
-
-        if args.remove_book is not None:
-            book_id = _parse_book_id(args.remove_book)
-            if book_id is None:
-                return 2
-            if not args.confirm_remove:
-
-                def _describe(wdb):
-                    row = wdb.conn.execute(
-                        "SELECT title FROM books WHERE id = ?", (book_id,)
-                    ).fetchone()
-                    title = row["title"] if row else "<unknown>"
-                    fmts = [
-                        r[0]
-                        for r in wdb.conn.execute(
-                            "SELECT format FROM data WHERE book = ?", (book_id,)
-                        )
-                    ]
-                    print(
-                        f"DRY RUN — would permanently remove book {book_id} "
-                        f"({title!r}, formats: {', '.join(fmts) or 'none'})."
-                    )
-                    print("Re-run with --confirm-remove to delete.")
-                    return 0
-
-                return _run_write(db_path, _describe)
-
-            def _do_remove(wdb):
-                wdb.remove_book(book_id)
-                if not args.quiet:
-                    print(f"Book {book_id} removed.")
-                return 0
-
-            return _run_write(db_path, _do_remove)
+        # Write verbs (opt-in) are dispatched before any read mode opens the
+        # database read-only; writeops owns WritableCalibreDB and the
+        # error-to-exit-code mapping (validation -> 2, lock/write -> 1).
+        handled = dispatch_write(args, db_path)
+        if handled is not None:
+            return handled
 
         if args.format_stats:
             with CalibreDB(db_path) as db:
@@ -579,6 +566,26 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.tags:
                 show_tag_dump(db, quiet=args.quiet)
+                return 0
+
+            if args.book is not None:
+                ok = show_book(db, args.book, quiet=args.quiet)
+                return 0 if ok else 1
+
+            if args.entities:
+                show_entities(db, args.entities, quiet=args.quiet)
+                return 0
+
+            if args.reading_progress:
+                show_reading_progress(db, quiet=args.quiet)
+                return 0
+
+            if args.columns:
+                show_columns(db, quiet=args.quiet)
+                return 0
+
+            if args.info:
+                show_info(db, quiet=args.quiet)
                 return 0
 
             # If --wing was given without a mode, default to catalog
