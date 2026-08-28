@@ -153,3 +153,89 @@ What's done, what's next. Updated as of v3.12.0.
 - [x] **Expand CC Orphan Audit:** Extend `check_orphan_cc_links` to audit single-value tables.
 - [x] **Multi-Threaded Audits:** Wrap file inspection in `reconcile_file_metadata.py`, `audit_isbns.py`, and `spot_check.py` with a `ThreadPoolExecutor` for a 5-10x speedup.
 - [x] **Docs Sync:** Bump versions in `spec.md` and `roadmap.md` to 3.13.0 to match the code.
+
+## Phase 14: Pre-import screen & pre-stamp support (proposed 2026-08-27)
+
+*Context: the acquisition pathway is a fixed three-phase pipeline — agent-run
+pre-import vetting ("phase-1-import" skill), Brandon's manual import, agent-run
+post-import curation ("phase-3-import" skill); both skills live in
+`~/docs/Calibre Library/.claude/skills/`. Phase 1 already reaches into
+`CalibreQuarry/scripts/` for `audit_drm.py` and `compress_pdf.py`. Two of its
+remaining steps are still ad-hoc inline command sequences re-typed every batch, and
+both are exactly this repo's companion-script shape: thin, stdlib + cquarry, external
+CLIs for file work, read-only-or-explicit-write. This phase gives them a home. It also
+closes a version/docs desync the repo's own tests currently cannot see.*
+
+- [ ] **`scripts/screen_duplicate.py` — loose-file vs library duplicate screen
+      (read-only).** Phase 1 § 3 screens every download against the library AND
+      within the batch, matching on normalized title AND same-first-author AND ISBN
+      (title alone misses worded-differently editions: "Capital: Volume I" vs
+      "Capital: A Critique..."; loose author LIKE patterns flood results — a
+      `%Lawrence%` match pulls in Mark Lawrence for a T. E. Lawrence book). Today
+      this is a hand-written SQL/search session per batch. The script:
+  - Input: a directory or file list (positional; EPUB/PDF/MOBI/AZW3). Read each
+    file's embedded title/authors/isbn with `ebook-meta` (read-only invocation).
+    Show the filename parse as a display hint only — the skill's rule is that
+    AA/z-library filenames lie ("...Volume 1..." held Volume 3; titles arrive
+    word-scrambled).
+  - Match: exact-ISBN lookup first; otherwise normalized-title + first-author via
+    cquarry's search (`db.search_books('title:"=..." AND author:"=..."')`), with
+    normalization = case/accent fold + leading-article strip + edition/subtitle
+    scrub. Reuse `cquarry.helpers.normalize_author_display` for the author side; do
+    not `.split(",")` hydrated list fields (cquarry contract).
+  - Output per candidate pair: existing id, title, authors, format, size (row
+    `size`), pages (row `pages`, native `books_pages_link`), plus the same fields for
+    the new file — the comparison columns the skill says to report before
+    recommending keep/upgrade/re-source. `--format json` for the batch report. Exit
+    codes mirror `audit_conversion_overrides.py`: 0 clean, 1 candidates found, 2
+    setup error.
+  - Tests in `tests/test_scripts.py` style: synthetic DB + stubbed `ebook-meta`.
+- [ ] **`scripts/stamp_pdf.py` — pre-stamp PDF metadata (writes FILES, never the
+      DB).** Phase 1 § 6 pre-stamps bare-metadata PDFs (TTRPG modules, scans, indie
+      releases) so phase 2 imports real titles instead of filename fragments
+      (`5E - Wonderland.pdf` imports as Title "5E", Author "Wonderland"). The
+      exiftool incantation is precise and its traps are already paid for; encode
+      them once:
+  - Flags `--title/--author/--publisher/--isbn`; dry-run by default; `--apply` to
+    write. The field set is FIXED per the skill: `-Title` + `-XMP-dc:Title`,
+    `-Author` + `-XMP-dc:Creator`, `-XMP-dc:Publisher` for publisher, and ISBN via
+    `-Keywords="isbn:..."` — NEVER `-XMP-dc:Identifier`, which Calibre maps to a
+    bogus `doi`. Multi-author joins with " & " (Calibre's separator — note this is
+    the OPPOSITE of the `cquarry --set-authors` CLI, which splits on `;`; keep both
+    documented in the help text).
+  - Verification uses `ebook-meta` (Calibre's own reader), not an exiftool
+    round-trip — exiftool reading back what exiftool wrote proves nothing.
+  - On write-reports-success-but-readback-disagrees (the stubborn-XMP class, where
+    even a qpdf rebuild does not help): print STAMP_FAILED with the field, exit
+    nonzero, stop. The skill's rule: do not keep fighting; phase 3 fixes the field
+    in SQL instead.
+  - `--backup-dir` REQUIRED for `--apply`, and REFUSED if it resolves inside the
+    directory holding the target files (a stray backup beside the file gets
+    imported — the phase-1 cardinal sin).
+  - Dry-run preview prints what Calibre would derive from the filename alone (the
+    dash-split Title/Author) next to the requested stamp, so the before/after is
+    visible without writing anything.
+  - The script is mechanics only. Choosing the VALUES — researching the book online
+    or reading its credits/copyright/back-cover pages (`pdftotext -f 1 -l 4`,
+    `-layout` for column-formatted credits) — stays the agent's informed-judgment
+    step per the skill. Say so in the docstring so a future editor does not bolt on
+    web lookups.
+- [ ] **Version/docs re-sync.** *State as of 2026-08-27 (post 3.21.0 work):* the
+      full 3.21.0 release (`--book`, `--entities`, `--reading-progress`,
+      `--columns`, `--info`, the write-verb expansion, `writeops.py`, new tests)
+      sits in the working tree UNCOMMITTED with VERSION/pyproject/`__init__.py`
+      and the patchnotes entry all at 3.21.0 — commit it first. The desync this
+      item exists to prevent already happened once at HEAD: the "Patchnotes:
+      3.20.0" commit landed with VERSION/pyproject/`__init__` still at 3.19.0.
+      Still stale after that release: spec.md header reads 3.15.0; this roadmap's
+      header reads "as of v3.12.0"; spec § 5's companion table is missing
+      `audit_conversion_overrides.py` (shipped between releases, documented only
+      in `.clinerules`); `scripts/fetch_library_codes.py.bak` is scratch litter
+      by this repo's own cleanup standard. Extend `tests/test_version.py` to
+      parse the top `# X.Y.Z` heading of patchnotes.md and pin it equal to
+      `cquarry_cli.VERSION`, so the patchnotes-vs-code desync class is caught by
+      CI instead of by the next agent to notice.
+
+Non-goals: no EPUB pre-stamping (Calibre reads EPUB OPF natively; the skill forbids
+it); no in-`~/Downloads` backups or writes beyond the stamped file itself; no
+deletion of library copies on duplicate hits (that stays a Brandon-decision, phase 3).
