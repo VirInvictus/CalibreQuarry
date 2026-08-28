@@ -240,3 +240,33 @@ closes a version/docs desync the repo's own tests currently cannot see.*
 Non-goals: no EPUB pre-stamping (Calibre reads EPUB OPF natively; the skill forbids
 it); no in-`~/Downloads` backups or writes beyond the stamped file itself; no
 deletion of library copies on duplicate hits (that stays a Brandon-decision, phase 3).
+
+## Phase 15: Phase-3 batch dossier & write-verb completeness (proposed 2026-08-28)
+
+*Context: the 2026-08-27 acquisition batch was curated end to end against this
+CLI, so the friction points are known precisely. 3.22.0's `--book BOOK_ID`
+dossier already answers "show me everything about one book" — this phase makes
+it batch-shaped and closes the two write gaps the batch exposed.*
+
+- [ ] **`--book` batch forms**: accept comma-separated ids (`--book
+  8884,8885,8886`) and an `--book --untagged` selector (the phase-3 entry state
+  is "all untagged books"). Curating a batch today means a hand-rolled
+  `get_book()` loop; the dossier renderer (`modes/detail.py show_book`) is
+  already per-book and composes in a loop unchanged.
+- [ ] **`show_book`: print `pubdate`.** The dossier prints added/modified dates
+  but not the publication date — a field phase 3 explicitly checks (Jan-01
+  placeholder dates are one of its standard catches). One-line fix in
+  `modes/detail.py`.
+- [ ] **`--set-pubdate ID DATE` write verb** once cquarry ships `set_pubdate`
+  (cquarry roadmap Phase 8): store the canonical TEXT form
+  (`'YYYY-MM-DD 00:00:00+00:00'`). The 2026-08-27 batch's raw-integer pubdate
+  writes tripped 8 linter errors (sentinel + unparseable) before being caught.
+- [ ] **`scripts/fetch_library_codes.py` Calibre-detection guard**: its
+  "Calibre is running" refusal matches concurrent process ARGS, so a parallel
+  Bindery sweep whose command line contains "Calibre Library" false-positives
+  it (bit twice in one batch, 2026-08-27). Detect the GUI by exact process name
+  (`pgrep -x calibre`) or by attempting the DB write lock — not `pgrep -f` over
+  the whole process table.
+
+Non-goals: no `--get-id` alias (the verb is `--book` and it shipped in 3.22.0);
+no new read APIs (they belong to cquarry per the frontend-only split).
