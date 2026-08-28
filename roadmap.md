@@ -133,6 +133,7 @@ What's done, what's next. Updated as of v3.12.0.
 
 ## Phase 13: Extraction (2026-08-23)
 - [x] Extract `vir-tui` core into a standalone repository and replace local primitives with the shared dependency.
+- [x] Adopt vir-tui 2.2.0's Phase-3 primitives — `interactive_session()`, `prompt_float`/`prompt_path`, `confirm`, `out_note`, `text_mode()` — deleting the duplicated session/prompt scaffolding (v3.22.0).
 
 ## Phase 12: Codebase Sweep & Robustness Hardening (2026-08-23)
 *Context: Based on a full-repo sweep, addressing edge-case crashes, documentation desyncs, and expanding multi-threaded capabilities.*
