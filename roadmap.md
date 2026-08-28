@@ -267,6 +267,10 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   it (bit twice in one batch, 2026-08-27). Detect the GUI by exact process name
   (`pgrep -x calibre`) or by attempting the DB write lock — not `pgrep -f` over
   the whole process table.
+- [ ] **Skill sync**: the phase-3-import skill in Brandon's library
+  (`~/docs/Calibre Library/.claude/skills/`) should name the `--book` batch
+  form in its "read EVERY field" step, and soften its LoC-sequencing warning
+  once the guard fix above stops the false positives.
 
 Non-goals: no `--get-id` alias (the verb is `--book` and it shipped in 3.22.0);
 no new read APIs (they belong to cquarry per the frontend-only split).
