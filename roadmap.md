@@ -287,5 +287,9 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   skill's mandatory manual-research pass starts from a file instead of terminal
   scrollback (2026-08-27: 3 misses were tracked by hand).
 
+- [ ] **Consume cquarry Phase 9's `get_book_dossier()`** once it lands: `show_book`
+  becomes a thin renderer over the composed dossier dict instead of hand-calling
+  ten read APIs (cquarry roadmap Phase 9 is the mine this comes from).
+
 Non-goals: no `--get-id` alias (the verb is `--book` and it shipped in 3.22.0);
 no new read APIs (they belong to cquarry per the frontend-only split).
