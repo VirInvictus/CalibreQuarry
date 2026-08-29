@@ -264,10 +264,19 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   but not the publication date — a field phase 3 explicitly checks (Jan-01
   placeholder dates are one of its standard catches). One-line fix in
   `modes/detail.py`.
-- [ ] **`--set-pubdate ID DATE` write verb** once cquarry ships `set_pubdate`
+- [x] **`--set-pubdate ID DATE` write verb** once cquarry ships `set_pubdate`
   (cquarry roadmap Phase 8): store the canonical TEXT form
   (`'YYYY-MM-DD 00:00:00+00:00'`). The 2026-08-27 batch's raw-integer pubdate
   writes tripped 8 linter errors (sentinel + unparseable) before being caught.
+  *(Shipped in 3.23.0: `--set-pubdate` / `--clear-pubdate` plus a TUI
+  Set/Clear Pubdate pair, all through cquarry 1.7's `set_pubdate`. Bonus that
+  cquarry's batch context unlocked: several write flags in ONE invocation now
+  run in a single `WritableCalibreDB` inside one `cquarry.batch()`
+  transaction (all-or-nothing, per-verb summary after the commit), which is
+  the actual "fix it all in one transaction" shape the phase-3 skill wanted;
+  `--remove-book` refuses batch combinations. The TUI edit session keeps one
+  transaction per op on purpose: wrapping the whole interactive menu in a
+  batch would hold the write lock while the user thinks.)*
 - [ ] **`scripts/fetch_library_codes.py` Calibre-detection guard**: its
   "Calibre is running" refusal matches concurrent process ARGS, so a parallel
   Bindery sweep whose command line contains "Calibre Library" false-positives

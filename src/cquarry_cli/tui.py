@@ -175,6 +175,8 @@ def _edit_book_session(db_path: str) -> None:
         "Set Title",
         "Set Authors",
         "Set Rating",
+        "Set Pubdate",
+        "Clear Pubdate",
         "Add Tag",
         "Remove Tag",
         "Set Series",
@@ -229,20 +231,31 @@ def _edit_book_session(db_path: str) -> None:
                 lambda s=stars: writeops.op_set_rating(db_path, bid, s),
             )
         elif idx == 3:
+            raw = ask("Pubdate (YYYY-MM-DD, blank cancels)", "")
+            if raw:
+                run_with_capture(
+                    "Set Pubdate",
+                    lambda d=raw: writeops.op_set_pubdate(db_path, bid, d),
+                )
+        elif idx == 4:
+            run_with_capture(
+                "Clear Pubdate", lambda: writeops.op_clear_pubdate(db_path, bid)
+            )
+        elif idx == 5:
             tag = ask("Tag to add", "")
             if tag:
                 run_with_capture(
                     "Add Tag",
                     lambda t=tag: writeops.op_add_tag(db_path, bid, [t]),
                 )
-        elif idx == 4:
+        elif idx == 6:
             tag = ask("Tag to remove", "")
             if tag:
                 run_with_capture(
                     "Remove Tag",
                     lambda t=tag: writeops.op_remove_tag(db_path, bid, [t]),
                 )
-        elif idx == 5:
+        elif idx == 7:
             name = ask("Series name", "")
             if not name:
                 continue
@@ -256,33 +269,33 @@ def _edit_book_session(db_path: str) -> None:
                 "Set Series",
                 lambda n=name, i=index: writeops.op_set_series(db_path, bid, n, i),
             )
-        elif idx == 6:
+        elif idx == 8:
             run_with_capture(
                 "Clear Series", lambda: writeops.op_clear_series(db_path, bid)
             )
-        elif idx == 7:
+        elif idx == 9:
             name = ask("Publisher (blank cancels)", "")
             if name:
                 run_with_capture(
                     "Set Publisher",
                     lambda n=name: writeops.op_set_publisher(db_path, bid, n),
                 )
-        elif idx == 8:
+        elif idx == 10:
             run_with_capture(
                 "Clear Publisher", lambda: writeops.op_clear_publisher(db_path, bid)
             )
-        elif idx == 9:
+        elif idx == 11:
             langs = ask("Languages (comma-separated, blank cancels)", "")
             if langs:
                 run_with_capture(
                     "Set Languages",
                     lambda lg=langs: writeops.op_set_languages(db_path, bid, lg),
                 )
-        elif idx == 10:
+        elif idx == 12:
             run_with_capture(
                 "Clear Languages", lambda: writeops.op_clear_languages(db_path, bid)
             )
-        elif idx == 11:
+        elif idx == 13:
             id_type = ask("Identifier type (isbn, goodreads, ...)", "isbn")
             if not id_type:
                 continue
@@ -293,25 +306,25 @@ def _edit_book_session(db_path: str) -> None:
                     db_path, bid, t, v
                 ),
             )
-        elif idx == 12:
+        elif idx == 14:
             id_type = ask("Identifier type to delete", "isbn")
             if id_type:
                 run_with_capture(
                     "Clear Identifier",
                     lambda t=id_type: writeops.op_clear_identifier(db_path, bid, t),
                 )
-        elif idx == 13:
+        elif idx == 15:
             text = ask("Comments (HTML, blank cancels)", "")
             if text:
                 run_with_capture(
                     "Set Comments",
                     lambda t=text: writeops.op_set_comments(db_path, bid, t),
                 )
-        elif idx == 14:
+        elif idx == 16:
             run_with_capture(
                 "Clear Comments", lambda: writeops.op_clear_comments(db_path, bid)
             )
-        elif idx == 15:
+        elif idx == 17:
             label = ask("Column label (without #)", "")
             if not label:
                 continue
@@ -320,20 +333,20 @@ def _edit_book_session(db_path: str) -> None:
                 "Set Custom Column",
                 lambda lb=label, v=value: writeops.op_set_column(db_path, bid, lb, v),
             )
-        elif idx == 16:
+        elif idx == 18:
             label = ask("Column label to clear (without #)", "")
             if label:
                 run_with_capture(
                     "Clear Custom Column",
                     lambda lb=label: writeops.op_clear_column(db_path, bid, lb),
                 )
-        elif idx == 17:
+        elif idx == 19:
             has = ask_yn("Catalogued as having a cover? (y/N)")
             run_with_capture(
                 "Set Cover Flag",
                 lambda h=has: writeops.op_set_cover(db_path, bid, h),
             )
-        elif idx == 18:
+        elif idx == 20:
             fmt = ask("Format (e.g. EPUB)", "")
             if not fmt:
                 continue
@@ -350,7 +363,7 @@ def _edit_book_session(db_path: str) -> None:
                     db_path, bid, f, n, s
                 ),
             )
-        elif idx == 19:
+        elif idx == 21:
             fmt = ask("Format to remove", "")
             if fmt:
                 run_with_capture(

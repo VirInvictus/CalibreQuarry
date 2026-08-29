@@ -251,3 +251,132 @@ class TestWriteVerbs(_TempDBCase):
             .fetchone()[0]
         )
         self.assertEqual(gone, 0)
+
+
+class TestSetPubdateWriteFlow(_TempDBCase):
+    """--set-pubdate / --clear-pubdate ride cquarry 1.7's set_pubdate:
+    TEXT normalization, sentinel clear, no-op honesty."""
+
+    def test_set_pubdate_normalizes_to_calibre_text(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--set-pubdate", "1", "1991-10-01", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        try:
+            pubdate, lm = con.execute(
+                "SELECT pubdate, last_modified FROM books WHERE id=1"
+            ).fetchone()
+            self.assertEqual(pubdate, "1991-10-01 00:00:00+00:00")
+            self.assertNotEqual(lm, "2020-01-01 00:00:00")
+            self.assertEqual(
+                [r[0] for r in con.execute("SELECT book FROM metadata_dirtied")], [1]
+            )
+        finally:
+            con.close()
+
+    def test_set_pubdate_unparseable_fails_cleanly(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(["--set-pubdate", "1", "sentinel pubdate", "--db", self.db_path])
+        self.assertEqual(rc, 1)
+        self.assertIn("Unparseable pubdate", err_cap.getvalue())
+
+    def test_clear_pubdate_writes_sentinel(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--clear-pubdate", "1", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        try:
+            pubdate = con.execute("SELECT pubdate FROM books WHERE id=1").fetchone()[0]
+        finally:
+            con.close()
+        self.assertEqual(pubdate, "0101-01-01 00:00:00+00:00")
+
+
+class TestBatchedWriteVerbs(_TempDBCase):
+    """Several write verbs in one invocation share ONE batch() transaction
+    (cquarry >= 1.7): all-or-nothing, committed exactly once. This is the
+    multi-mutation shape the 2026-08-27 phase-3 pass needed (~45 mutations
+    that each committed separately)."""
+
+    def test_multi_verb_commits_all(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--set-title",
+                    "1",
+                    "Batched",
+                    "--set-pubdate",
+                    "1",
+                    "2001-02-03",
+                    "--add-tag",
+                    "1",
+                    "Curated",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        try:
+            title, pubdate = con.execute(
+                "SELECT title, pubdate FROM books WHERE id=1"
+            ).fetchone()
+            tags = [
+                r[0]
+                for r in con.execute(
+                    "SELECT t.name FROM books_tags_link l JOIN tags t "
+                    "ON t.id=l.tag WHERE l.book=1"
+                )
+            ]
+        finally:
+            con.close()
+        self.assertEqual((title, pubdate), ("Batched", "2001-02-03 00:00:00+00:00"))
+        self.assertEqual(tags, ["Curated"])
+        self.assertIn("3 mutations committed as one transaction", out.getvalue())
+
+    def test_multi_verb_failure_rolls_everything_back(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                [
+                    "--set-title",
+                    "1",
+                    "Should Not Stick",
+                    "--set-pubdate",
+                    "99",
+                    "2001-02-03",  # unknown book
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("rolled back", err_cap.getvalue())
+        con = sqlite3.connect(self.db_path)
+        try:
+            title = con.execute("SELECT title FROM books WHERE id=1").fetchone()[0]
+            dirtied = con.execute("SELECT COUNT(*) FROM metadata_dirtied").fetchone()[0]
+        finally:
+            con.close()
+        self.assertEqual(title, "Old Title")
+        self.assertEqual(dirtied, 0)
+
+    def test_remove_book_refuses_batch_combinations(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                [
+                    "--set-title",
+                    "1",
+                    "X",
+                    "--remove-book",
+                    "2",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("cannot be combined", err_cap.getvalue())

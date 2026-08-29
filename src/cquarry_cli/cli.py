@@ -248,6 +248,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Set rating (0-5, halves allowed)",
     )
     w.add_argument(
+        "--set-pubdate",
+        dest="set_pubdate",
+        nargs=2,
+        metavar=("BOOK_ID", "DATE"),
+        default=None,
+        help="Set the publication date (YYYY-MM-DD or a full ISO datetime)",
+    )
+    w.add_argument(
+        "--clear-pubdate",
+        dest="clear_pubdate",
+        metavar="BOOK_ID",
+        default=None,
+        help="Clear the publication date",
+    )
+    w.add_argument(
         "--set-comments",
         dest="set_comments",
         nargs=2,
