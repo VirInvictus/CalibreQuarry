@@ -57,6 +57,7 @@ import re
 import sys
 
 from cquarry.db import CalibreDB
+from cquarry.helpers import to_isbn13
 
 # Byte-exact from LibraryThing's own sample (librarything.com/LibraryThingSample.csv,
 # refetched 2026-08-09). Two things are load-bearing and easy to get wrong:
@@ -79,17 +80,6 @@ COLUMNS = 11
 DEFAULT_BATCH = 500
 READ_STATUS = "Read"
 SENTINEL_PUBDATE = "0101"
-
-
-def to_isbn13(raw: str) -> str:
-    s = re.sub(r"[^0-9Xx]", "", raw or "").upper()
-    if len(s) == 13:
-        return s
-    if len(s) != 10:
-        return ""
-    core = "978" + s[:9]
-    total = sum((1 if i % 2 == 0 else 3) * int(d) for i, d in enumerate(core))
-    return core + str((10 - total % 10) % 10)
 
 
 def tag_list(taxonomy: str | None, translators: str | None) -> str:
@@ -171,7 +161,9 @@ def build_rows(
             title or "",
             author_sort or "",
             year,
-            to_isbn13(isbn) if isbn else "",
+            # cquarry 1.8's to_isbn13 returns None for garbage; the CSV
+            # column stays "" exactly as before.
+            to_isbn13(isbn) or "",
             publisher or "",
             tag_list(tags, translators),
             str(rating // 2) if rating else "",

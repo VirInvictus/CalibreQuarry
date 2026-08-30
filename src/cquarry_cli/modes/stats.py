@@ -1,7 +1,8 @@
 from collections import Counter
 
+from cquarry.analytics import rating_distribution
 from cquarry.db import CalibreDB
-from cquarry.helpers import calibre_rating_to_stars, normalize_author_display
+from cquarry.helpers import normalize_author_display
 
 
 def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
@@ -22,22 +23,17 @@ def show_stats(db: CalibreDB, *, quiet: bool = False) -> None:
         bar = "\u2588" * (count * 40 // total) if total else ""
         print(f"  {fmt:6s} {count:5d}  {bar}")
 
-    # Rating distribution
+    # Rating distribution (derivation lives in cquarry.analytics)
     print("\nRatings:")
-    rated = 0
-    rating_counts: Counter = Counter()
-    for b in books:
-        stars = calibre_rating_to_stars(b["rating"])
-        if stars is not None:
-            rating_counts[stars] += 1
-            rated += 1
+    dist = rating_distribution(db)
+    rating_counts = {k: v for k, v in dist.items() if isinstance(k, float)}
     max_count = max(rating_counts.values()) if rating_counts else 0
     for stars in sorted(rating_counts.keys()):
         count = rating_counts[stars]
         bar = "\u2588" * (count * 40 // max_count) if max_count else ""
         star_str = "\u2605" * int(stars)
         print(f"  {star_str:5s} ({stars:.1f})  {count:5d}  {bar}")
-    unrated = total - rated
+    unrated = dist.get("unrated", 0)
     pct = f"{unrated * 100 / total:.1f}%" if total else "N/A"
     print(f"  Unrated:       {unrated:5d}  ({pct})")
 

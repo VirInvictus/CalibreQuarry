@@ -1,9 +1,10 @@
 """Single-book dossier (--book ID).
 
-Composes cquarry's read APIs into one view: the hydrated row, identifiers,
-per-format files (path + catalogued size), cover, pages, comments (HTML
-stripped for the terminal), custom columns, e-reader annotations, reading
-positions, plugin data, and conversion overrides.
+A renderer over cquarry 1.8's `get_book_dossier()` — the composed deep fetch
+lives in the library now; this module only prints it: the hydrated row,
+identifiers, per-format files (path + catalogued size), cover, pages,
+pubdate, comments (HTML stripped for the terminal), custom columns, e-reader
+annotations, reading positions, plugin data, and conversion overrides.
 """
 
 import json
@@ -20,7 +21,6 @@ from cquarry.helpers import (
     color,
     format_stars,
     normalize_author_display,
-    strip_html,
 )
 
 _ANNOT_PREVIEW = 8
@@ -53,8 +53,8 @@ def _show_identifiers(b) -> None:
         print(f"  {id_type}: {val}")
 
 
-def _show_formats(db, b) -> None:
-    fmts = db.get_formats(b["id"])
+def _show_formats(d) -> None:
+    fmts = d["formats"]
     if not fmts:
         return
     print(color("Formats:", C_HEADER))
@@ -70,12 +70,9 @@ def _show_formats(db, b) -> None:
         print(color(f"         {info['path']}", C_DIM))
 
 
-def _show_comments(db, b) -> None:
-    try:
-        raw = db.field(b["id"], "comments")
-    except Exception:
-        return
-    text = strip_html(raw or "")
+def _show_comments(d) -> None:
+    # plain is strip_html() of the stored HTML, done inside the dossier.
+    text = (d.get("comments") or {}).get("plain") or ""
     if not text.strip():
         return
     print(color("Comments:", C_HEADER))
@@ -92,19 +89,16 @@ def _show_comments(db, b) -> None:
             )
 
 
-def _show_custom(db, b) -> None:
-    cols = db.get_custom_columns()
+def _show_custom(d) -> None:
+    cols = d["custom_columns"]
     if not cols:
         return
     rows = []
-    for name, meta in cols.items():
-        try:
-            value = db.field(b["id"], "#" + meta["label"])
-        except Exception:
-            continue
+    for label, meta in cols.items():
+        value = meta["value"]
         if value is None or value == "" or value == []:
             continue
-        rows.append((meta["label"], name, value))
+        rows.append((label.lstrip("#"), meta["name"], value))
     if not rows:
         return
     print(color("Custom columns:", C_HEADER))
@@ -112,8 +106,8 @@ def _show_custom(db, b) -> None:
         print(f"  {name} (#{label}): {_fmt_custom(value)}")
 
 
-def _show_annotations(db, b) -> None:
-    annots = db.get_annotations(b["id"])
+def _show_annotations(d) -> None:
+    annots = d["annotations"]
     if not annots:
         return
     print(color(f"Annotations ({len(annots)}):", C_HEADER))
@@ -132,8 +126,8 @@ def _show_annotations(db, b) -> None:
         print(color(f"  … {len(annots) - _ANNOT_PREVIEW} more", C_DIM))
 
 
-def _show_progress(db, b) -> None:
-    positions = db.get_last_read_positions(b["id"])
+def _show_progress(d) -> None:
+    positions = d["reading_positions"]
     if not positions:
         return
     print(color("Reading progress:", C_HEADER))
@@ -150,15 +144,15 @@ def _show_progress(db, b) -> None:
         print(f"  {who} ({row.get('format') or '?'}) — {pct}{when}")
 
 
-def _show_extras(db, b) -> None:
-    plugin_rows = db.get_plugin_data(book_id=b["id"])
+def _show_extras(d) -> None:
+    plugin_rows = d["plugin_data"]
     if plugin_rows:
         print(color("Plugin data:", C_HEADER))
         for row in plugin_rows:
             val = " ".join(str(row.get("val") or "").split())[:80]
             print(f"  {row['name']}: {val}")
 
-    overrides = db.get_conversion_profiles(b["id"])
+    overrides = d["conversion_overrides"]
     if overrides:
         print(color("Conversion overrides:", C_HEADER))
         for row in overrides:
@@ -170,10 +164,11 @@ def _show_extras(db, b) -> None:
 
 def show_book(db: CalibreDB, book_id: int, *, quiet: bool = False) -> bool:
     """Print the full record for one book. Returns False for unknown ids."""
-    b = db.get_book(book_id)
-    if b is None:
+    d = db.get_book_dossier(book_id, include_comments=True)
+    if d is None:
         print(f"ERROR: no book with id {book_id} in this library.", file=sys.stderr)
         return False
+    b = d["book"]
 
     authors = normalize_author_display(b["authors"]) if b["authors"] else "(no author)"
     series = ""
@@ -201,10 +196,13 @@ def show_book(db: CalibreDB, book_id: int, *, quiet: bool = False) -> bool:
         facts.append(f"{b['pages']} pages")
     if b.get("size") is not None:
         facts.append(_human_size(b["size"]))
+    pubdate = b.get("pubdate") or ""
+    if pubdate and not pubdate.startswith("0101"):
+        facts.append(f"published {pubdate[:10]}")
     facts.append(f"added {(b['timestamp'] or '?')[:10]}")
     facts.append(f"modified {(b['last_modified'] or '?')[:10]}")
     if b["has_cover"]:
-        cover = db.get_cover_path(b["id"])
+        cover = d["cover_path"]
         facts.append("cover on disk" if cover else "cover catalogued (file missing)")
     else:
         facts.append("no cover")
@@ -217,12 +215,12 @@ def show_book(db: CalibreDB, book_id: int, *, quiet: bool = False) -> bool:
 
     print()
     _show_identifiers(b)
-    _show_formats(db, b)
-    _show_custom(db, b)
-    _show_comments(db, b)
-    _show_annotations(db, b)
-    _show_progress(db, b)
-    _show_extras(db, b)
+    _show_formats(d)
+    _show_custom(d)
+    _show_comments(d)
+    _show_annotations(d)
+    _show_progress(d)
+    _show_extras(d)
 
     if not quiet:
         print()

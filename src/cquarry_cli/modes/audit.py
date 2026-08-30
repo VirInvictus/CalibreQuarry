@@ -9,9 +9,18 @@ from cquarry.helpers import (
     C_TITLE,
     C_WARN,
     color,
-    detect_series_gaps,
-    get_image_size,
     normalize_author_display,
+)
+from cquarry.integrity import (
+    find_authorless,
+    find_coverless,
+    find_deprecated_formats,
+    find_formatless,
+    find_low_res_covers,
+    find_missing_cover_files,
+    find_series_gaps,
+    find_untagged,
+    find_unrated,
 )
 
 
@@ -21,43 +30,42 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
     all_series = db.get_all_series()
     issues: list[dict[str, str]] = []
 
+    # The per-book predicates live in cquarry.integrity now — one shared
+    # definition of "incomplete" across the ecosystem; this frontend renders.
+    # Flag names, per-book problem order, and the CSV shape are unchanged.
     DEPRECATED_FORMATS = {"MOBI", "LIT", "LRF", "DJVU", "PDB", "AZW"}
+    untagged = set(find_untagged(db))
+    unrated = set(find_unrated(db))
+    authorless = set(find_authorless(db))
+    formatless = set(find_formatless(db))
+    deprecated = set(find_deprecated_formats(db, DEPRECATED_FORMATS))
+    coverless = set(find_coverless(db))
+    missing_covers = set(find_missing_cover_files(db))
+    low_res = find_low_res_covers(db)
 
     title_author_groups = defaultdict(list)
 
     for b in books:
         problems: list[str] = []
 
-        if not b["tags"]:
+        if b["id"] in untagged:
             problems.append("no_tags")
-        if b["rating"] is None or b["rating"] == 0:
+        if b["id"] in unrated:
             problems.append("unrated")
-        if not b["authors"] or b["authors"] == ["Unknown"]:
+        if b["id"] in authorless:
             problems.append("no_author")
-        if not b["formats"]:
+        if b["id"] in formatless:
             problems.append("no_file")
-        else:
-            formats = set(f.strip().upper() for f in b["formats"])
-            if formats and formats.issubset(DEPRECATED_FORMATS):
-                problems.append("deprecated_format_only")
+        elif b["id"] in deprecated:
+            problems.append("deprecated_format_only")
 
-        if not b["has_cover"]:
+        if b["id"] in coverless:
             problems.append("no_cover")
-        elif b["path"]:
-            # Canonical cover resolution via cquarry 1.3 (cover.jpg with a
-            # cover.png fallback, verified on disk).
-            cover_path = db.get_cover_path(b["id"])
-            if cover_path:
-                size = get_image_size(cover_path)
-                if size:
-                    w, h = size
-                    if max(w, h) < 500:
-                        problems.append(f"low_res_cover({w}x{h})")
-            else:
-                # has_cover says yes but the file is gone: the DB and the disk
-                # disagree, which every cover consumer (Calibre's own grid, the
-                # exporters) will hit. Previously this was silently clean.
-                problems.append("cover_file_missing")
+        elif b["id"] in missing_covers:
+            problems.append("cover_file_missing")
+        elif b["id"] in low_res:
+            w, h = low_res[b["id"]]
+            problems.append(f"low_res_cover({w}x{h})")
 
         if problems:
             issues.append(
@@ -89,8 +97,9 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 }
             )
 
+    series_gaps = find_series_gaps(db)
     for s in all_series:
-        gaps = detect_series_gaps(s["indices"], s["max_index"])
+        gaps = series_gaps.get(s["name"])
         if gaps:
             issues.append(
                 {

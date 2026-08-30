@@ -99,6 +99,8 @@ import json
 import os
 import random
 import re
+
+from cquarry.helpers import isbn_check_digit_is_valid, to_isbn13
 import sqlite3
 import subprocess
 import sys
@@ -173,30 +175,14 @@ FINDINGS = ("MISMATCH", "AMBIGUOUS", "VARIANT")
 # --------------------------------------------------------------------------- #
 # ISBN arithmetic
 # --------------------------------------------------------------------------- #
-def normalise(raw: str) -> str:
-    return re.sub(r"[^0-9Xx]", "", raw or "").upper()
-
-
+# The ISBN arithmetic lives in cquarry.helpers now (1.8.0) — one family
+# across the ecosystem instead of three divergent copies. checksum_ok is
+# kept as the local name for isbn_check_digit_is_valid; to_isbn13 returns
+# None where the old local copy passed normalized garbage through, which
+# only ever mattered for junk stored identifiers (they matched nothing
+# anyway; the JSON now reports null instead of the junk).
 def checksum_ok(raw: str) -> bool:
-    s = normalise(raw)
-    if len(s) == 13 and s.isdigit():
-        total = sum((1 if i % 2 == 0 else 3) * int(d) for i, d in enumerate(s[:12]))
-        return (10 - total % 10) % 10 == int(s[12])
-    if len(s) == 10 and s[:9].isdigit() and (s[9].isdigit() or s[9] == "X"):
-        total = sum((10 - i) * int(d) for i, d in enumerate(s[:9]))
-        total += 10 if s[9] == "X" else int(s[9])
-        return total % 11 == 0
-    return False
-
-
-def to_isbn13(raw: str) -> str:
-    """Fold ISBN-10 to ISBN-13 so stored and printed forms compare like for like."""
-    s = normalise(raw)
-    if len(s) != 10:
-        return s
-    core = "978" + s[:9]
-    total = sum((1 if i % 2 == 0 else 3) * int(d) for i, d in enumerate(core))
-    return core + str((10 - total % 10) % 10)
+    return isbn_check_digit_is_valid(raw)
 
 
 def same_registrant(a: str, b: str) -> bool:

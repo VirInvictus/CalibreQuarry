@@ -175,8 +175,14 @@ class TestVerdicts(unittest.TestCase):
 
     def test_bibliography_is_not_evidence_about_itself(self):
         """The Art of UNIX Programming prints 49 other books' ISBNs."""
-        many = [isbns.to_isbn13(f"04710{n:04d}") for n in range(40)]
-        many = [i for i in many if len(i) == 13]
+        # cquarry 1.8's to_isbn13 returns None for non-10/13 input (the old
+        # local copy passed normalized junk through), so the fake printed
+        # ISBNs are 10-digit strings that fold to real 13s.
+        many = [
+            i
+            for i in (isbns.to_isbn13(f"04710{n:05d}") for n in range(40))
+            if i is not None
+        ]
         self.assertEqual(
             isbns.classify("9781039260719", many, self.MAX), "NO_ISBN_PRINTED"
         )

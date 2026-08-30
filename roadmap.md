@@ -274,10 +274,11 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   is "all untagged books"). Curating a batch today means a hand-rolled
   `get_book()` loop; the dossier renderer (`modes/detail.py show_book`) is
   already per-book and composes in a loop unchanged.
-- [ ] **`show_book`: print `pubdate`.** The dossier prints added/modified dates
+- [x] **`show_book`: print `pubdate`.** The dossier prints added/modified dates
   but not the publication date — a field phase 3 explicitly checks (Jan-01
   placeholder dates are one of its standard catches). One-line fix in
-  `modes/detail.py`.
+  `modes/detail.py`. *(Shipped in 3.24.0: `published YYYY-MM-DD` in the facts
+  line, suppressed while the `0101` sentinel stands.)*
 - [x] **`--set-pubdate ID DATE` write verb** once cquarry ships `set_pubdate`
   (cquarry roadmap Phase 8): store the canonical TEXT form
   (`'YYYY-MM-DD 00:00:00+00:00'`). The 2026-08-27 batch's raw-integer pubdate
@@ -321,9 +322,13 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   skill's mandatory manual-research pass starts from a file instead of terminal
   scrollback (2026-08-27: 3 misses were tracked by hand).
 
-- [ ] **Consume cquarry Phase 9's `get_book_dossier()`** once it lands: `show_book`
+- [x] **Consume cquarry Phase 9's `get_book_dossier()`** once it lands: `show_book`
   becomes a thin renderer over the composed dossier dict instead of hand-calling
   ten read APIs (cquarry roadmap Phase 9 is the mine this comes from).
+  *(Shipped in 3.24.0: show_book renders the dossier; `--audit` predicates run
+  through `cquarry.integrity` and `--analytics`/`--stats` through
+  `cquarry.analytics`, with old-vs-new output verified byte-identical on the
+  real library for the audit CSV, stats, and analytics.)*
 
 Non-goals: no `--get-id` alias (the verb is `--book` and it shipped in 3.22.0);
 no new read APIs (they belong to cquarry per the frontend-only split).
