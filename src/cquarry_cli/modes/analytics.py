@@ -1,7 +1,7 @@
 import sys
 from collections import Counter, defaultdict
 
-from cquarry.analytics import addition_timeline, author_stats
+from cquarry.analytics import addition_timeline, author_stats, vl_overlap
 from cquarry.db import CalibreDB
 from cquarry.helpers import normalize_author_display, tags_to_tree
 
@@ -72,25 +72,27 @@ def show_tag_tree(db: CalibreDB, *, quiet: bool = False) -> None:
 
 
 def show_wing_overlap(db: CalibreDB, *, quiet: bool = False) -> None:
-    """Show which books appear in multiple virtual libraries."""
+    """Show which books appear in multiple virtual libraries.
+
+    The derivation lives in cquarry.analytics now; this renders it. Unparseable
+    wings are skipped exactly as before (probed via resolve_vl first).
+    """
     vls = db.get_virtual_libraries()
     if not vls:
         print("No virtual libraries defined.", file=sys.stderr)
         return
 
-    book_wings = defaultdict(list)
-    for name in vls.keys():
+    usable = []
+    for name in sorted(vls):
         try:
-            ids = db.resolve_vl(name)
-            for bid in ids:
-                book_wings[bid].append(name)
+            db.resolve_vl(name)
+            usable.append(name)
         except Exception:
-            pass  # ignore unparseable
+            pass  # ignore unparseable, exactly as before
 
-    overlap_counts = Counter()
-    for wings in book_wings.values():
-        if len(wings) > 1:
-            overlap_counts[tuple(sorted(wings))] += 1
+    overlap_counts = Counter(
+        {wings: len(ids) for wings, ids in vl_overlap(db, usable).items()}
+    )
 
     if not quiet:
         print("=== Wing Overlap Analysis ===\n")
