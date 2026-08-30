@@ -255,6 +255,15 @@ CLI, so the friction points are known precisely. 3.22.0's `--book BOOK_ID`
 dossier already answers "show me everything about one book" — this phase makes
 it batch-shaped and closes the two write gaps the batch exposed.*
 
+> **Status (2026-08-28, after 3.23.0):** the `--set-pubdate` box below is
+> shipped, and the multi-verb batch mode it required landed in the same
+> release (see its ship note). Everything else in this phase is open; the
+> dossier-consumption box at the bottom is BLOCKED on cquarry Phase 9, whose
+> full-mine scope (dossier, integrity + analytics modules, ISBN family, path
+> index, API.md split) is approved and written out in cquarry's roadmap — the
+> next session resumes there and this repo's remaining boxes are its
+> downstream sync (as release 3.24.0).
+
 - [ ] **`--book` batch forms**: accept comma-separated ids (`--book
   8884,8885,8886`) and an `--book --untagged` selector (the phase-3 entry state
   is "all untagged books"). Curating a batch today means a hand-rolled
