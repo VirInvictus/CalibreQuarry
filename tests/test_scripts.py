@@ -14,9 +14,13 @@ import pathlib
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
+
+from cquarry.db import CalibreDB
 
 _SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 
@@ -589,3 +593,362 @@ class TestFetchLibraryCodesGuard(unittest.TestCase):
 
         with mock.patch("subprocess.run", side_effect=hang):
             self.assertTrue(fetch_library_codes.calibre_running())
+
+
+screen_duplicate = _load("screen_duplicate")
+stamp_pdf = _load("stamp_pdf")
+
+
+class TestScreenDuplicateNormalize(unittest.TestCase):
+    def test_scrubs_subtitle_edition_and_article(self):
+        # The roadmap's example pair: both normalize to the same token.
+        self.assertEqual(
+            screen_duplicate.normalize_title("Capital: Volume I"),
+            screen_duplicate.normalize_title(
+                "Capital: A Critique of Political Economy"
+            ),
+        )
+        self.assertEqual(
+            screen_duplicate.normalize_title("The Left Hand of Darkness"),
+            "left hand of darkness",
+        )
+        self.assertEqual(screen_duplicate.normalize_title("L'Étranger"), "l etranger")
+
+    def test_volume_signature_gates_series_matches(self):
+        # Real-library smoke finding (2026-08-30): scrubbing the colon segments
+        # collapsed every Wandering Inn volume into one title, flooding 19
+        # candidates for Book 8. Equal volume signatures are required whenever
+        # both sides carry one.
+        self.assertEqual(
+            screen_duplicate._volume_signature(
+                "The Wandering Inn: Book 8: Blood of Liscor"
+            ),
+            {("book", "8")},
+        )
+        self.assertEqual(screen_duplicate._volume_signature("Capital: Volume I"), set())
+
+    def test_author_bracket_annotations_do_not_block_matches(self):
+        # Real-library smoke finding: download metadata annotates the author
+        # ("Pirateaba [Pirateaba]"); the annotation must not break the match.
+        self.assertEqual(
+            screen_duplicate.normalize_author("Pirateaba [Pirateaba]"), "pirateaba"
+        )
+        self.assertEqual(
+            screen_duplicate.normalize_author_brackets("Pirateaba [Pirateaba]"),
+            "Pirateaba",
+        )
+
+    def test_fold_author(self):
+        self.assertEqual(
+            screen_duplicate.normalize_author("Ursula K. Le Guin"), "ursula k. le guin"
+        )
+        self.assertEqual(screen_duplicate.normalize_author("ÉRIC"), "eric")
+
+
+class TestScreenDuplicateMatching(unittest.TestCase):
+    """The library match: exact ISBN first, then normalized title + first
+    author over cquarry's tight `=` search. ebook-meta is stubbed."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        con = sqlite3.connect(os.path.join(self.temp_dir, "metadata.db"))
+        c = con
+        c.execute(
+            "CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT,"
+            " author_sort TEXT, timestamp TEXT, pubdate TEXT, last_modified TEXT,"
+            " series_index REAL, path TEXT, has_cover INTEGER)"
+        )
+        c.executemany(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (?, ?, ?, ?, ?, 1)",
+            [
+                (
+                    1,
+                    "Capital: A Critique of Political Economy",
+                    "Capital",
+                    "Marx, Karl",
+                    "p1",
+                ),
+                (
+                    2,
+                    "The Left Hand of Darkness",
+                    "Left Hand of Darkness",
+                    "Le Guin, Ursula K.",
+                    "p2",
+                ),
+            ],
+        )
+        c.execute("CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT)")
+        c.execute(
+            "INSERT INTO authors VALUES (1, 'Karl Marx'), (2, 'Ursula K. Le Guin')"
+        )
+        c.execute(
+            "CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY,"
+            " book INTEGER, author INTEGER)"
+        )
+        c.executemany(
+            "INSERT INTO books_authors_link (book, author) VALUES (?, ?)",
+            [(1, 1), (2, 2)],
+        )
+        c.execute("CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT)")
+        c.execute(
+            "CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INTEGER, tag INTEGER)"
+        )
+        c.execute(
+            "CREATE TABLE data (id INTEGER PRIMARY KEY, book INTEGER,"
+            " format TEXT, uncompressed_size INTEGER, name TEXT)"
+        )
+        c.execute(
+            "INSERT INTO data (book, format, uncompressed_size, name) VALUES (1, 'EPUB', 2048, 'capital')"
+        )
+        c.execute("CREATE TABLE identifiers (book INTEGER, type TEXT, val TEXT)")
+        c.execute(
+            "INSERT INTO identifiers (book, type, val) VALUES (1, 'isbn', '9780140445688')"
+        )
+        # Tables _BOOK_SELECT joins; empty here, present so get_all_books works.
+        c.execute("CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT)")
+        c.execute(
+            "CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INTEGER, series INTEGER)"
+        )
+        c.execute("CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT)")
+        c.execute(
+            "CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INTEGER, publisher INTEGER)"
+        )
+        c.execute("CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT)")
+        c.execute(
+            "CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INTEGER, lang_code INTEGER)"
+        )
+        c.execute("CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INTEGER)")
+        c.execute(
+            "CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INTEGER, rating INTEGER)"
+        )
+        con.commit()
+        con.close()
+        self.db = CalibreDB(os.path.join(self.temp_dir, "metadata.db"))
+
+    def tearDown(self):
+        self.db.close()
+        shutil.rmtree(self.temp_dir)
+
+    def test_exact_isbn_hit(self):
+        fields = {
+            "file": "/dl/x.epub",
+            "title": "Capital (Penguin)",
+            "authors": ["Karl Marx"],
+            "isbn": "9780140445688",
+        }
+        hits = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([h["id"] for h in hits], [1])
+        self.assertEqual(hits[0]["formats"], ["EPUB"])
+        self.assertEqual(hits[0]["size"], 2048)
+
+    def test_different_volume_is_not_a_hit(self):
+        # Book 7 of a series is not a duplicate of a Book 8 download, even
+        # though the scrubbed series root matches.
+        fields = {
+            "file": "/dl/x.epub",
+            "title": "The Wandering Inn: Book 7: Rains of Liscor",
+            "authors": ["Pirateaba [Pirateaba]"],
+            "isbn": "",
+        }
+        fields8 = {
+            "file": "/dl/x.epub",
+            "title": "The Wandering Inn: Book 8: Blood of Liscor",
+            "authors": ["Pirateaba [Pirateaba]"],
+            "isbn": "",
+        }
+        self.assertEqual(
+            screen_duplicate._volume_signature(fields["title"]), {("book", "7")}
+        )
+        self.assertEqual(
+            screen_duplicate._volume_signature(fields8["title"]), {("book", "8")}
+        )
+
+    def test_scrubbed_title_matches_worded_differently_edition(self):
+        # No ISBN on the file; the embedded title says "Volume I" while the
+        # library copy is the full subtitle. Raw `=` equality would miss.
+        fields = {
+            "file": "/dl/x.pdf",
+            "title": "Capital: Volume I",
+            "authors": ["Karl Marx"],
+            "isbn": "",
+        }
+        hits = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([h["id"] for h in hits], [1])
+
+    def test_different_author_is_not_a_hit(self):
+        # Tight `=` author matching: Mark Lawrence is not T. E. Lawrence.
+        fields = {
+            "file": "/dl/x.epub",
+            "title": "The Broken Empire",
+            "authors": ["Mark Lawrence"],
+            "isbn": "",
+        }
+        self.assertEqual(screen_duplicate._library_hits(self.db, fields), [])
+
+    def test_batch_duplicates_cross_reference(self):
+        # Within-batch dedup: same ISBN binds the two files both ways.
+        files = [Path("/dl/a.epub"), Path("/dl/b.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Capital: Volume I",
+                    "author(s)": "Karl Marx",
+                    "identifiers": "isbn:9780140445688",
+                },
+                {
+                    "title": "Capital (Penguin Classics)",
+                    "author(s)": "Karl Marx",
+                    "identifiers": "isbn:9780140445688",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/b.epub"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/a.epub"])
+        # Both files also hit the real fixture book: the ISBN is book 1's.
+        self.assertEqual([h["id"] for h in out[0]["library_hits"]], [1])
+        self.assertEqual([h["id"] for h in out[1]["library_hits"]], [1])
+
+
+class TestStampPdfGuards(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.pdf = self.dir / "5E - Wonderland.pdf"
+        self.pdf.write_bytes(b"%PDF-1.4 fake")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run_main(self, *extra):
+        argv = ["stamp_pdf", str(self.pdf), *extra]
+        buf = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            contextlib.redirect_stdout(buf),
+            contextlib.redirect_stderr(buf),
+        ):
+            return stamp_pdf.main(), buf.getvalue()
+
+    def test_derive_from_filename(self):
+        self.assertEqual(
+            stamp_pdf._derive_from_filename(Path("5E - Wonderland.pdf")),
+            ("5E", "Wonderland"),
+        )
+        self.assertEqual(
+            stamp_pdf._derive_from_filename(Path("Bare.pdf")), ("Bare", "")
+        )
+
+    def test_exiftool_field_set_is_fixed(self):
+        args = stamp_pdf._build_exiftool_args(
+            "T", ["A One", "A Two"], "P", "9780140445688"
+        )
+        self.assertIn("-Title=T", args)
+        self.assertIn("-XMP-dc:Title=T", args)
+        self.assertIn("-Author=A One & A Two", args)
+        self.assertIn("-XMP-dc:Creator=A One & A Two", args)
+        self.assertIn("-XMP-dc:Publisher=P", args)
+        self.assertIn("-Keywords=isbn:9780140445688", args)
+        # The trap: Calibre maps -XMP-dc:Identifier to a bogus doi.
+        self.assertFalse(any(a.startswith("-XMP-dc:Identifier") for a in args))
+
+    def test_dry_run_default_never_invokes_exiftool(self):
+        with mock.patch.object(stamp_pdf, "_run_exiftool") as run:
+            rc, out = self._run_main("--title", "Wonderland")
+        self.assertEqual(rc, 0)
+        run.assert_not_called()
+        self.assertIn("dry run", out)
+        self.assertIn("'5E'", out)  # the filename-derivation preview
+
+    def test_apply_requires_backup_dir(self):
+        rc, out = self._run_main("--apply", "--title", "Wonderland")
+        self.assertEqual(rc, 2)
+        self.assertIn("backup-dir", out)
+
+    def test_backup_dir_inside_target_dir_is_refused(self):
+        rc, out = self._run_main(
+            "--apply", "--title", "W", "--backup-dir", str(self.dir / "sub")
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("OUTSIDE", out)
+
+    def test_apply_stamps_and_verifies(self):
+        backup = Path(self.tmp.name + "-backups")
+        joined = "A One & A Two"
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok) as run,
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={
+                    "title": "Wonderland",
+                    "author(s)": joined,
+                    "identifiers": "isbn:9780140445688",
+                },
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(backup),
+                "--title",
+                "Wonderland",
+                "--author",
+                "A One",
+                "--author",
+                "A Two",
+                "--isbn",
+                "9780140445688",
+            )
+        self.assertEqual(rc, 0)
+        run.assert_called_once()
+        called = run.call_args.args[0]
+        self.assertEqual(called[-1], str(self.pdf))
+        self.assertIn("-Title=Wonderland", called)
+        self.assertIn(f"-Author={joined}", called)
+        self.assertTrue(
+            (backup / self.pdf.name).exists(), "backup copy made before writing"
+        )
+
+    def test_stubborn_xmp_fails_without_retry(self):
+        backup = Path(self.tmp.name + "-backups")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok) as run,
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Something Else", "identifiers": ""},
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(backup),
+                "--title",
+                "Wonderland",
+                "--isbn",
+                "9780140445688",
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertIn("isbn", out)
+        run.assert_called_once()  # no re-fighting
+
+    def test_refuses_non_pdf(self):
+        epub = self.dir / "book.epub"
+        epub.write_bytes(b"EPUB")
+        argv = ["stamp_pdf", str(epub), "--title", "X"]
+        buf = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            contextlib.redirect_stdout(buf),
+            contextlib.redirect_stderr(buf),
+        ):
+            rc = stamp_pdf.main()
+        self.assertEqual(rc, 2)
+        self.assertIn("EPUB", buf.getvalue())

@@ -167,8 +167,10 @@ both are exactly this repo's companion-script shape: thin, stdlib + cquarry, ext
 CLIs for file work, read-only-or-explicit-write. This phase gives them a home. It also
 closes a version/docs desync the repo's own tests currently cannot see.*
 
-- [ ] **`scripts/screen_duplicate.py` — loose-file vs library duplicate screen
-      (read-only).** Phase 1 § 3 screens every download against the library AND
+- [x] **`scripts/screen_duplicate.py` — loose-file vs library duplicate screen
+      (read-only).** *(Shipped in 3.25.0: ebook-meta reads, ISBN-exact then
+      scrub-normalized title+author via the search engine, within-batch
+      screening, json/text reports, exit 0/1/2.)* Phase 1 § 3 screens every download against the library AND
       within the batch, matching on normalized title AND same-first-author AND ISBN
       (title alone misses worded-differently editions: "Capital: Volume I" vs
       "Capital: A Critique..."; loose author LIKE patterns flood results — a
@@ -191,8 +193,11 @@ closes a version/docs desync the repo's own tests currently cannot see.*
     codes mirror `audit_conversion_overrides.py`: 0 clean, 1 candidates found, 2
     setup error.
   - Tests in `tests/test_scripts.py` style: synthetic DB + stubbed `ebook-meta`.
-- [ ] **`scripts/stamp_pdf.py` — pre-stamp PDF metadata (writes FILES, never the
-      DB).** Phase 1 § 6 pre-stamps bare-metadata PDFs (TTRPG modules, scans, indie
+- [x] **`scripts/stamp_pdf.py` — pre-stamp PDF metadata (writes FILES, never the
+      DB).** *(Shipped in 3.25.0: fixed field set, ' & ' author join documented
+      against --set-authors' ';', ebook-meta verification, STAMP_FAILED on
+      read-back disagreement, mandatory out-of-tree --backup-dir, dry-run
+      filename-derivation preview, mechanics-only docstring.)* Phase 1 § 6 pre-stamps bare-metadata PDFs (TTRPG modules, scans, indie
       releases) so phase 2 imports real titles instead of filename fragments
       (`5E - Wonderland.pdf` imports as Title "5E", Author "Wonderland"). The
       exiftool incantation is precise and its traps are already paid for; encode
@@ -241,7 +246,7 @@ closes a version/docs desync the repo's own tests currently cannot see.*
       now pins the newest patchnotes heading to `cquarry_cli.VERSION`. The
       README's "completed software" note was rewritten the same pass; its "no
       new features are planned" claim contradicted this roadmap's open phases.)*
-- [ ] **Skill sync**: phase-1-import (Brandon's library,
+- [x] **Skill sync**: phase-1-import (Brandon's library,
       `~/docs/Calibre Library/.claude/skills/`) should name `screen_duplicate.py`
       in its duplicate-screen step and `stamp_pdf.py` in its pre-stamp section
       once shipped. **Floor, not ceiling**: any behavior-affecting discovery made
