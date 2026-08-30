@@ -1,6 +1,6 @@
 # CalibreQuarry — Roadmap
 
-What's done, what's next. Updated as of v3.12.0.
+What's done, what's next. Updated as of v3.23.1.
 
 ---
 
@@ -221,7 +221,7 @@ closes a version/docs desync the repo's own tests currently cannot see.*
     `-layout` for column-formatted credits) — stays the agent's informed-judgment
     step per the skill. Say so in the docstring so a future editor does not bolt on
     web lookups.
-- [ ] **Version/docs re-sync.** *State as of 2026-08-27 (post 3.21.0 work):* the
+- [x] **Version/docs re-sync.** *State as of 2026-08-27 (post 3.21.0 work):* the
       full 3.21.0 release (`--book`, `--entities`, `--reading-progress`,
       `--columns`, `--info`, the write-verb expansion, `writeops.py`, new tests)
       sits in the working tree UNCOMMITTED with VERSION/pyproject/`__init__.py`
@@ -236,6 +236,11 @@ closes a version/docs desync the repo's own tests currently cannot see.*
       parse the top `# X.Y.Z` heading of patchnotes.md and pin it equal to
       `cquarry_cli.VERSION`, so the patchnotes-vs-code desync class is caught by
       CI instead of by the next agent to notice.
+      *(Done in 3.23.1: both headers current, the companion-table row added,
+      the `.bak` and orphaned `audit_epub*.pyc` deleted, and `test_version.py`
+      now pins the newest patchnotes heading to `cquarry_cli.VERSION`. The
+      README's "completed software" note was rewritten the same pass; its "no
+      new features are planned" claim contradicted this roadmap's open phases.)*
 - [ ] **Skill sync**: phase-1-import (Brandon's library,
       `~/docs/Calibre Library/.claude/skills/`) should name `screen_duplicate.py`
       in its duplicate-screen step and `stamp_pdf.py` in its pre-stamp section
@@ -286,12 +291,23 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   `--remove-book` refuses batch combinations. The TUI edit session keeps one
   transaction per op on purpose: wrapping the whole interactive menu in a
   batch would hold the write lock while the user thinks.)*
-- [ ] **`scripts/fetch_library_codes.py` Calibre-detection guard**: its
+- [x] **`scripts/fetch_library_codes.py` Calibre-detection guard**: its
   "Calibre is running" refusal matches concurrent process ARGS, so a parallel
   Bindery sweep whose command line contains "Calibre Library" false-positives
   it (bit twice in one batch, 2026-08-27). Detect the GUI by exact process name
   (`pgrep -x calibre`) or by attempting the DB write lock — not `pgrep -f` over
   the whole process table.
+  *(Done in 3.23.1, with a correction: the args-matching mechanism was a
+  misdiagnosis. The probe has been name-only since 2026-08-09 and could only
+  refuse on a real calibre-named process; on 2026-08-30 a live check confirmed
+  the refusals' likely source was Calibre itself. The real defect was the
+  opposite of the record: `-x "calibre"` full-name matching can never see the
+  calibre-parallel job workers, whose comm truncates to "calibre-paralle", so
+  the guard under-refused while a worker touched the DB. The probe is now an
+  anchored name-only `pgrep ^calibre` (GUI + debug + parallel workers, still
+  never args), verified live against a running Calibre with four workers, and
+  the phase-3 skill's wrong "matches process args" warning was rewritten in the
+  same pass.)*
 - [ ] **Skill sync**: the phase-3-import skill in Brandon's library
   (`~/docs/Calibre Library/.claude/skills/`) should name the `--book` batch
   form in its "read EVERY field" step, and soften its LoC-sequencing warning

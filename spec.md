@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.15.0  
+**Version:** 3.23.1  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -20,7 +20,7 @@ Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a s
 ### 2.1 Decoupled Shared Library Architecture
 The CalibreQuarry architecture relies on a strict separation of concerns, decoupling the CLI/TUI frontend from the database and search logic. 
 
-**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.1: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, and unknown virtual libraries raise instead of matching nothing.
+**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.7: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, unknown virtual libraries raise instead of matching nothing, and the `--set-*`/`--remove-book` write verbs run on `WritableCalibreDB` 1.7 (`set_pubdate`, `batch()`).
 
 **`cquarry_cli` (Internal Package)**: The frontend modules live in `src/cquarry_cli/`:
 
@@ -131,5 +131,6 @@ The `scripts/` directory holds standalone maintenance tools that are **not** par
 | `reconcile_file_metadata.py` | Diffs the curated `metadata.db` against each file's embedded metadata; `--apply` embeds the DB values back into drifted files, and `--repair-pdf` rebuilds a broken PDF xref table so the embed can succeed | **Yes** with `--apply` (rewrites book files; never `metadata.db`) | `calibredb`, `exiftool`, `djvused`, `qpdf` (`--repair-pdf`) |
 | `fetch_library_codes.py` | Queries the LoC SRU catalogue (`bath.isbn`) for Library of Congress Classification codes and stores them as `lcc` (optionally `ddc`) identifiers; dry-run by default, disk-cached and resumable, rate-limited with backoff | **Yes** with `--apply` (inserts identifiers; backs up `metadata.db` first, refuses while Calibre is open) | none (plain-HTTP SRU endpoint) |
 | `audit_isbns.py` | Checks each stored ISBN against the ISBN the book prints on its own copyright page, catching identifiers that point at a different book (usually a same-publisher sibling). Reads body text only, never embedded metadata, since `reconcile_file_metadata.py` writes the DB's values there and comparing against them would be circular. Classifies apart the three benign look-alikes: bibliographies, bundles/series, and format variants | No (`metadata.db` opened `mode=ro`; deliberately has no `--apply`) | `pdftotext`/`pdfinfo` (poppler), `djvutxt` (both optional) |
+| `audit_conversion_overrides.py` | Lists books carrying manual per-book conversion overrides (`conversion_options`), so pipeline drift is visible instead of surprising | No (`metadata.db` opened `mode=ro`) | none |
 
 Write capability is the reason these live outside the package: `compress_pdf.py`, `reconcile_file_metadata.py --apply`, and `fetch_library_codes.py --apply` mutate things, which the `cquarry` core forbids. Keeping them adjacent but separate preserves the toolkit's read-only promise.

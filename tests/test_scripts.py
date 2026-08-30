@@ -13,8 +13,10 @@ import os
 import pathlib
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 _SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 
@@ -551,3 +553,43 @@ class TestFetchLibraryCodesFindDb(unittest.TestCase):
                 os.chdir(cwd)
         self.assertEqual(cm.exception.code, 2)
         self.assertIn("metadata.db", buf.getvalue())
+
+
+class TestFetchLibraryCodesGuard(unittest.TestCase):
+    """calibre_running matches process NAMES only, never command lines.
+
+    The 2026-08-27 refusal incident was recorded as a pgrep -f args
+    false-positive, but the probe had matched exact names (-x) since
+    2026-08-09 and could only refuse on a real calibre-named process; the
+    record was a misdiagnosis. These tests pin the property that matters:
+    args cannot trip the guard, and every calibre-named binary does.
+    """
+
+    def test_probe_is_name_only_never_args(self):
+        with mock.patch(
+            "subprocess.run", return_value=mock.Mock(returncode=1)
+        ) as run:
+            self.assertFalse(fetch_library_codes.calibre_running())
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[0], "pgrep")
+        self.assertNotIn("-f", argv)
+
+    def test_probe_pattern_reaches_the_parallel_workers(self):
+        # calibre-parallel's comm truncates to "calibre-paralle" (15 chars),
+        # which the old exact-match -x "calibre" could never see; the anchored
+        # prefix must. Verified live 2026-08-30 against a running Calibre with
+        # four workers.
+        with mock.patch(
+            "subprocess.run", return_value=mock.Mock(returncode=0)
+        ) as run:
+            self.assertTrue(fetch_library_codes.calibre_running())
+        self.assertTrue(run.call_args.args[0][-1].startswith("^calibre"))
+
+    def test_probe_timeout_assumes_calibre_is_running(self):
+        # The gate fails closed: a hung probe refuses --apply, because
+        # guessing wrong writes to a live database.
+        def hang(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="pgrep", timeout=1)
+
+        with mock.patch("subprocess.run", side_effect=hang):
+            self.assertTrue(fetch_library_codes.calibre_running())

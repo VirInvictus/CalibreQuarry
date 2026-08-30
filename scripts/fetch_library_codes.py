@@ -271,10 +271,17 @@ def display_tag(tags: list[str], prefixes: list[str] | None) -> str:
 
 
 def calibre_running() -> bool:
+    # Anchored NAME match, never -f: command lines must not be able to trip
+    # this (a concurrent Bindery sweep mentions "Calibre Library" in its args).
+    # The prefix covers the GUI, calibre-debug, and the calibre-parallel job
+    # workers, whose comm truncates to "calibre-paralle" — a full-name -x match
+    # cannot ever see them, so it under-refused while a worker touched the DB.
+    # (The 2026-08-27 "args false-positive" record was a misdiagnosis: -x had
+    # been in place since 2026-08-09, and a name-only probe cannot match args.)
     try:
         return (
             subprocess.run(
-                ["pgrep", "-x", "calibre"], capture_output=True, timeout=PGREP_TIMEOUT
+                ["pgrep", "^calibre"], capture_output=True, timeout=PGREP_TIMEOUT
             ).returncode
             == 0
         )
