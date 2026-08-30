@@ -23,7 +23,9 @@ def show_author_stats(db: CalibreDB, *, quiet: bool = False) -> None:
 
     for s in stats:
         series = series_by_author.get(s["author"], set())
-        rating_str = f"avg rating: {s['avg_rating']:.1f}" if s["rated_count"] else "unrated"
+        rating_str = (
+            f"avg rating: {s['avg_rating']:.1f}" if s["rated_count"] else "unrated"
+        )
         formats_str = ", ".join(s["formats"])
         series_str = f"{len(series)} series" if series else "no series"
 

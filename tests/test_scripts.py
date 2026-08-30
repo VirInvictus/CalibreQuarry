@@ -566,9 +566,7 @@ class TestFetchLibraryCodesGuard(unittest.TestCase):
     """
 
     def test_probe_is_name_only_never_args(self):
-        with mock.patch(
-            "subprocess.run", return_value=mock.Mock(returncode=1)
-        ) as run:
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)) as run:
             self.assertFalse(fetch_library_codes.calibre_running())
         argv = run.call_args.args[0]
         self.assertEqual(argv[0], "pgrep")
@@ -579,9 +577,7 @@ class TestFetchLibraryCodesGuard(unittest.TestCase):
         # which the old exact-match -x "calibre" could never see; the anchored
         # prefix must. Verified live 2026-08-30 against a running Calibre with
         # four workers.
-        with mock.patch(
-            "subprocess.run", return_value=mock.Mock(returncode=0)
-        ) as run:
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as run:
             self.assertTrue(fetch_library_codes.calibre_running())
         self.assertTrue(run.call_args.args[0][-1].startswith("^calibre"))
 

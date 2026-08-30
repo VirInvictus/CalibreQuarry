@@ -66,9 +66,7 @@ class TestVersionSync(unittest.TestCase):
                     notes_version = m.group(1)
                     break
 
-        self.assertIsNotNone(
-            notes_version, "No version heading found in patchnotes.md"
-        )
+        self.assertIsNotNone(notes_version, "No version heading found in patchnotes.md")
         self.assertEqual(
             notes_version,
             CODE_VERSION,
