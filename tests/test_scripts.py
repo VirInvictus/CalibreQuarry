@@ -880,6 +880,7 @@ class TestStampPdfGuards(unittest.TestCase):
         joined = "A One & A Two"
         ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
             mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok) as run,
             mock.patch.object(
                 stamp_pdf,
@@ -918,6 +919,7 @@ class TestStampPdfGuards(unittest.TestCase):
         backup = Path(self.tmp.name + "-backups")
         ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
             mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok) as run,
             mock.patch.object(
                 stamp_pdf,

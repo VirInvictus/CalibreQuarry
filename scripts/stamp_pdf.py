@@ -80,11 +80,7 @@ def _read_ebook_meta(path: Path) -> dict[str, str]:
     return out
 
 
-def _check_prereqs(files: list[Path]) -> int | None:
-    for tool in ("exiftool", "ebook-meta"):
-        if shutil.which(tool) is None:
-            print(f"ERROR: {tool} not found on PATH.", file=sys.stderr)
-            return 2
+def _check_files(files: list[Path]) -> int | None:
     for f in files:
         if not f.is_file():
             print(f"ERROR: no such file: {f}", file=sys.stderr)
@@ -96,6 +92,16 @@ def _check_prereqs(files: list[Path]) -> int | None:
                 f"ERROR: not a PDF: {f} (EPUBs are read natively; never stamp them)",
                 file=sys.stderr,
             )
+            return 2
+    return None
+
+
+def _check_tools() -> int | None:
+    # Only the write path needs the external CLIs: a dry-run previews from
+    # arguments alone and must work on machines without exiftool.
+    for tool in ("exiftool", "ebook-meta"):
+        if shutil.which(tool) is None:
+            print(f"ERROR: {tool} not found on PATH.", file=sys.stderr)
             return 2
     return None
 
@@ -198,7 +204,7 @@ def main() -> int:
     args = parser.parse_args()
 
     files = [Path(f).expanduser() for f in args.files]
-    if rc := _check_prereqs(files):
+    if rc := _check_files(files):
         return rc
     if not (args.title or args.author or args.publisher or args.isbn):
         print(
@@ -217,6 +223,8 @@ def main() -> int:
             return 2
         backup_dir = Path(args.backup_dir).expanduser()
         if rc := _validate_backup_dir(backup_dir, files):
+            return rc
+        if rc := _check_tools():
             return rc
         backup_dir.mkdir(parents=True, exist_ok=True)
 
