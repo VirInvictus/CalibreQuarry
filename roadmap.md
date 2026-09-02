@@ -337,3 +337,7 @@ it batch-shaped and closes the two write gaps the batch exposed.*
 
 Non-goals: no `--get-id` alias (the verb is `--book` and it shipped in 3.22.0);
 no new read APIs (they belong to cquarry per the frontend-only split).
+- [ ] **`fetch_library_codes.py` SQLite locking & concurrency protection**:
+  - **Context**: During a Phase 3 import (2026-09-02), dispatching `--apply` (for LCC) to the background and immediately dispatching `--apply --write-ddc` (for DDC) created concurrent DB writers, risking SQLite lock contention on `metadata.db`.
+  - **Required Fix**: Enhance `fetch_library_codes.py` to handle both LCC and DDC code fetches efficiently in a single pass (e.g., via `--all-codes` or if `--write-ddc` is passed, check both at once without locking each other), or implement robust retry/backoff logic for SQLite `database is locked` errors during `WritableCalibreDB` transactions.
+  - **Skill sync**: Upon completion, update the `phase-3-import` skill in Brandon's library to teach the new unified invocation or remove the strict manual-serialization warning if the locking is fully hardened.
