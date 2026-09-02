@@ -34,3 +34,13 @@ dev = [
 ]
 
 
+
+keywords = ["calibre", "ebooks", "library", "tui", "cli"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
