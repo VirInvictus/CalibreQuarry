@@ -74,16 +74,12 @@ Running with no arguments launches a full-screen interactive TUI (arrow-key navi
 ## Installation
 
 ```bash
-pip install .
+pip install calibrequarry
 # or
-pipx install .
+pipx install calibrequarry
+# or
+uv tool install calibrequarry
 ```
-
-`cquarry` (the library) and `vir-tui` are git dependencies tracked at `@main` —
-every fresh install picks up the newest upstream, never a pinned release. There
-is deliberately no committed `uv.lock`: `uv sync` re-resolves the latest on
-every run. If you want a frozen environment anyway, generate a lock locally
-(`uv lock`) and keep it out of version control.
 
 This gives you the `cquarry` command:
 
@@ -101,7 +97,7 @@ PYTHONPATH=src python -m cquarry_cli --stats
 
 ## Requirements
 
-Python 3.14+. Requires `cquarry`, `vir-tui` (shared TUI primitives, tracked at `@main`), and `tqdm` (`sqlite3`, `json`, `csv`, `argparse`, `curses`, `re`, `unicodedata`, `datetime`).
+Python 3.14+. Requires `cquarry`, `vir-tui`, and `tqdm` (`sqlite3`, `json`, `csv`, `argparse`, `curses`, `re`, `unicodedata`, `datetime`).
 
 (3.14 is the tested floor, matching the development environment. The code does not lean on bleeding-edge language features, so it is likely fine on somewhat older interpreters, but only 3.14+ is supported.)
 
