@@ -7,6 +7,15 @@ name = "calibrequarry"
 version = "3.26.0"
 description = "Calibre library toolkit: catalog, stats, audit, export"
 readme = "README.md"
+keywords = ["calibre", "ebooks", "library", "tui", "cli"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
 requires-python = ">=3.14"
 license = {text = "MIT"}
 authors = [
@@ -35,12 +44,3 @@ dev = [
 
 
 
-keywords = ["calibre", "ebooks", "library", "tui", "cli"]
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Environment :: Console :: Curses",
-    "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.14",
-    "Topic :: Utilities",
-]
