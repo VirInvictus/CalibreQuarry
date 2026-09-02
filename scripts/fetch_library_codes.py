@@ -36,6 +36,7 @@ Run from the library directory:
     python3 fetch_library_codes.py --id 8541,8542     # dry run, specific books
     python3 fetch_library_codes.py --apply            # write identifiers
     python3 fetch_library_codes.py --apply --write-ddc  # also store ddc
+    python3 fetch_library_codes.py --apply --all-codes  # one pass, both codes
 
 Exit codes:
     0 = completed (with or without hits)
@@ -62,6 +63,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
 
+from cquarry.write import WritableCalibreDB
 from vir_tui import core as ui
 
 SRU_BASE = "http://lx2.loc.gov:210/LCDB"
@@ -212,7 +214,9 @@ def load_targets(
             """
             SELECT b.id, b.title, i.val,
                    EXISTS(SELECT 1 FROM identifiers x
-                           WHERE x.book = b.id AND x.type = 'lcc')
+                           WHERE x.book = b.id AND x.type = 'lcc'),
+                   EXISTS(SELECT 1 FROM identifiers x
+                           WHERE x.book = b.id AND x.type = 'ddc')
               FROM books b
               JOIN identifiers i ON i.book = b.id AND i.type = 'isbn'
              ORDER BY b.id
@@ -242,6 +246,7 @@ def load_targets(
                 "tag": display_tag(tags, prefixes),
                 "tags": tags,
                 "has_lcc": bool(r[3]),
+                "has_ddc": bool(r[4]),
             }
         )
     return out
@@ -309,21 +314,63 @@ def backup_db(db_path: str) -> str:
 
 
 def write_identifiers(db_path: str, writes: list[tuple[int, str, str]]) -> int:
-    """INSERT OR REPLACE identifiers. UNIQUE(book,type) makes this an upsert."""
-    con = sqlite3.connect(db_path)
-    try:
-        con.execute("BEGIN IMMEDIATE")
-        con.executemany(
-            "INSERT OR REPLACE INTO identifiers(book, type, val) VALUES (?, ?, ?)",
-            writes,
+    """Store identifiers through cquarry's write module; returns how many
+    actually changed.
+
+    This used to be a raw INSERT OR REPLACE: it worked, but it bypassed the
+    ecosystem's only sanctioned write path, so the touched books never landed
+    in `metadata_dirtied` (Calibre never regenerated their sidecar .opfs) and
+    `last_modified` never moved. `set_identifier` inside one `batch()`
+    transaction fixes both. Concurrent writers are absorbed by the module's
+    30s busy timeout plus the retry/backoff below (the 2026-09-02 incident:
+    two background --apply passes contending on the write lock). Identical
+    values are no-ops and are not counted, so a `--refresh` re-run reports
+    honestly.
+    """
+    delay = 2.0
+    for attempt in range(4):
+        try:
+            with WritableCalibreDB(db_path) as wdb:
+                with wdb.batch():
+                    return sum(wdb.set_identifier(b, t, v) for b, t, v in writes)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) and "busy" not in str(e):
+                raise
+            if attempt == 3:
+                raise
+            time.sleep(delay)
+            delay *= 2
+    raise AssertionError("unreachable")
+
+
+def _needs_query(t: dict, want_ddc: bool) -> bool:
+    """A book needs querying when the pass wants a code it does not have."""
+    if want_ddc:
+        return not (t["has_lcc"] and t["has_ddc"])
+    return not t["has_lcc"]
+
+
+def write_misses_worklist(results: list[dict], path: str) -> int:
+    """Emit the manual-research worklist: every book the SRU pass could not
+    code, one per line as `id<TAB>isbn<TAB>ddc<TAB>title`, so the follow-up
+    research pass starts from a file instead of terminal scrollback. A report
+    artifact, not a database write: it is produced in dry runs too."""
+    misses = [r for r in results if not r.get("lcc")]
+    if not misses:
+        return 0
+    lines = [
+        f"# fetch_library_codes misses: {len(misses)} book(s) with no LCC.",
+        "# Manual research pass: find the code, then",
+        "#   wdb.set_identifier(<id>, 'lcc', '<code>')",
+        "# id\tisbn\tddc\ttitle",
+    ]
+    for r in misses:
+        lines.append(
+            f"{r['id']}\t{r.get('isbn', '')}\t{r.get('ddc') or ''}\t{r['title']}"
         )
-        con.commit()
-    except Exception:
-        con.rollback()
-        raise
-    finally:
-        con.close()
-    return len(writes)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    return len(misses)
 
 
 # --------------------------------------------------------------------------
@@ -337,7 +384,7 @@ def branch_of(tag: str) -> str:
     return ".".join(parts[:2]) if len(parts) >= 2 else parts[0]
 
 
-def report(results: list[dict], quiet: bool) -> None:
+def report(results: list[dict], quiet: bool, want_ddc: bool = False) -> None:
     hits = Counter()
     total = Counter()
     for r in results:
@@ -354,6 +401,9 @@ def report(results: list[dict], quiet: bool) -> None:
         if n
         else "nothing queried"
     )
+    if want_ddc and n:
+        ddc_got = sum(1 for r in results if r.get("ddc"))
+        print(f"DDC found for {ddc_got} ({ddc_got / n:.0%})")
     if quiet or not n:
         return
 
@@ -367,7 +417,7 @@ def report(results: list[dict], quiet: bool) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Derive LCC/DDC codes from the Library of Congress SRU catalogue.",
-        epilog="Default is a dry run; nothing is written without --apply.",
+        epilog="Default is a dry run; nothing is written to the database without --apply. (The misses worklist file is a report artifact and is written in dry runs too.)",
     )
     ap.add_argument("--db", help="path to metadata.db (default: ./metadata.db)")
     ap.add_argument(
@@ -375,6 +425,20 @@ def main() -> int:
     )
     ap.add_argument(
         "--write-ddc", action="store_true", help="also store the ddc identifier"
+    )
+    ap.add_argument(
+        "--all-codes",
+        dest="all_codes",
+        action="store_true",
+        help="one pass storing both lcc and ddc (they arrive in the same "
+        "SRU query; selects every book missing either code)",
+    )
+    ap.add_argument(
+        "--misses-file",
+        default="fetch_library_codes_misses.txt",
+        help="worklist file for the manual-research pass, written whenever a "
+        "book ends the pass with no LCC (default: "
+        "fetch_library_codes_misses.txt in the current directory)",
     )
     ap.add_argument("--sample", type=int, metavar="N", help="random sample of N books")
     ap.add_argument(
@@ -446,8 +510,9 @@ def main() -> int:
         print("nothing to do: no book with an ISBN matched --id/--tag")
         return 0
     selected = len(targets)
+    want_ddc = args.write_ddc or args.all_codes
     if not args.refresh:
-        targets = [t for t in targets if not t["has_lcc"]]
+        targets = [t for t in targets if _needs_query(t, want_ddc)]
     if args.sample and args.sample < len(targets):
         random.seed(args.seed)
         targets = random.sample(targets, args.sample)
@@ -457,13 +522,17 @@ def main() -> int:
 
     if not targets:
         print(
-            f"nothing to do: all {selected} selected book(s) already have an lcc identifier"
+            f"nothing to do: all {selected} selected book(s) already have the "
+            f"requested code(s) ({'lcc+ddc' if want_ddc else 'lcc'})"
         )
         return 0
 
     cache = {} if args.no_cache else load_cache(args.cache)
     mode = "APPLY" if args.apply else "DRY RUN"
-    print(f"{mode}: {len(targets)} book(s) with an ISBN and no LCC")
+    print(
+        f"{mode}: {len(targets)} book(s) with an ISBN and no "
+        f"{'LCC/DDC' if want_ddc else 'LCC'}"
+    )
     print(f"pacing {args.delay}s between requests; cached results reused")
     if not args.apply:
         print("(nothing will be written; re-run with --apply to store)")
@@ -530,12 +599,18 @@ def main() -> int:
 
             if lcc:
                 writes.append((t["id"], "lcc", lcc))
-                if args.write_ddc and ddc:
-                    writes.append((t["id"], "ddc", ddc))
+            if want_ddc and ddc:
+                # DDC rides the same SRU response; store it whenever it was
+                # asked for and found, even for a book the catalogue has no
+                # LCC for (the old nesting silently dropped exactly those).
+                writes.append((t["id"], "ddc", ddc))
+
+            shown = lcc or (ddc if want_ddc else None)
+            if shown:
                 if not args.quiet:
                     ui.tqdm.write(
                         ui.success(
-                            f"  [{i}/{len(targets)}] HIT  {lcc:<24} #{t['id']} {t['title'][:40]}"
+                            f"  [{i}/{len(targets)}] HIT  {shown:<24} #{t['id']} {t['title'][:40]}"
                         )
                     )
             elif not args.quiet:
@@ -555,7 +630,10 @@ def main() -> int:
         if not args.no_cache:
             save_cache(args.cache, cache)
 
-    report(results, args.quiet)
+    report(results, args.quiet, want_ddc=want_ddc)
+    misses = write_misses_worklist(results, args.misses_file)
+    if misses:
+        print(f"wrote {misses} miss(es) to {args.misses_file} for the manual pass")
 
     if not writes:
         print("\nno codes found; nothing to write")
@@ -574,7 +652,7 @@ def main() -> int:
     except sqlite3.Error as e:
         print(f"write error: {e}", file=sys.stderr)
         return 1
-    print(f"wrote {n} identifier(s).")
+    print(f"stored {n} of {len(writes)} identifier(s).")
     print("Next: run validate_metadata.py, then reconcile_file_metadata.py --apply")
     if aborted:
         print("NOTE: the pass stopped early; re-run to cover the remaining books.")

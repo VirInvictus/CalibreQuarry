@@ -254,6 +254,17 @@ def action_set_identifier(book_id, id_type, value, *, quiet=False):
     return _do
 
 
+def action_clear_identifier(book_id, id_type, *, quiet=False):
+    def _do(wdb):
+        changed = wdb.clear_identifier(book_id, id_type)
+        if not quiet:
+            state = "cleared" if changed else "already absent"
+            print(f"Identifier {id_type!r} on book {book_id} {state}.")
+        return 0
+
+    return _do
+
+
 def action_set_series(book_id, name, index=None, *, quiet=False):
     def _do(wdb):
         wdb.set_series(book_id, name, index)
@@ -442,7 +453,9 @@ def op_set_identifier(db_path, book_id, id_type, value, *, quiet=False) -> int:
 
 
 def op_clear_identifier(db_path, book_id, id_type, *, quiet=False) -> int:
-    return op_set_identifier(db_path, book_id, id_type, "", quiet=quiet)
+    # cquarry >= 1.9 has the explicit helper (same observable behavior as the
+    # old set_identifier-with-empty-value route, minus the indirection).
+    return run_write(db_path, action_clear_identifier(book_id, id_type, quiet=quiet))
 
 
 def op_set_series(db_path, book_id, name, index=None, *, quiet=False) -> int:

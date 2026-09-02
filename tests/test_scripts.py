@@ -16,6 +16,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -593,6 +595,140 @@ class TestFetchLibraryCodesGuard(unittest.TestCase):
 
         with mock.patch("subprocess.run", side_effect=hang):
             self.assertTrue(fetch_library_codes.calibre_running())
+
+
+class TestFetchNeedsQuery(unittest.TestCase):
+    """--all-codes selection: a book needs querying when the pass wants a
+    code it does not already have."""
+
+    def test_needs_query_semantics(self):
+        f = fetch_library_codes
+        both = {"has_lcc": True, "has_ddc": True}
+        lcc_only = {"has_lcc": True, "has_ddc": False}
+        neither = {"has_lcc": False, "has_ddc": False}
+        self.assertFalse(f._needs_query(both, want_ddc=False))
+        self.assertFalse(f._needs_query(both, want_ddc=True))
+        self.assertFalse(f._needs_query(lcc_only, want_ddc=False))
+        self.assertTrue(f._needs_query(lcc_only, want_ddc=True))
+        self.assertTrue(f._needs_query(neither, want_ddc=False))
+        self.assertTrue(f._needs_query(neither, want_ddc=True))
+
+
+class TestFetchMissesWorklist(unittest.TestCase):
+    """The manual-research pass starts from a file, not scrollback."""
+
+    def test_worklist_written_with_misses_only(self):
+        results = [
+            {
+                "id": 1,
+                "title": "Has LCC",
+                "isbn": "9780000000001",
+                "lcc": "PS1",
+                "ddc": None,
+            },
+            {
+                "id": 2,
+                "title": "No LCC",
+                "isbn": "9780000000002",
+                "lcc": None,
+                "ddc": "519.5",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "misses.txt"
+            n = fetch_library_codes.write_misses_worklist(results, str(path))
+            self.assertEqual(n, 1)
+            text = path.read_text()
+        self.assertIn("2\t9780000000002\t519.5\tNo LCC", text)
+        self.assertNotIn("Has LCC", text)
+
+    def test_no_misses_no_file(self):
+        results = [{"id": 1, "title": "T", "isbn": "x", "lcc": "PS1", "ddc": None}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "misses.txt"
+            self.assertEqual(
+                fetch_library_codes.write_misses_worklist(results, str(path)), 0
+            )
+            self.assertFalse(path.exists())
+
+
+class TestFetchWriteIdentifiers(unittest.TestCase):
+    """The write path goes through cquarry's write module (dirtied queue,
+    last_modified) and waits out concurrent writers."""
+
+    def _make_db(self, path):
+        con = sqlite3.connect(path)
+        con.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT,
+                timestamp TEXT, last_modified TEXT, path TEXT);
+            CREATE TABLE identifiers (
+                id INTEGER PRIMARY KEY, book INTEGER, type TEXT, val TEXT,
+                UNIQUE(book, type));
+            CREATE TABLE metadata_dirtied (book INTEGER UNIQUE);
+            """
+        )
+        con.execute("INSERT INTO books (id,title) VALUES (1,'T1')")
+        con.execute("INSERT INTO books (id,title) VALUES (2,'T2')")
+        con.commit()
+        con.close()
+
+    def test_stores_counts_changes_and_queues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "metadata.db")
+            self._make_db(db)
+            n = fetch_library_codes.write_identifiers(
+                db, [(1, "lcc", "PS1"), (2, "ddc", "519.5")]
+            )
+            self.assertEqual(n, 2)
+            # A --refresh re-run with identical values changes nothing and
+            # says so, instead of counting the same rows again.
+            n2 = fetch_library_codes.write_identifiers(
+                db, [(1, "lcc", "PS1"), (2, "ddc", "519.5")]
+            )
+            self.assertEqual(n2, 0)
+            con = sqlite3.connect(db)
+            try:
+                pairs = dict(
+                    con.execute("SELECT book, type FROM identifiers").fetchall()
+                )
+                self.assertEqual(pairs, {1: "lcc", 2: "ddc"})
+                dirtied = [
+                    r[0] for r in con.execute("SELECT book FROM metadata_dirtied")
+                ]
+                self.assertEqual(sorted(dirtied), [1, 2])
+                lm = con.execute(
+                    "SELECT last_modified FROM books WHERE id = 1"
+                ).fetchone()[0]
+                self.assertTrue(lm)
+            finally:
+                con.close()
+
+    def test_write_waits_out_a_concurrent_writer(self):
+        # The 2026-09-02 incident: two background --apply passes contending
+        # on the write lock. The writer now waits (30s busy timeout) instead
+        # of dying on "database is locked"; a short-held lock proves it.
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "metadata.db")
+            self._make_db(db)
+            blocker = sqlite3.connect(db, check_same_thread=False)
+            blocker.execute("BEGIN IMMEDIATE")
+            started = threading.Event()
+
+            def release():
+                started.wait(timeout=5)
+                time.sleep(1.0)
+                blocker.rollback()
+                blocker.close()
+
+            th = threading.Thread(target=release)
+            th.start()
+            started.set()
+            try:
+                n = fetch_library_codes.write_identifiers(db, [(1, "lcc", "PS1")])
+            finally:
+                th.join()
+            self.assertEqual(n, 1)
 
 
 screen_duplicate = _load("screen_duplicate")

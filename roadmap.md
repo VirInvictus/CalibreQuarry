@@ -1,6 +1,6 @@
 # CalibreQuarry — Roadmap
 
-What's done, what's next. Updated as of v3.23.1.
+What's done, what's next. Updated as of v3.26.0.
 
 ---
 
@@ -274,11 +274,15 @@ it batch-shaped and closes the two write gaps the batch exposed.*
 > next session resumes there and this repo's remaining boxes are its
 > downstream sync (as release 3.24.0).
 
-- [ ] **`--book` batch forms**: accept comma-separated ids (`--book
+- [x] **`--book` batch forms**: accept comma-separated ids (`--book
   8884,8885,8886`) and an `--book --untagged` selector (the phase-3 entry state
   is "all untagged books"). Curating a batch today means a hand-rolled
   `get_book()` loop; the dossier renderer (`modes/detail.py show_book`) is
   already per-book and composes in a loop unchanged.
+  *(Shipped in 3.26.0: `--book` takes a comma list; `--book --untagged` (no
+  ids) sources them from `cquarry.integrity.find_untagged`. A bare `--book`
+  or `--book 1 --untagged` are usage errors (exit 2); an unknown id inside a
+  list renders the rest and exits 1, matching the single-id behavior.)*
 - [x] **`show_book`: print `pubdate`.** The dossier prints added/modified dates
   but not the publication date — a field phase 3 explicitly checks (Jan-01
   placeholder dates are one of its standard catches). One-line fix in
@@ -314,7 +318,7 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   never args), verified live against a running Calibre with four workers, and
   the phase-3 skill's wrong "matches process args" warning was rewritten in the
   same pass.)*
-- [ ] **Skill sync**: the phase-3-import skill in Brandon's library
+- [x] **Skill sync**: the phase-3-import skill in Brandon's library
   (`~/docs/Calibre Library/.claude/skills/`) should name the `--book` batch
   form in its "read EVERY field" step, and soften its LoC-sequencing warning
   once the guard fix above stops the false positives. **This item is a floor,
@@ -322,10 +326,19 @@ it batch-shaped and closes the two write gaps the batch exposed.*
   flag that landed differently, a default that changed, a new failure mode the
   tests surfaced — gets documented in the affected skills in the same release,
   even when this phase didn't predict it.
-- [ ] **`fetch_library_codes.py` misses worklist**: when the hit rate is under
+  *(Done in 3.26.0: the skill's dossier step names the batch forms and
+  `--book --untagged`; the LoC step teaches the one-pass `--all-codes`
+  invocation and drops the strict manual-serialization warning (the writer
+  now retries over contention); the manual-insert SQL there had already moved
+  to `wdb.set_identifier` in the cquarry 1.9 sync.)*
+- [x] **`fetch_library_codes.py` misses worklist**: when the hit rate is under
   100%, emit a worklist file (id, title, identifiers) of the misses so the
   skill's mandatory manual-research pass starts from a file instead of terminal
   scrollback (2026-08-27: 3 misses were tracked by hand).
+  *(Shipped in 3.26.0: `--misses-file` (default
+  `fetch_library_codes_misses.txt` in the CWD) gets every book ending the pass
+  with no LCC as `id<TAB>isbn<TAB>ddc<TAB>title`; written in dry runs too — it
+  is a report artifact, not a database write.)*
 
 - [x] **Consume cquarry Phase 9's `get_book_dossier()`** once it lands: `show_book`
   becomes a thin renderer over the composed dossier dict instead of hand-calling
@@ -337,7 +350,18 @@ it batch-shaped and closes the two write gaps the batch exposed.*
 
 Non-goals: no `--get-id` alias (the verb is `--book` and it shipped in 3.22.0);
 no new read APIs (they belong to cquarry per the frontend-only split).
-- [ ] **`fetch_library_codes.py` SQLite locking & concurrency protection**:
+- [x] **`fetch_library_codes.py` SQLite locking & concurrency protection**:
   - **Context**: During a Phase 3 import (2026-09-02), dispatching `--apply` (for LCC) to the background and immediately dispatching `--apply --write-ddc` (for DDC) created concurrent DB writers, risking SQLite lock contention on `metadata.db`.
   - **Required Fix**: Enhance `fetch_library_codes.py` to handle both LCC and DDC code fetches efficiently in a single pass (e.g., via `--all-codes` or if `--write-ddc` is passed, check both at once without locking each other), or implement robust retry/backoff logic for SQLite `database is locked` errors during `WritableCalibreDB` transactions.
   - **Skill sync**: Upon completion, update the `phase-3-import` skill in Brandon's library to teach the new unified invocation or remove the strict manual-serialization warning if the locking is fully hardened.
+  - *(Shipped in 3.26.0, both halves. `--all-codes` does one pass for both
+  codes — they arrive in the same SRU response, so the second pass only ever
+  re-read the cache; its selection covers books missing either code, and the
+  DDC write left the LCC branch (a DDC-only book used to be silently dropped
+  even under `--write-ddc`). The writer moved from raw `INSERT OR REPLACE` to
+  `cquarry.write.WritableCalibreDB.set_identifier` in one `batch()` — touched
+  books finally land in `metadata_dirtied` and `last_modified` moves — with
+  retry/backoff over `database is locked` on top of the module's 30s busy
+  timeout; identical values are honest no-ops, so `--refresh` re-runs report
+  the real change count. `--clear-identifier` (already present since 3.19.0)
+  now routes through cquarry 1.9's explicit helper.)*

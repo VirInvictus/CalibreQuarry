@@ -1,4 +1,55 @@
+# 3.26.0 (2026-09-02)
+
+### Phase 15 closes: batch dossiers, the clear verb, and the fetch script's single-pass rewrite
+
+- **`--book` batch forms.** `--book` takes a comma-separated id list
+  (`--book 8884,8885,8886`) and composes the dossier renderer in a loop; a
+  bare `--book --untagged` (no ids) selects every untagged book through
+  cquarry's `find_untagged()` — the phase-3 curation entry state, which used
+  to mean a hand-rolled `get_book()` loop per batch. An unknown id inside a
+  list renders the books that exist and exits 1, matching the single-id
+  behavior; conflicting or empty forms are usage errors (exit 2).
+- **`--show-custom` speaks both names.** cquarry 1.9's dual resolution flows
+  straight through `load_custom_column`, so `--show-custom` now accepts the
+  display name (`Status`), the bare label, or the `#label`
+  (`#reading_status`); the docs' old "asymmetry" warnings are rewritten. No
+  code change was needed beyond the cquarry bump — the flag routed through
+  `load_custom_column` all along.
+- **`--clear-identifier BOOK_ID TYPE`** existed since 3.19.0 but reached the
+  deletion as `set_identifier(..., "")`; it now calls cquarry 1.9's explicit
+  `clear_identifier()` (same observable behavior, honest naming).
+- **`fetch_library_codes.py` gains `--all-codes` and a misses worklist, and
+  its write path moves inside the sanctioned one.**
+  - LCC and DDC arrive in the same SRU response, so `--all-codes` stores both
+    in ONE pass and selects every book missing either code; the old flow
+    (an LCC `--apply`, then `--apply --write-ddc` behind it) created exactly
+    the concurrent-writer contention that bit the 2026-09-02 import.
+  - Bug fix riding along: the DDC write was nested inside the LCC-hit branch,
+    so a book the catalogue has DDC but no LCC for was silently dropped even
+    under `--write-ddc`. The writes are now independent.
+  - The writer is no longer a raw `INSERT OR REPLACE`: it goes through
+    `cquarry.write.WritableCalibreDB.set_identifier` in one `batch()`
+    transaction, so touched books land in `metadata_dirtied` (Calibre
+    regenerates their sidecar .opfs) and `last_modified` moves — neither
+    happened before. Retry/backoff over `database is locked` rides on top of
+    the module's 30s busy timeout; identical values are honest no-ops, so a
+    `--refresh` re-run reports the real change count.
+  - Every book ending the pass with no LCC is written to a misses worklist
+    (`--misses-file`, default `fetch_library_codes_misses.txt`) as
+    `id<TAB>isbn<TAB>ddc<TAB>title` — the manual-research pass starts from a
+    file instead of terminal scrollback (2026-08-27: three misses tracked by
+    hand). The worklist is a report artifact and is written in dry runs too.
+- **Version/docs re-sync.** This roadmap's header catches up (was "as of
+  v3.23.1"); README, spec's companion table, and CLAUDE.md carry the new
+  surface. Phase 15 is fully ticked; the phase-3 skill names the batch forms
+  and the one-pass fetch invocation.
+- Tests: 201 → 213 (batch/untagged forms and exit codes, `--show-custom`'s
+  both-forms catalog render, `--all-codes` selection semantics, the misses
+  worklist, and `write_identifiers`' change-counting, dirtied queueing, and
+  wait-out-a-concurrent-writer behavior).
+
 # 3.25.0 (2026-08-30)
+
 - **Feature**: `scripts/screen_duplicate.py` — the phase-1 duplicate screen as a tool. Reads each download's embedded title/authors/ISBN with `ebook-meta` (filenames are display hints only; they lie), matches exact ISBN first, then normalized title + first author over cquarry's tight `=` search with Python-side normalization (accent/case fold, leading-article strip, subtitle/edition scrub — "Capital: Volume I" screens against "Capital: A Critique of Political Economy"), and screens within the batch too. Prints the comparison columns (existing id/title/authors/formats/size/pages) the skill says to report before judging keep/upgrade/re-source; `--format json` for the batch report; report-only, exit 0/1/2.
 - **Feature**: `scripts/stamp_pdf.py` — the phase-1 pre-stamp as a tool. Fixed exiftool field set (Title/XMP-dc:Title, Author/XMP-dc:Creator, XMP-dc:Publisher, ISBN via `-Keywords=isbn:...` — never `-XMP-dc:Identifier`, which Calibre maps to a bogus doi); multi-`--author` joins with " & " (documented opposite of `--set-authors`' `;`); dry-run by default with the filename-derivation preview beside the requested stamp; `--apply` requires `--backup-dir`, refused if it resolves inside any target's directory (a backup beside the file gets imported); verifies with `ebook-meta` and prints STAMP_FAILED on read-back disagreement instead of re-fighting a stubborn XMP store. Mechanics only — value choice stays the agent's research step (stated in the docstring).
 - **Docs**: spec §5's companion table gained both scripts; README gained a companion-scripts section; the phase-1 skill names both tools in its duplicate-screen and pre-stamp steps.

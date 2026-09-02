@@ -3,6 +3,7 @@ import sys
 
 from cquarry.db import CalibreDB
 from cquarry.helpers import find_db
+from cquarry.integrity import find_untagged
 
 from cquarry_cli import VERSION
 from cquarry_cli.modes.analytics import (
@@ -32,6 +33,26 @@ from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
 from cquarry_cli.tui import interactive_menu
 from cquarry_cli.writeops import dispatch_write
+
+
+def _book_ids(value: str) -> list[int]:
+    """Parse --book's id list: `42` or `42,43,44` (whitespace tolerated).
+
+    An empty string is the bare `--book` form (argparse applies the type to
+    the const too) and comes back as an empty list for the dispatch to
+    resolve: with --untagged it selects the untagged set, without one it is
+    a usage error.
+    """
+    ids: list[int] = []
+    for part in (value or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.append(int(part))
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"invalid book id {part!r}") from None
+    return ids
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,11 +118,22 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument(
         "--book",
         dest="book",
-        type=int,
+        nargs="?",
+        const="",
         default=None,
-        metavar="BOOK_ID",
-        help="Show the full record for one book: identifiers, format files, "
-        "cover, comments, custom columns, annotations, reading progress",
+        type=_book_ids,
+        metavar="BOOK_ID[,BOOK_ID...]",
+        help="Show the full record for one book or a comma-separated list: "
+        "identifiers, format files, cover, comments, custom columns, "
+        "annotations, reading progress. With --untagged, give no ids to "
+        "select every untagged book",
+    )
+    p.add_argument(
+        "--untagged",
+        dest="untagged",
+        action="store_true",
+        help="With --book: select every untagged book (the phase-3 entry "
+        "state) instead of listing ids; use as `--book --untagged`",
     )
     group.add_argument(
         "--entities",
@@ -583,8 +615,32 @@ def main(argv: list[str] | None = None) -> int:
                 show_tag_dump(db, quiet=args.quiet)
                 return 0
 
-            if args.book is not None:
-                ok = show_book(db, args.book, quiet=args.quiet)
+            if args.untagged or args.book is not None:
+                if args.untagged:
+                    if args.book:
+                        print(
+                            "ERROR: --untagged selects the books itself; give "
+                            "--book ids, or use `--book --untagged` with no ids.",
+                            file=sys.stderr,
+                        )
+                        return 2
+                    ids = find_untagged(db)
+                    if not ids:
+                        print("No untagged books: the library is fully tagged.")
+                        return 0
+                elif not args.book:
+                    print(
+                        "ERROR: --book needs at least one id, or --book --untagged.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                else:
+                    ids = args.book
+                ok = True
+                for i, book_id in enumerate(ids):
+                    if i and not args.quiet:
+                        print()
+                    ok = show_book(db, book_id, quiet=args.quiet) and ok
                 return 0 if ok else 1
 
             if args.entities:

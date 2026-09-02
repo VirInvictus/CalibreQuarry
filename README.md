@@ -56,7 +56,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Set title** | `--set-title BOOK_ID TITLE` | Rename a book through cquarry's opt-in write module (trigger-safe; refreshes the sort key and queues an OPF regeneration). Close Calibre first |
 | **Write verbs** | `--set-authors`, `--set-rating`, `--set-comments` / `--clear-comments`, `--set-column` / `--clear-column`, `--remove-book [--confirm-remove]` | Core opt-in write surface via cquarry ≥1.5: authors (author_sort recomputed), ratings (0–5), comments HTML, generic custom columns (enum-validated, non-editable refused) and guarded book removal (dry-run by default) |
 | **Write verbs, expanded** | `--add-tag` / `--remove-tag`, `--set-identifier` / `--clear-identifier`, `--set-series` (+ `--series-index`) / `--clear-series`, `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages`, `--add-format` / `--remove-format`, `--set-cover` | Full coverage of cquarry ≥1.5's write module: tags (orphaned rows pruned), identifier EAV upserts, series assignment with index, publisher, language lists (canonicalized `English` → `eng`), format registration/removal, and the has-cover flag. All queue OPF regeneration via `metadata_dirtied` |
-| **Book detail** | `--book BOOK_ID` | Full dossier for one book: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; publication date shown alongside the timestamps |
+| **Book detail** | `--book BOOK_ID[,BOOK_ID...]`, `--book --untagged` | Full dossier for one book or a comma-separated list: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; publication date shown alongside the timestamps. `--book --untagged` (no ids) selects every untagged book — the phase-3 curation entry state — via cquarry's `find_untagged()` |
 | **Entities** | `--entities KIND` | List `authors`/`series`/`publishers`/`tags`/`languages`/`ratings` with book counts; authors/series/publishers carry their sort and link columns |
 | **Reading progress** | `--reading-progress` | Every recorded reading position across devices with progress bars, newest first |
 | **Custom columns** | `--columns` | Custom-column schema: label, search location, datatype, editability, enum values |
@@ -67,7 +67,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
 | **Version** | `--version` | Show version and exit |
 
-Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column, `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search`, `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
+Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search`, `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
 
 Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager — supporting `/` search and `n`/`N` match jumping — or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions. Its menu covers every read mode above plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats — all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
 
@@ -338,10 +338,10 @@ Custom columns are referred to by **two different names**, which is easy to trip
 
 | Where | Which name | Example |
 |-------|-----------|---------|
-| `--show-custom` | the column's **display name** (what you see in Calibre) | `--show-custom "Status"` |
+| `--show-custom` | the column's **display name** (what you see in Calibre) or its `#label` — both resolve since cquarry 1.9 | `--show-custom "Status"` or `--show-custom "#reading_status"` |
 | `--search` (the `#` prefix) | the column's **lookup name** (label), prefixed with `#` | `--search '#reading_status:Read'` |
 
-These two names are often different (display "Status", lookup `reading_status`). In Calibre, the lookup name is the one shown in *Preferences → Add your own columns* under "Lookup name"; the `#` search prefix always uses that one. If `--show-custom` reports "not found", the error lists the valid display names.
+These two names are often different (display "Status", lookup `reading_status`). In Calibre, the lookup name is the one shown in *Preferences → Add your own columns* under "Lookup name"; the `#` search prefix always uses that one. Since cquarry 1.9 the two are bridged: `--show-custom` resolves the display name, the bare label, or the `#label` form (an exact display name wins if a bare key is ambiguous), and a "not found" error lists every column as `name (#label)`.
 
 **Watch the contains-vs-exact trap on enumerations.** A custom search is a substring match by default, so `#reading_status:Read` also matches `Reading` and `To Read` (both contain "read"). For the exact value, use `=`: `#reading_status:=Read`. Quote values with spaces: `#reading_status:"=To Read"`.
 
@@ -385,7 +385,7 @@ Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same co
 
 **The shell mangles my query.** Wrap the whole expression in single quotes and use double quotes inside: `cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'`. Without single quotes, your shell treats `OR`/`AND`/parentheses as separate arguments.
 
-**"Custom column not found" (`--show-custom`).** Use the column's *display* name (e.g. `Status`); the error lists the available names. Note the asymmetry: `--show-custom` wants the display name, but a `#` search wants the *lookup* name (`#reading_status`). See [Custom columns](#custom-columns).
+**"Custom column not found" (`--show-custom`).** Any of the three forms works since cquarry 1.9 — display name (`Status`), bare label (`reading_status`), or `#label` (`#reading_status`) — and the error lists every column as `name (#label)`. The `#` search grammar has always spoken `#label`. See [Custom columns](#custom-columns).
 
 **A `#custom` search matches too many rows.** Custom searches are substring matches, so `#reading_status:Read` also catches `Reading` and `To Read`. Use `=` for an exact value: `#reading_status:=Read`.
 
@@ -413,12 +413,13 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
                --analytics {author,pace,tags,overlap} | --audit |
                --recent [RECENT] | --series | --export | --search QUERY |
-               --wings | --tags | --book BOOK_ID | --entities KIND |
+               --wings | --tags | --book [BOOK_ID[,BOOK_ID...]] | --entities KIND |
                --reading-progress | --columns | --info] [--exportlt]
                [--export-annotations] [--id BOOK_ID] [--plugin-data NAME]
                [--db DB] [--wing WING] [--output OUTPUT] [--outdir OUTDIR]
                [--format {json,csv,ai}] [--primary-only] [--show-tags]
                [--show-id] [--show-custom COL_NAME] [--show-author-details]
+               [--untagged]
                [--quiet] [--set-title BOOK_ID TITLE]
                [--set-authors BOOK_ID NAMES] [--set-rating BOOK_ID STARS]
                [--set-comments BOOK_ID HTML] [--clear-comments BOOK_ID]
@@ -455,9 +456,14 @@ options:
                         over e-reader highlights
   --wings               List all virtual library wings
   --tags                Dump every tag with its book count
-  --book BOOK_ID        Show the full record for one book: identifiers, format
-                        files, cover, comments, custom columns, annotations,
-                        reading progress
+  --book [BOOK_ID[,BOOK_ID...]]
+                        Show the full record for one book or a comma-separated
+                        list: identifiers, format files, cover, comments,
+                        custom columns, annotations, reading progress. With
+                        --untagged, give no ids to select every untagged book
+  --untagged            With --book: select every untagged book (the phase-3
+                        entry state) instead of listing ids; use as `--book
+                        --untagged`
   --entities KIND       List an entity class with book counts
                         (authors/series/publishers include sort and link
                         columns)
@@ -723,9 +729,10 @@ python3 scripts/fetch_library_codes.py --tag NonFic     # scope by tag prefix (a
 python3 scripts/fetch_library_codes.py --id 8541,8542   # specific books
 python3 scripts/fetch_library_codes.py --apply          # write the identifiers
 python3 scripts/fetch_library_codes.py --apply --write-ddc   # also store ddc
+python3 scripts/fetch_library_codes.py --apply --all-codes   # one pass, both codes
 ```
 
-Books that already have an `lcc` identifier are skipped unless you pass `--refresh`, so the tool is naturally incremental: run it again after an import and it only queries the new books. `--apply` backs up `metadata.db` to the sibling `.backups` directory first and refuses to run while Calibre is open. Sample output:
+Books that already have the requested code are skipped unless you pass `--refresh`, so the tool is naturally incremental: run it again after an import and it only queries the new books (`--all-codes` selects books missing *either* code). LCC and DDC arrive in the same SRU response, so `--all-codes` stores both in one pass and the old two-pass dance (an LCC `--apply`, then a `--apply --write-ddc` behind it) is retired — two concurrent writers on `metadata.db` were exactly the lock-contention incident that motivated it. `--apply` backs up `metadata.db` to the sibling `.backups` directory first and refuses to run while Calibre is open; the write itself goes through cquarry's `WritableCalibreDB` (so touched books land in the `metadata_dirtied` OPF-resync queue and `last_modified` moves) with retry/backoff over a busy database. Every book that ends the pass without an LCC is written to the misses worklist (`--misses-file`, default `fetch_library_codes_misses.txt` in the current directory) as `id<TAB>isbn<TAB>ddc<TAB>title`, so the manual-research pass starts from a file instead of terminal scrollback. Sample output:
 
 ```
 DRY RUN: 12 book(s) with an ISBN and no LCC

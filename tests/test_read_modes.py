@@ -172,6 +172,93 @@ class TestBookDetail(_TempDBCase):
         self.assertEqual(rc, 1)
 
 
+class TestBookBatchForms(_TempDBCase):
+    """v3.26.0: --book takes comma-separated ids and an --untagged selector
+    (the phase-3 entry state: show every untagged book's dossier)."""
+
+    def _add_book(self, book_id, title, tagged=False):
+        con = sqlite3.connect(self.db_path)
+        try:
+            con.execute(
+                "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+                "has_cover,last_modified,series_index,path,uuid) VALUES "
+                "(?,?,?,?,'2024-01-01','2024-01-01',0,'2024-01-02 00:00:00',1.0,?,?)",
+                (book_id, title, title, "X", f"x/{book_id}", f"uuid-{book_id}"),
+            )
+            if tagged:
+                con.execute(
+                    "INSERT INTO books_tags_link (book,tag) VALUES (?,1)", (book_id,)
+                )
+            con.commit()
+        finally:
+            con.close()
+
+    def _main(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main([*argv, "--db", self.db_path])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_comma_list_renders_each_book(self):
+        self._add_book(2, "Specific Heat")
+        rc, out, _ = self._main("--book", "1,2")
+        self.assertEqual(rc, 0)
+        self.assertIn("Dune", out)
+        self.assertIn("Specific Heat", out)
+
+    def test_comma_list_unknown_id_renders_the_rest_and_fails(self):
+        rc, out, err = self._main("--book", "1,999")
+        self.assertEqual(rc, 1)
+        self.assertIn("Dune", out)
+        self.assertIn("no book with id 999", err)
+
+    def test_untagged_selector_renders_only_untagged(self):
+        self._add_book(2, "Untagged Book")
+        self._add_book(3, "Another Tagged", tagged=True)
+        rc, out, _ = self._main("--book", "--untagged")
+        self.assertEqual(rc, 0)
+        self.assertIn("Untagged Book", out)
+        self.assertNotIn("Dune", out)
+        self.assertNotIn("Another Tagged", out)
+
+    def test_untagged_selector_clean_when_fully_tagged(self):
+        rc, out, _ = self._main("--book", "--untagged")
+        self.assertEqual(rc, 0)
+        self.assertIn("No untagged books", out)
+
+    def test_untagged_with_ids_is_a_usage_error(self):
+        rc, _, _ = self._main("--book", "1", "--untagged")
+        self.assertEqual(rc, 2)
+
+    def test_bare_book_flag_without_selector_is_a_usage_error(self):
+        rc, _, err = self._main("--book")
+        self.assertEqual(rc, 2)
+        self.assertIn("--book needs at least one id", err)
+
+    def test_show_custom_accepts_label_form(self):
+        # cquarry 1.9's dual resolution reaches the CLI through
+        # load_custom_column: the #label form and the display name both work.
+        with tempfile.TemporaryDirectory() as td:
+            out_path = os.path.join(td, "catalog.txt")
+            rc, _, _ = self._main(
+                "--catalog", "--show-custom", "#read", "--output", out_path
+            )
+            self.assertEqual(rc, 0)
+            with open(out_path, encoding="utf-8") as fh:
+                catalog = fh.read()
+        self.assertIn("#read", catalog)
+        # The historical display-name form resolves to the same column.
+        with tempfile.TemporaryDirectory() as td:
+            out_path = os.path.join(td, "catalog.txt")
+            rc, _, _ = self._main(
+                "--catalog", "--show-custom", "Read", "--output", out_path
+            )
+            self.assertEqual(rc, 0)
+            with open(out_path, encoding="utf-8") as fh:
+                catalog = fh.read()
+        self.assertIn("Read", catalog)
+
+
 class TestEntitiesAndProgress(_TempDBCase):
     def test_entities_authors_with_sort_and_link(self):
         _, out, _ = self._capture(show_entities, self.db, "authors")
