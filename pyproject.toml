@@ -14,11 +14,9 @@ authors = [
 ]
 dependencies = [
   "tqdm",
-   "vir-tui @ git+https://github.com/VirInvictus/vir-tui.git@main",
-  # Front-end of cquarry: always track its main branch so every install
-  # (pip, uv without a lock, CI) picks up the newest cquarry. Never pin a
-  # tag or commit here, and keep uv.lock out of the repo (see .gitignore).
-  "cquarry @ git+https://github.com/VirInvictus/cquarry.git@main",]
+  "vir-tui>=2.2.0",
+  "cquarry>=1.9.0",
+]
 
 [project.scripts]
 cquarry = "cquarry_cli.cli:main"
@@ -35,6 +33,4 @@ dev = [
     "pytest-asyncio>=1.4.0",
 ]
 
-[tool.hatch.metadata]
-allow-direct-references = true
 
