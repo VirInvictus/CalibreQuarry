@@ -47,7 +47,7 @@ The search engine provided by `cquarry` ports Calibre's grammar and matching sem
 
 - `~` regex uses the stdlib `re` engine, not Calibre's third-party `regex` module.
 - Accent/contains folding uses `unicodedata` (NFKD), not ICU collation, so punctuation-insensitivity is not reproduced.
-- GPM templates (`@...:`) and saved-search references (`search:`) are not evaluated.
+- GPM templates (`@...:`) are tokenized but not evaluated. Saved-search references (`search:"Name"`) ARE evaluated, interpolated from the `preferences` table (cquarry 1.1).
 - `tags:` uses cquarry's anchored hierarchical match (`Foo` matches `Foo` and `Foo.*`) rather than Calibre's raw substring default. This is a long-standing invariant; `=` opts into strict exact match.
 
 ### 2.4 Database Access

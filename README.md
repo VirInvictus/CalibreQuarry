@@ -325,7 +325,7 @@ Matching is near-complete but not bit-for-bit identical to Calibre, by design: C
 
 * `~` regex uses Python's stdlib `re`, not Calibre's `regex` module (`\X`, `VERSION1` semantics differ).
 * Accent/contains folding uses `unicodedata` (NFKD), not ICU, so it is accent- and case-insensitive but not punctuation-insensitive.
-* GPM templates (`@...:`) and saved-search references (`search:`) are not evaluated.
+* GPM templates (`@...:`) are tokenized but not evaluated. Saved-search references (`search:"Name"`) ARE evaluated, interpolated from Calibre's `preferences` table (cquarry 1.1).
 * `tags:` is **anchored-hierarchical** (matches `Foo` and `Foo.*`), where Calibre's raw default is an unanchored substring. This is intentional and is what curated dotted taxonomies want; use `=` for strict exact.
 
 ### Custom columns
@@ -361,10 +361,10 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 ### Automated Test Suite
 
-The whole suite runs without a Calibre library (stdlib `unittest`, ~273 tests):
+The whole suite runs without a Calibre library (stdlib `unittest`, 213 tests):
 
-- **Modes** (`tests/test_modes.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, and the audit's cover checks, all against a temporary database.
-- **TUI** (`tests/test_tui.py`): fallback-menu generation, prompt/cancel semantics, non-ASCII prompt input, and the persistent-screen session lifecycle.
+- **Modes** (`tests/test_modes.py`, `tests/test_read_modes.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, the audit's cover checks, and the read-mode renderers, all against a temporary database.
+- **Write flows** (`tests/test_write_flow.py`, `tests/test_write_expand.py`): the write verbs against a temporary database, including batch all-or-nothing rollback.
 - **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`, `tests/test_audit_isbns.py`): `compress_pdf.py` size-sync and backup guards, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, DRM classification, and the ISBN arithmetic, printed-ISBN extraction, and verdict rules behind `audit_isbns.py`.
 
 Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same command CI runs). The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
@@ -573,7 +573,6 @@ python3 scripts/compress_pdf.py book.pdf --out-dir ~/out # write a copy elsewher
 ```
 
 Exit codes: `0` compressed/verified (or clean inspect), `1` aborted (no shrink, page-count mismatch), `2` setup error (Ghostscript missing, unreadable file).
-Exit codes: `0` clean (THIN is advisory), `1` a real problem (foreign content, baked page numbers, empty book, OCR-damaged prose) or a scan error, `2` setup error.
 
 ### `audit_drm.py` — flag DRM-locked files across every format (read-only)
 

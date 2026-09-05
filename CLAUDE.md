@@ -28,8 +28,8 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - `src/cquarry_cli/writeops.py`: Shared write-verb plumbing: `run_write()` owns the WritableCalibreDB lifecycle; `dispatch_write()` maps CLI flags onto per-verb executors the TUI also calls.
 - `tests/`: End-to-end integration tests using `cquarry_cli` directly against the database (the unit tests for `cquarry.db` and `cquarry.search` were moved to the `cquarry` library).
 
-> **Important:** The core database logic (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library. Additionally, the generic UI formatting and Curses menu primitives have been extracted to the `vir-tui` shared repository. CalibreQuarry relies on both of these external dependencies. (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library package. CalibreQuarry relies on this external dependency.
+> **Important:** The core database logic (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library, and the generic UI formatting and curses menu primitives were extracted to the `vir-tui` shared repository. CalibreQuarry is a frontend over both; do not re-derive database logic inline that the library provides.
 
 ## Conventions
-- Single source of truth for version is `src/cquarry_cli/__init__.py`.
+- Single source of truth for version is `src/cquarry_cli/__init__.py`; `tests/test_version.py` pins it equal to the root `VERSION` file, `pyproject.toml`, and the newest `patchnotes.md` heading.
 - Run tests with `./run_tests.sh`. Test the CLI, not just the functions.

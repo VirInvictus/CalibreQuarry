@@ -76,6 +76,12 @@ What's done, what's next. Updated as of v3.26.0.
 - [x] **`audit_drm.py`** (v3.3.0): cross-format DRM scanner (EPUB/PDF/MOBI/AZW3; DJVU is N/A), library or loose-directory mode, read-only. Clears the two benign cases a crude check trips on (font obfuscation, including `fonts/*.dat` named fonts; PDF permission flags) and catches residual/inactive handler dictionaries by streaming byte scan. Built after a residual Adobe ADEPT dictionary in a z-library PDF (#7893) slipped the pre-import battery and broke its reconcile embed. First whole-library sweep flagged 48 live DRM files (all recoverable Adobe ADEPT PDF dictionaries; v3.3.1 reclassified a lone residual FairPlay EPUB marker as benign once it was clear the marker, not content encryption, was all that remained).
 - [x] **`audit_epub.py ocr` analyzer** (v3.6.0) — a fourth body-text analyzer (`content|pagenumbers|emptytext|ocr|all`) flagging OCR/conversion-damaged prose, the defect class none of the existing three catches. Primary signal: mid-sentence paragraph splits, where a paragraph ends without terminal punctuation (lowercase letter or comma) and the next paragraph starts lowercase. Motivating case (2026-07-03): a damaged Jingo EPUB measured 80 such splits ("could just make out the shape" / "of another boat"); a clean edition of the same text measured 0. The planned rate-only threshold turned out not to separate style from damage (deliberately unpunctuated literary prose — Fosse, Evaristo, Kingsnorth, Faulkner — posts higher split rates than damaged books); the shipped gate adds a function-word-fraction discriminator (damage splits at line-wrap positions, so fragments end on function words; style splits at clause boundaries) plus guards for five legitimate idioms found during validation (figure-interrupted paragraphs, display math as text, rendered indexes, epistolary sign-offs, block quotations). Secondary signals, all dictionary-free to keep the stdlib-only contract, are reported but never gate: en-dashes embedded inside words (`bottom–feedin'`), doubled opening quotes (`' 'Course`), and space-stripped proper nouns recurring alongside their hyphenated form (`AnkhMorpork` vs `Ankh-Morpork` in the same book). Hand-validated against the full 4,605-EPUB reference library, every flagged book inspected: 105 flagged, 104 confirmed damage, 1 borderline residue (publisher-styled display quotes, indistinguishable without CSS). Out of scope, documented in the script header: character-substitution errors ("sonic" for "some") need a wordlist; word-truncation and whitespace-corruption damage carry different signatures. `all` gained the fourth analyzer inside the same single decompression pass. Tests grew to 60: split detection (true mid-sentence split; dialogue fragment and scene break as non-splits), image-interrupted pairs, style-vs-damage discrimination, threshold boundaries, and an `all` run that includes the new analyzer.
 
+> **Historical note (added 2026-09-05):** the `audit_epub*.py` companions the rows
+> above shipped were extracted to their own repository on 2026-08-21 (commit
+> `7fce60c`) and no longer live in `scripts/`; the analyzers ship today inside
+> bindery-cli as `bindery audit` (its v0.15.0). The rows stay as the release
+> record; the scripts themselves are gone from this repo.
+
 ## Phase 7: Judgement & External-Catalogue Companions (v3.7.0–v3.8.0)
 *Companion evolution continues: quality checks that need a human verdict, and the first external-catalogue integration. All in `scripts/`, outside the package contract.*
 
@@ -365,3 +371,189 @@ no new read APIs (they belong to cquarry per the frontend-only split).
   timeout; identical values are honest no-ops, so `--refresh` re-runs report
   the real change count. `--clear-identifier` (already present since 3.19.0)
   now routes through cquarry 1.9's explicit helper.)*
+
+## Phase 16: Set-oriented write verbs & the phase-2 write mechanics (proposed 2026-09-05)
+
+*Context: approved by Brandon 2026-09-05. The read side became batch-shaped in
+Phase 15 (`--book 1,2,3`, `--book --untagged`); the write side never did. Every
+write verb carries exactly one inline id today, multi-verb mode composes verbs
+over one invocation's flags with no shared target set, and the planned automated
+phase-2 import (Phase 17) needs scoped set writes: clear the downloaded tags and
+rating on the ids it just imported, set `#audience`, apply mechanical fixes.
+Two safety facts shape the design: cquarry's `set_rating(id, None)` is a true
+clear (deletes the link, prunes the orphan) while `--set-rating ID 0` writes a
+phantom 0-rating row that reads as unrated; and the library NON-NEGOTIABLES ban
+bulk edits of ratings, which the design honors by making the rating clear legal
+ONLY against a manifest of ids that same run imported.*
+
+- [ ] **Target-set mechanism** — exactly one source per invocation, mutually
+      exclusive (else exit 2): `--ids ID[,ID...]`, `--from-search 'EXPR'`
+      (resolved read-only via the search engine before anything opens
+      writable), `--from-untagged` (reuses `find_untagged`), `--from-manifest
+      FILE` (ids one per line or comma-separated; unknown ids reported and
+      aborted before `--apply`). All existing single-book verbs stay
+      byte-for-byte unchanged; combining a target source with inline ids is a
+      usage error.
+- [ ] **Set-mode verbs** (id-less `--batch-*` forms reusing the existing action
+      builders and `run_write_batch`): add/remove tag, clear tags, clear
+      rating, set/clear column, add-column-value (append for `is_multiple`
+      columns), set/clear pubdate, set title/authors/publisher/languages/
+      series (+`--series-index`), set/clear identifier, set cover, remove
+      format. `--remove-book` is NOT available in set mode: deletion stays
+      per-book, explicit, and recoverable.
+- [ ] **Dry-run by default.** Prints the target source verbatim, the resolved
+      id count and list, and a per-verb preview; `--apply` executes and
+      nothing opens `WritableCalibreDB` without it. On apply: Calibre-closed
+      guard (anchored `pgrep ^calibre`), mandatory `--backup-dir` (the
+      `stamp_pdf.py` precedent), then ONE `batch()` transaction;
+      `--commit-per-book` as the documented non-default escape hatch for very
+      large sets.
+- [ ] **The rating carve-out, mechanically encoded:** `--batch-clear-rating` is
+      accepted only when the target source is `--from-manifest`;
+      `--from-search`, `--from-untagged`, and `--ids` are refused with exit 2.
+      The NON-NEGOTIABLES' bulk-ratings ban stays enforced for every set
+      Brandon could point at; the automated phase-2 reset stays legal because
+      the manifest proves which ids that run imported. Set-mode verbs also
+      refuse `#reading_status`, `status`, and `date_read` by label with exit 2
+      (belt-and-braces on the absolute ban).
+- [ ] **Reporting:** per-verb `applied / already-so / failed` counts plus a
+      per-id failure list, and `--format json`
+      (`{target, verbs, results[{id, verb, status, detail}], committed}`) so
+      an AI caller consumes the run. Exit 0/1/2. Requires threading the
+      setters' `changed` returns through the actions (today the batch summary
+      prints "ok" unconditionally, so applied vs already-so is not
+      distinguishable).
+- [ ] **Depends on cquarry** (its roadmap Phase 11): `clear_tags(book_id)`,
+      `add_custom_column_values(book_id, label, values)` (Pattern-A append
+      with dedupe against the `UNIQUE(book, value)` link table), optional
+      `clear_rating` alias. Everything else already exists in
+      `cquarry.write`.
+- [ ] **Skill sync**: phase-3-import names the set forms where it teaches
+      per-id loops, if any land in its workflow. Floor, not ceiling, per the
+      standing rule.
+
+Open questions (Brandon): flag naming (shared sources + `--batch-*` verbs, as
+ specced, vs per-verb `@file` in the existing id slot); whether
+`--batch-clear-rating` should also accept an explicit `--ids` list; backup
+location (mandatory `--backup-dir` vs automatic `.bak-*` beside the DB); and
+whether `--set-rating ID 0` should be remapped to a clear or rejected in the
+single-book path (it currently writes the phantom row).
+
+Non-goals: no `add_book` (cquarry Phase 10); no book deletion in set mode; no
+set-mode comments/description writes (description curation is phase 3's
+curated house-voice step; bulk comment overwrite is exactly the regression
+class it guards against); no implicit library-wide predicates; no change to
+single-verb behavior; no dependency pinning.
+
+## Phase 17: The acquisition run commands — `run phase1/2/3` + the manifest (proposed 2026-09-05)
+
+*Context: Brandon's 2026-09-05 decision promotes the three-phase acquisition
+pathway (today: the `phase-1-import` skill vetting `~/Downloads`, his manual
+import + metadata download, the `phase-3-import` skill curating `metadata.db`)
+into first-class CLI subcommands. `run phase1` and `run phase3` turn each
+skill's mechanical steps into one orchestrated pass that a user or an AI agent
+can run, surfacing judgment calls as structured decisions instead of re-reading
+prose. `run phase2` is the NEW automated middle phase, and it AMENDS the
+pathway's written-in-stone division of labour (library `CLAUDE.md` "The
+acquisition pathway"; the phase-1 skill's "Never import on Brandon's behalf").
+Feasibility was researched 2026-09-05 against the skills, the tooling, and the
+calibre 9.14 reference clone: import via cquarry's `add_book` (cquarry Phase
+10) with `calibredb add` as the documented fallback; headless metadata download
+is real — `calibredb` has no download command, but Calibre ships
+`fetch-ebook-metadata`, which drives the same source plugins the GUI uses, and
+`calibredb set_metadata` applies the result; downloaded junk tags/ratings are
+cleared through Phase 16's set-writes, manifest-scoped. Dependencies: bindery
+Phase 13 (`audit --json`, `run phase1`/`run phase3` slices), cquarry Phase 10
++ Phase 11, this repo's Phase 16.*
+
+**The pathway amendment, to land verbatim in the library `CLAUDE.md` and both
+skills in the same release as `run phase2`:** Phase 2 becomes tool-driven.
+`cquarry run phase2` imports ONLY the files on the phase-1 manifest's
+`approved_for_import` list, and that list is final only after Brandon answers
+the manifest's `decisions_needed` — his answer is the sign-off. The
+NON-NEGOTIABLES write shape binds phase 2 exactly as it binds phase 3
+(audit first, show findings, sign-off, `.bak` backup, one transaction for the
+DB-side pass, verify counts, docs updated). The "bulk edits of ratings" ban is
+interpreted as a ban on library-wide predicates: phase 2's clear is scoped to
+the ids THAT RUN imported, from its own manifest, never a search expression.
+
+- [ ] **The manifest** (`acquisition-manifest/1`): JSON, one per batch, in the
+      library-local `.claude/manifests/`. Carries per-file verdicts, checks,
+      repairs + backup paths, stamps, duplicates + recommendations,
+      quarantines, `decisions_needed`, and `approved_for_import`; phase 2
+      appends imported ids, per-book download outcomes, clears, and fixes;
+      phase 3 consumes it and emits the batch record. Machine-readable
+      hand-off between the phases and the calling agent; the prose
+      `.claude/project_preimport_*.md` record stays as the human summary.
+- [ ] **`cquarry run phase1 DIR`**: orchestrates the inventory, `audit_drm.py`,
+      `screen_duplicate.py --format json`, `stamp_pdf.py` driving, quarantine
+      moves, and the final report, plus a NEW `scripts/check_pdf.py` standing
+      wrapper for the per-file PDF/DJVU battery (header, page count,
+      `qpdf --check` with the real-vs-benign warning classes, `pdffonts`,
+      `pdftotext` sample, `pdfimages -list`, `djvused -e n`) — the last
+      hand-assembled battery in the skill. Invokes `bindery run phase1 --json`
+      as a subprocess for the EPUB slice and also accepts
+      `--bindery-report FILE` so the slices can be run peer-style by hand.
+      Read-only against `metadata.db`.
+- [ ] **`--book --format json`**: machine-readable dossier output (cquarry's
+      `get_book_dossier` already composes the dict; `show_book` renders text
+      only today). Phase 3's structured input.
+- [ ] **`scripts/comments_census.py`**: the description mechanical sweep as a
+      standing tool (`--`, spaced-hyphen dashes, `**`, `<br>`/`<div>` tags,
+      non-`<p>` body shape, soft hyphens, zero-width characters, mojibake,
+      ligature `?`, exact-duplicate bodies), retiring the inline three-liner
+      the skill re-derives every run.
+- [ ] **`cquarry run phase2 --manifest FILE [--audience ...] [--yes]`**: guard
+      Calibre closed + `.bak`; import each approved file through cquarry's
+      `add_book` (seed title/authors/identifiers/language/pubdate/publisher
+      from the manifest stamps; `calibredb add` as the documented fallback if
+      cquarry Phase 10 slips); write new ids back to the manifest and
+      cross-check them through `format_path_index()`; metadata download per id
+      via `fetch-ebook-metadata --identifier isbn:... -o book.opf` +
+      `calibredb set_metadata` (the one Calibre-open-safe segment; per-book
+      outcome recorded; no-result or ambiguous becomes a `decisions_needed`
+      entry, never a guess); clear tags + rating on the imported ids ONLY
+      (Phase 16, manifest-scoped); set cc9 `#audience` (default `Brandon`,
+      multi-value append via cquarry's `add_custom_column_values`); mechanical
+      title/author fixes only (filename-derived titles, pipe artifacts) —
+      real curation stays phase 3; and a clobber watch comparing phase-1 stamp
+      authors against post-download authors, recorded in the manifest for
+      phase 3 to restore from.
+- [ ] **`cquarry run phase3 --manifest FILE [--answer-file FILE]`**: validate →
+      batch set = manifest ids cross-checked against `find_untagged` → dossier
+      fetch (`--book --format json`) → decision gates (tag-by-precedent,
+      description curation, field fixes) rendered as prompts on a TTY or
+      consumed from `--answer-file` → ONE `WritableCalibreDB` `batch()`
+      transaction → taxonomy-declaration reminder → subprocess
+      `bindery run phase3` + `reconcile_file_metadata.py --apply --repair-pdf
+      --id` → re-validate to 0 errors → emit the `.claude/project_import_*.md`
+      batch record from the manifest.
+- [ ] **Skill sync (same release, both skills + the library `CLAUDE.md`)**: the
+      pathway amendment above; the phase-1 skill names `run phase1` as the
+      orchestrated form with its manual command list kept as the appendix; the
+      phase-3 skill names `run phase3`; the phase-2 section records the cc6
+      `source` decision below.
+
+Acceptance criteria: a seeded test-Downloads run produces a schema-valid
+manifest whose `approved_for_import` matches the hand-derived list; phase 2
+with Calibre open, or with non-empty `decisions_needed`, exits 2 without
+touching the DB; a 3-book test import yields exactly 3 new ids, zero tags,
+zero ratings, audience set, and manifest ids equal to `find_untagged`; killing
+phase 2 mid-batch leaves a resumable manifest and a `.bak` that diffs clean; a
+phase-3 `--answer-file` run lands validator-clean with the batch record
+written.
+
+Open questions (Brandon): cc6 `source` in phase 2 (set from manifest provenance
+vs leave for phase 3's `SOURCE_MISSING` loop); audience default (unconditional
+`Brandon` vs a per-file manifest column); lossy-strip consent (does signing the
+phase-1 report constitute standing consent for `--apply-lossy`); duplicate-net
+skips (when the import refuses a file as already-in-library: stop for a
+decision, or import anyway under `--duplicates` and flag the pair for phase 3);
+download residue (GUI one-keystroke fallback vs push to phase 3); manifest
+retention (archive after phase 3 vs keep as the durable record).
+
+Non-goals: no GUI automation; no Goodreads/Amazon API work (downloads ride
+Calibre's own source plugins); no taxonomy or genre decisions in phase 2; no
+bulk anything (every write is manifest-scoped); no replacement of the manual
+path (the skills' command lists remain the fallback and the documentation of
+record).
