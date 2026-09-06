@@ -78,11 +78,14 @@ def show_tag_tree(db: CalibreDB, *, quiet: bool = False) -> None:
     _print_tree(tree, indent=1)
 
 
-def show_genre_breakdown(db: CalibreDB, *, quiet: bool = False) -> None:
-    """Show every top-level genre as a share of the whole library.
+def show_genre_breakdown(db: CalibreDB, *, depth: int = 1, quiet: bool = False) -> None:
+    """Show the first `depth` levels of the tag hierarchy as library shares.
 
-    Rendered over cquarry.analytics' genre_distribution, sliced to the
-    roots of the tag hierarchy (genre = first dot-path segment).
+    Rendered over cquarry.analytics' genre_distribution (which already
+    carries every node of the hierarchy, tree-ordered): level 1 is the
+    genre roots, deeper levels indent under their parents with the last
+    path segment as the label. Every level is a share of the whole
+    library, not of its parent, so children need not sum to their parent.
     """
     dist = genre_distribution(db)
 
@@ -93,13 +96,20 @@ def show_genre_breakdown(db: CalibreDB, *, quiet: bool = False) -> None:
         print("No books in this library.")
         return
 
-    roots = [(name, share) for name, share in dist.items() if "." not in name]
-    width = max(len(name) for name, _ in roots)
-    max_share = roots[0][1]  # tree order: biggest root first
-    for name, share in roots:
+    rows = [
+        (name.count(".") + 1, name.rpartition(".")[2], share)
+        for name, share in dist.items()
+        if name.count(".") + 1 <= depth
+    ]
+    if not rows:
+        print(f"Nothing to show at depth {depth}.")
+        return
+    width = max(len(label) for level, label, share in rows)
+    max_share = rows[0][2]  # tree order: biggest root first
+    for level, label, share in rows:
         bar_len = int(share * 40 / max_share) if max_share else 0
         bar = "\u2588" * bar_len
-        print(f"  {name:<{width}}  {share * 100:5.1f}%  {bar}")
+        print(f"{'  ' * level}{label:<{width}}  {share * 100:5.1f}%  {bar}")
     print()
     print("  Multi-genre books count once per genre, so shares can sum over 100%.")
 

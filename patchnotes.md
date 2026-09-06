@@ -1,3 +1,23 @@
+# 3.28.0 (2026-09-06)
+
+### `--genre-depth N`: descend the genre hierarchy
+
+- **Second-level genres (and beyond) in the breakdown.**
+  `--analytics genres` now takes `--genre-depth N` (default 1, the
+  previous root-only shape). Depth 2 renders each root's children
+  indented beneath it, labeled by their last path segment (`SciFi`
+  under `Fic`, not the full `Fic.SciFi` path); deeper flags go deeper.
+  No cquarry change was needed: `genre_distribution()` already returns
+  every node of the hierarchy tree-ordered, so this is renderer slicing
+  only.
+- **Every level stays a share of the whole library.** A child's
+  percentage is its fraction of all books, not of its parent, so
+  children need not sum to their parent (a book with both `Fic.Fantasy`
+  and `Fic.SciFi` counts once toward each). The TUI's Genre Breakdown
+  entry prompts for the depth. `--genre-depth` below 1 is a usage error
+  (exit 2).
+- Suite 216 → 219.
+
 # 3.27.0 (2026-09-06)
 
 ### `--analytics genres`: every genre's share of the library

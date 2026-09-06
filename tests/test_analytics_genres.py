@@ -1,5 +1,6 @@
-"""Smoke tests for the v3.27 ``--analytics genres`` mode: the top-level
-genre share breakdown rendered over cquarry.analytics' genre_distribution.
+"""Smoke tests for the ``--analytics genres`` mode: the genre share
+breakdown rendered over cquarry.analytics' genre_distribution, including
+the v3.28 ``--genre-depth`` hierarchy levels.
 
 Exercised both directly (output assertions against a temp Calibre-shaped
 database) and through cli.main() for exit-code plumbing, mirroring
@@ -112,6 +113,12 @@ class _TempDBCase(unittest.TestCase):
             result = fn(*args, **kwargs)
         return result, out.getvalue(), err.getvalue()
 
+    def _main(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main([*argv, "--db", self.db_path])
+        return rc, out.getvalue(), err.getvalue()
+
 
 class TestGenreBreakdown(_TempDBCase):
     def test_renders_roots_shares_and_caveat(self):
@@ -138,6 +145,30 @@ class TestGenreBreakdown(_TempDBCase):
             rc = main(["--analytics", "genres", "--db", self.db_path])
         self.assertEqual(rc, 0)
         self.assertIn("Genre Breakdown", out.getvalue())
+
+    def test_depth_shows_children_under_their_roots(self):
+        # Depth 2 renders the second level as last-segment labels indented
+        # under their roots; each level stays a share of the whole library.
+        _, out, _ = self._capture(show_genre_breakdown, self.db, depth=2)
+        for label in ("Fantasy", "SciFi", "History", "TTRPG"):
+            self.assertIn(label, out)
+        self.assertNotIn("Fic.SciFi", out)  # last segment only, indented
+        # Tree order: every root precedes its children.
+        self.assertLess(out.index("Fic"), out.index("SciFi"))
+        self.assertLess(out.index("Gaming"), out.index("TTRPG"))
+        # Default depth keeps the root-only shape.
+        _, out1, _ = self._capture(show_genre_breakdown, self.db)
+        self.assertNotIn("SciFi", out1)
+
+    def test_cli_genre_depth_flag(self):
+        rc, out, _ = self._main("--analytics", "genres", "--genre-depth", "2")
+        self.assertEqual(rc, 0)
+        self.assertIn("SciFi", out)
+
+    def test_cli_genre_depth_below_one_exits_2(self):
+        rc, _, err = self._main("--analytics", "genres", "--genre-depth", "0")
+        self.assertEqual(rc, 2)
+        self.assertIn("--genre-depth", err)
 
     def test_cli_rejects_unknown_analytics_choice(self):
         out, err = io.StringIO(), io.StringIO()

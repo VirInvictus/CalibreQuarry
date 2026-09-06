@@ -237,6 +237,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Prefix each book with its Calibre ID for scripting",
     )
     p.add_argument(
+        "--genre-depth",
+        dest="genre_depth",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Levels of the tag hierarchy shown by --analytics genres "
+        "(default: 1, top-level genres only)",
+    )
+    p.add_argument(
         "--show-custom",
         dest="show_custom",
         default=None,
@@ -569,7 +578,10 @@ def main(argv: list[str] | None = None) -> int:
                 show_tag_tree(db, quiet=args.quiet)
                 return 0
             elif args.analytics == "genres":
-                show_genre_breakdown(db, quiet=args.quiet)
+                if args.genre_depth < 1:
+                    print("--genre-depth must be at least 1", file=sys.stderr)
+                    return 2
+                show_genre_breakdown(db, depth=args.genre_depth, quiet=args.quiet)
                 return 0
             elif args.analytics == "overlap":
                 show_wing_overlap(db, quiet=args.quiet)

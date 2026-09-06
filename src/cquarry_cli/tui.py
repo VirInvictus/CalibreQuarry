@@ -484,9 +484,11 @@ def _menu_session() -> int:
                     reset_terminal()
                     run_with_capture("Tag Tree", lambda: show_tag_tree(db))
                 elif result == (1, 3):
+                    depth = prompt_int("Levels of the tag hierarchy (1 = genres)", 1)
                     reset_terminal()
                     run_with_capture(
-                        "Genre Breakdown", lambda: show_genre_breakdown(db)
+                        "Genre Breakdown",
+                        lambda d=max(1, depth): show_genre_breakdown(db, depth=d),
                     )
                 elif result == (1, 4):
                     reset_terminal()

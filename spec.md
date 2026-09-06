@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.27.0  
+**Version:** 3.28.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -84,7 +84,7 @@ The path is saved to config on first successful resolution.
 | Audit | `--audit` | Untagged, unrated, coverless/low-res books, and covers the DB claims but the disk lacks; deprecated formats; duplicates; series gaps |
 | Recent | `--recent N` | N most recently added books |
 | Series | `--series` | All series with completeness and gap detection |
-| Analytics | `--analytics {author,pace,tags,genres,overlap}` | Per-author stats, reading-pace trend, tag tree, genre share breakdown, Wing overlap |
+| Analytics | `--analytics {author,pace,tags,genres,overlap}` | Per-author stats, reading-pace trend, tag tree, genre share breakdown (`--genre-depth N` for deeper hierarchy levels), Wing overlap |
 | Export | `--export` | Full library to JSON, CSV, or AI-readable format |
 | Search | `--search QUERY` | Books matching a search expression; prints to stdout, or a file with `--output` |
 | Annotations | `--export-annotations` | E-reader highlights/bookmarks/notes as JSON; `--id N` scopes to one book |
