@@ -56,6 +56,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Set title** | `--set-title BOOK_ID TITLE` | Rename a book through cquarry's opt-in write module (trigger-safe; refreshes the sort key and queues an OPF regeneration). Close Calibre first |
 | **Write verbs** | `--set-authors`, `--set-rating`, `--set-comments` / `--clear-comments`, `--set-column` / `--clear-column`, `--remove-book [--confirm-remove]` | Core opt-in write surface via cquarry ≥1.5: authors (author_sort recomputed), ratings (0–5), comments HTML, generic custom columns (enum-validated, non-editable refused) and guarded book removal (dry-run by default) |
 | **Write verbs, expanded** | `--add-tag` / `--remove-tag`, `--set-identifier` / `--clear-identifier`, `--set-series` (+ `--series-index`) / `--clear-series`, `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages`, `--add-format` / `--remove-format`, `--set-cover` | Full coverage of cquarry ≥1.5's write module: tags (orphaned rows pruned), identifier EAV upserts, series assignment with index, publisher, language lists (canonicalized `English` → `eng`), format registration/removal, and the has-cover flag. All queue OPF regeneration via `metadata_dirtied` |
+| **Set writes** | `--ids` / `--from-search` / `--from-untagged` / `--from-manifest` + `--batch-*` verbs, `--apply`, `--backup-dir`, `--format json` | One target set, many verbs, one transaction (Phase 16). Dry-run by default; `--apply` demands a closed Calibre and a backup of `metadata.db` outside the library directory, then commits as ONE `batch()` pass (all-or-nothing; `--commit-per-book` for very large sets). `--batch-clear-rating` is legal ONLY against a manifest (the bulk-ratings ban, mechanically enforced); `#reading_status`/`status`/`date_read` are refused by name; reporting counts applied / already-so / failed per verb, with a machine-readable JSON report |
 | **Book detail** | `--book BOOK_ID[,BOOK_ID...]`, `--book --untagged` | Full dossier for one book or a comma-separated list: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; publication date shown alongside the timestamps. `--book --untagged` (no ids) selects every untagged book — the phase-3 curation entry state — via cquarry's `find_untagged()` |
 | **Entities** | `--entities KIND` | List `authors`/`series`/`publishers`/`tags`/`languages`/`ratings` with book counts; authors/series/publishers carry their sort and link columns |
 | **Reading progress** | `--reading-progress` | Every recorded reading position across devices with progress bars, newest first |
@@ -67,7 +68,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
 | **Version** | `--version` | Show version and exit |
 
-Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search`, `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
+Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search` (and emits the set writes' machine-readable report as JSON), `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout, `--quiet` suppresses decorative output.
 
 Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager — supporting `/` search and `n`/`N` match jumping — or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions. Its menu covers every read mode above plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats — all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
 
@@ -125,6 +126,15 @@ cquarry --audit --db ~/Calibre/metadata.db --output audit.csv
 # Rename a book in place (writes via cquarry's WritableCalibreDB; queues an
 # OPF regeneration so Calibre picks the change up on its next startup)
 cquarry --set-title 42 "Dune Messiah" --db ~/Calibre/metadata.db
+
+# Set write: clear tags and set a column on every untagged book. Dry-runs
+# first (shows the resolved ids and planned verbs), then --apply commits the
+# whole pass as one transaction after backing metadata.db up outside the
+# library (Calibre must be closed)
+cquarry --from-untagged --batch-clear-tags --batch-set-column '#audience' Brandon \
+    --db ~/Calibre/metadata.db
+cquarry --from-untagged --batch-clear-tags --batch-set-column '#audience' Brandon \
+    --apply --backup-dir ~/backups --db ~/Calibre/metadata.db
 
 # Recently added books
 cquarry --recent 10 --db ~/Calibre/metadata.db
@@ -367,7 +377,7 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 The whole suite runs without a Calibre library (stdlib `unittest`, 213 tests):
 
 - **Modes** (`tests/test_modes.py`, `tests/test_read_modes.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, the audit's cover checks, and the read-mode renderers, all against a temporary database.
-- **Write flows** (`tests/test_write_flow.py`, `tests/test_write_expand.py`): the write verbs against a temporary database, including batch all-or-nothing rollback.
+- **Write flows** (`tests/test_write_flow.py`, `tests/test_write_expand.py`, `tests/test_write_reporting.py`, `tests/test_set_writes.py`): the write verbs against a temporary database, including batch all-or-nothing rollback, honest applied/already-so reporting, and the set-mode sources, dry-run/apply lifecycle, manifest-only rating carve-out, and banned-label refusals.
 - **Companion scripts** (`tests/test_scripts.py`, `tests/test_reconcile.py`, `tests/test_audit_drm.py`, `tests/test_audit_isbns.py`): `compress_pdf.py` size-sync and backup guards, `spot_check.py` lints and review-ledger paths, the reconcile diff/parse logic, DRM classification, and the ISBN arithmetic, printed-ISBN extraction, and verdict rules behind `audit_isbns.py`.
 
 Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same command CI runs). The shell scripts `run_tests.sh` (every CLI mode) and `test_queries.sh` (representative `--search` queries) smoke-test against a real library.
@@ -410,19 +420,19 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 
 ```
 usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
-               --analytics {author,pace,tags,overlap} | --audit |
+               --analytics {author,pace,tags,genres,overlap} | --audit |
                --recent [RECENT] | --series | --export | --search QUERY |
-               --wings | --tags | --book [BOOK_ID[,BOOK_ID...]] | --entities KIND |
-               --reading-progress | --columns | --info] [--exportlt]
-               [--export-annotations] [--id BOOK_ID] [--plugin-data NAME]
-               [--db DB] [--wing WING] [--output OUTPUT] [--outdir OUTDIR]
-               [--format {json,csv,ai}] [--primary-only] [--show-tags]
-               [--show-id] [--show-custom COL_NAME] [--show-author-details]
-               [--untagged]
-               [--quiet] [--set-title BOOK_ID TITLE]
-               [--set-authors BOOK_ID NAMES] [--set-rating BOOK_ID STARS]
-               [--set-comments BOOK_ID HTML] [--clear-comments BOOK_ID]
-               [--set-column BOOK_ID LABEL VALUE]
+               --wings | --tags | --book [BOOK_ID[,BOOK_ID...]] |
+               --entities KIND | --reading-progress | --columns | --info]
+               [--untagged] [--exportlt] [--export-annotations] [--id BOOK_ID]
+               [--plugin-data NAME] [--db DB] [--wing WING] [--output OUTPUT]
+               [--outdir OUTDIR] [--format {json,csv,ai}] [--primary-only]
+               [--show-tags] [--show-id] [--genre-depth N]
+               [--show-custom COL_NAME] [--show-author-details] [--quiet]
+               [--set-title BOOK_ID TITLE] [--set-authors BOOK_ID NAMES]
+               [--set-rating BOOK_ID STARS] [--set-pubdate BOOK_ID DATE]
+               [--clear-pubdate BOOK_ID] [--set-comments BOOK_ID HTML]
+               [--clear-comments BOOK_ID] [--set-column BOOK_ID LABEL VALUE]
                [--clear-column BOOK_ID LABEL] [--add-tag BOOK_ID TAG]
                [--remove-tag BOOK_ID TAG]
                [--set-identifier BOOK_ID TYPE VALUE]
@@ -433,6 +443,21 @@ usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
                [--add-format BOOK_ID FORMAT NAME SIZE]
                [--remove-format BOOK_ID FORMAT] [--set-cover BOOK_ID YES/NO]
                [--remove-book BOOK_ID] [--confirm-remove] [--format-stats]
+               [--ids ID[,ID...] | --from-search EXPR | --from-untagged |
+               --from-manifest FILE] [--batch-add-tag TAG]
+               [--batch-remove-tag TAG] [--batch-clear-tags]
+               [--batch-clear-rating] [--batch-set-column LABEL VALUE]
+               [--batch-clear-column LABEL]
+               [--batch-add-column-value LABEL VALUE]
+               [--batch-set-title TITLE] [--batch-set-authors NAMES]
+               [--batch-set-pubdate DATE] [--batch-clear-pubdate]
+               [--batch-set-publisher NAME] [--batch-clear-publisher]
+               [--batch-set-languages CODES] [--batch-clear-languages]
+               [--batch-set-series NAME] [--batch-clear-series]
+               [--batch-set-identifier TYPE VALUE]
+               [--batch-clear-identifier TYPE] [--batch-set-cover YES/NO]
+               [--batch-remove-format FMT] [--apply] [--backup-dir DIR]
+               [--commit-per-book]
 
 Calibre library toolkit: catalog, stats, audit, export
 
@@ -442,7 +467,7 @@ options:
   --catalog             Build a text catalog
   --all-wings           Generate catalogs for all virtual libraries
   --stats               Show library statistics
-  --analytics {author,pace,tags,overlap}
+  --analytics {author,pace,tags,genres,overlap}
                         Extended analytics and visualizations
   --audit               Report issues (untagged, unrated, series gaps)
   --recent [RECENT]     Show N most recently added books (default: 20)
@@ -492,6 +517,8 @@ options:
                         collections)
   --show-tags           Show tags instead of ratings in catalog output
   --show-id             Prefix each book with its Calibre ID for scripting
+  --genre-depth N       Levels of the tag hierarchy shown by --analytics
+                        genres (default: 1, top-level genres only)
   --show-custom COL_NAME
                         Load and display a specific custom column
   --show-author-details
@@ -507,6 +534,11 @@ write verbs (Calibre must be closed):
                         Replace authors ("Name One; Name Two"; ; = separator)
   --set-rating BOOK_ID STARS
                         Set rating (0-5, halves allowed)
+  --set-pubdate BOOK_ID DATE
+                        Set the publication date (YYYY-MM-DD or a full ISO
+                        datetime)
+  --clear-pubdate BOOK_ID
+                        Clear the publication date
   --set-comments BOOK_ID HTML
                         Set the comments/description HTML
   --clear-comments BOOK_ID
@@ -553,6 +585,69 @@ write verbs (Calibre must be closed):
   --confirm-remove      With --remove-book: actually delete instead of dry-
                         running
   --format-stats        Show per-format book counts and total bytes
+
+set writes (dry-run by default; --apply requires --backup-dir and Calibre closed):
+  --ids ID[,ID...]      Target set: explicit book ids (set mode)
+  --from-search EXPR    Target set: books matching a Calibre search
+                        expression, resolved read-only before anything opens
+                        writable
+  --from-untagged       Target set: every untagged book (the phase-3 entry
+                        state)
+  --from-manifest FILE  Target set: ids one per line or comma-separated in
+                        FILE; the only source that unlocks --batch-clear-
+                        rating
+  --batch-add-tag TAG   Add a tag to every targeted book (repeatable)
+  --batch-remove-tag TAG
+                        Remove a tag from every targeted book (repeatable)
+  --batch-clear-tags    Detach every tag from every targeted book
+  --batch-clear-rating  Clear the rating on every targeted book; ONLY legal
+                        with --from-manifest (the NON-NEGOTIABLES bulk-ratings
+                        ban)
+  --batch-set-column LABEL VALUE
+                        Write a custom-column value on every targeted book
+                        (#reading_status/#status/#date_read are refused)
+  --batch-clear-column LABEL
+                        Clear a custom-column value on every targeted book
+  --batch-add-column-value LABEL VALUE
+                        Append a value to a multi-valued custom column on
+                        every targeted book (repeatable; deduped per book)
+  --batch-set-title TITLE
+                        Rename every targeted book
+  --batch-set-authors NAMES
+                        Replace authors on every targeted book ('Name One;
+                        Name Two')
+  --batch-set-pubdate DATE
+                        Set the publication date on every targeted book
+  --batch-clear-pubdate
+                        Clear the publication date on every targeted book
+  --batch-set-publisher NAME
+                        Set the publisher on every targeted book
+  --batch-clear-publisher
+                        Clear the publisher on every targeted book
+  --batch-set-languages CODES
+                        Replace the languages on every targeted book
+  --batch-clear-languages
+                        Clear the languages on every targeted book
+  --batch-set-series NAME
+                        Put every targeted book in a series (--series-index
+                        optional)
+  --batch-clear-series  Remove every targeted book from its series
+  --batch-set-identifier TYPE VALUE
+                        Set an identifier (isbn, goodreads, ...) on every
+                        targeted book
+  --batch-clear-identifier TYPE
+                        Clear an identifier type on every targeted book
+  --batch-set-cover YES/NO
+                        Set the catalogued has_cover flag on every targeted
+                        book
+  --batch-remove-format FMT
+                        Drop a format row from every targeted book (files
+                        untouched)
+  --apply               Execute the planned set write (default is a dry run)
+  --backup-dir DIR      REQUIRED with --apply: metadata.db is copied here
+                        first; must sit outside the library directory
+  --commit-per-book     With --apply: one transaction per book instead of one
+                        for the whole pass (escape hatch for very large sets)
 ```
 
 ## Companion scripts

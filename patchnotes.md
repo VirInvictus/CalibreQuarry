@@ -1,3 +1,58 @@
+# 3.29.0 (2026-09-06)
+
+### Phase 16: set-oriented write verbs, one target set at a time
+
+- **One target set, many `--batch-*` verbs, one transaction.** The write
+  side catches up with Phase 15's batch-shaped read side: exactly one
+  target source per invocation (`--ids 1,2,3`, `--from-search 'EXPR'`
+  resolved read-only through the search engine, `--from-untagged` reusing
+  `find_untagged`, or `--from-manifest FILE` with ids one per line or
+  comma-separated) feeds id-less verbs: add/remove/clear tags, clear
+  rating, set/clear column, add-column-value (append for multi-valued
+  columns, via cquarry 1.13's `add_custom_column_values`), set/clear
+  pubdate, set title/authors/publisher/languages/series
+  (+`--series-index`), set/clear identifier, set cover, remove format.
+  Hand-supplied ids are validated read-only before anything opens
+  writable: unknown ids are reported and the run aborts (exit 2).
+  Deletion has no set form: `--remove-book` stays per-book.
+- **Dry-run by default.** A set write prints the verbatim target, the
+  resolved id count and list, and a per-verb preview; nothing opens
+  `WritableCalibreDB` without `--apply`. Apply demands a closed Calibre
+  (the anchored `pgrep ^calibre` guard, the `fetch_library_codes.py`
+  precedent) and a mandatory `--backup-dir` outside the library directory
+  (the `stamp_pdf.py` precedent), then commits the whole pass as ONE
+  `batch()` transaction: any failure rolls everything back.
+  `--commit-per-book` is the documented non-default escape hatch for very
+  large sets.
+- **The rating carve-out is mechanically encoded.** The library
+  NON-NEGOTIABLES ban bulk rating edits, so `--batch-clear-rating` is
+  accepted ONLY with `--from-manifest` (the manifest proves which ids
+  that run imported); `--ids`, `--from-search`, and `--from-untagged` are
+  refused with exit 2. The column verbs refuse `#reading_status`,
+  `status`, and `date_read` by label (case-insensitive), belt-and-braces
+  on the absolute ban.
+- **Honest reporting.** The write path's action builders now carry
+  cquarry's `changed` returns, so multi-verb summaries report
+  `applied:` / `already-so:` per verb instead of a blanket `ok:` (the
+  all-or-nothing rollback contract is untouched). Set mode reports
+  per-verb applied/already-so/failed counts plus the per-id failure list
+  on stderr, and `--format json` emits `{target, verbs, results[{id,
+  verb, status, detail}], committed, dry_run}`; a failed row rolls the
+  pass back and reports `committed: false` (exit 1). Exit 0 committed or
+  dry-run, 1 failures or lock, 2 usage.
+- **`--set-rating ID 0` now clears (behavior change).** It used to write
+  a phantom 0-rating row that reads as unrated everywhere while
+  polluting the ratings table; 0 now routes through the true clear
+  (`set_rating(id, None)`: link deleted, orphan pruned), matching
+  Calibre's own 0-stars semantics. This amends Phase 16's
+  no-single-verb-change non-goal for exactly this one case, Brandon's
+  call (2026-09-06); the other three open questions (flag naming,
+  manifest-only carve-out, `--backup-dir`) landed as specced.
+- **Skill sync.** The `phase-3-import` skill names the set forms where it
+  taught per-id CLI loops, with the rating carve-out called out so
+  rating changes there stay per-book.
+- Suite 225 → 257.
+
 # 3.28.0 (2026-09-06)
 
 ### `--genre-depth N`: descend the genre hierarchy

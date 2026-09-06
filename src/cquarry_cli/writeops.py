@@ -155,9 +155,18 @@ def action_set_authors(book_id, names, *, quiet=False):
 
 def action_set_rating(book_id, stars, *, quiet=False):
     def _do(wdb):
-        changed = wdb.set_rating(book_id, stars)
+        # 0 remaps to a true clear (set_rating(book_id, None): deletes the
+        # link, prunes the orphan). Writing a 0-rating row reads as unrated
+        # in every view while polluting the ratings table, so since 3.29.0
+        # zero means clear, matching Calibre's own 0-stars semantics.
+        cleared = stars == 0
+        changed = wdb.set_rating(book_id, None if cleared else stars)
         if not quiet:
-            print(f"Rated book {book_id} at {stars:g} stars.")
+            if cleared:
+                state = "Cleared" if changed else "Already clear:"
+                print(f"{state} rating of book {book_id}.")
+            else:
+                print(f"Rated book {book_id} at {stars:g} stars.")
         return 0, "applied" if changed else "already-so"
 
     return _do
@@ -337,6 +346,43 @@ def action_clear_languages(book_id, *, quiet=False):
         if not quiet:
             print(f"Cleared languages of book {book_id}.")
         return 0, "applied" if changed else "already-so"
+
+    return _do
+
+
+def action_clear_tags(book_id, *, quiet=False):
+    def _do(wdb):
+        # cquarry >= 1.13: detaches every tag, prunes orphans, honest count.
+        removed = wdb.clear_tags(book_id)
+        if not quiet:
+            print(f"Removed {removed} tag(s) from book {book_id}.")
+        return 0, "applied" if removed else "already-so"
+
+    return _do
+
+
+def action_clear_rating(book_id, *, quiet=False):
+    def _do(wdb):
+        # cquarry >= 1.13 alias for set_rating(book_id, None): deletes the
+        # link and prunes the orphan instead of writing a phantom 0 row.
+        changed = wdb.clear_rating(book_id)
+        if not quiet:
+            state = "Cleared" if changed else "Already clear:"
+            print(f"{state} rating of book {book_id}.")
+        return 0, "applied" if changed else "already-so"
+
+    return _do
+
+
+def action_add_column_value(book_id, label, value, *, quiet=False):
+    def _do(wdb):
+        # cquarry >= 1.13: append to an is_multiple Pattern-A column,
+        # deduped against the UNIQUE(book, value) link table.
+        added = wdb.add_custom_column_values(book_id, label, [value])
+        if not quiet:
+            state = "Added" if added else "Already present:"
+            print(f"{state} {value!r} on #{label.lstrip('#')} of book {book_id}.")
+        return 0, "applied" if added else "already-so"
 
     return _do
 
@@ -554,6 +600,16 @@ def _collect_set_authors(args, quiet):
     ]
 
 
+def parse_cover_state(raw) -> bool:
+    """Coerce a yes/no cover flag, or raise _ArgError."""
+    text = raw.strip().lower()
+    if text in ("y", "yes", "true", "1"):
+        return True
+    if text in ("n", "no", "false", "0"):
+        return False
+    raise _ArgError(f"cover state must be yes/no (got {raw!r}).")
+
+
 def _collect_set_rating(args, quiet):
     if not getattr(args, "set_rating", None):
         return []
@@ -566,9 +622,14 @@ def _collect_set_rating(args, quiet):
         ) from None
     if not 0 <= stars <= 5:
         raise _ArgError("STARS must be within 0-5.")
+    label = (
+        f"clear rating of book {book_id}"
+        if stars == 0
+        else f"rate book {book_id} {stars:g} stars"
+    )
     return [
         (
-            f"rate book {book_id} {stars:g} stars",
+            label,
             action_set_rating(book_id, stars, quiet=quiet),
         )
     ]
@@ -813,13 +874,7 @@ def _collect_set_cover(args, quiet):
     if not getattr(args, "set_cover", None):
         return []
     book_id = _require_id(args.set_cover[0])
-    raw = args.set_cover[1].strip().lower()
-    if raw in ("y", "yes", "true", "1"):
-        has_cover = True
-    elif raw in ("n", "no", "false", "0"):
-        has_cover = False
-    else:
-        raise _ArgError(f"cover state must be yes/no (got {args.set_cover[1]!r}).")
+    has_cover = parse_cover_state(args.set_cover[1])
     return [
         (
             f"set cover flag of book {book_id}",
@@ -868,39 +923,41 @@ _COLLECTORS: list[Callable] = [
 ]
 
 
+# The single-book verb dests, in dispatch priority order. Shared with
+# setwrite.py, which must reject any combination of these with its own
+# set-mode flags before anything executes.
+SINGLE_BOOK_DESTS: list[str] = [
+    "set_title",
+    "set_authors",
+    "set_rating",
+    "set_pubdate",
+    "clear_pubdate",
+    "set_comments",
+    "clear_comments",
+    "set_column",
+    "clear_column",
+    "set_identifier",
+    "clear_identifier",
+    "set_series",
+    "clear_series",
+    "set_publisher",
+    "clear_publisher",
+    "set_languages",
+    "clear_languages",
+    "add_format",
+    "remove_format",
+    "set_cover",
+    "remove_book",
+]
+
+
 def dispatch_write(args, db_path: str) -> int | None:
     try:
         # The multi-verb decision must be known before actions are built (it
         # silences their per-verb prints in favour of a post-commit summary).
         # Repeated --add-tag/--remove-tag flags count individually: three tag
         # adds are three mutations and deserve the same single transaction.
-        verb_count = sum(
-            1
-            for dest in (
-                "set_title",
-                "set_authors",
-                "set_rating",
-                "set_pubdate",
-                "clear_pubdate",
-                "set_comments",
-                "clear_comments",
-                "set_column",
-                "clear_column",
-                "set_identifier",
-                "clear_identifier",
-                "set_series",
-                "clear_series",
-                "set_publisher",
-                "clear_publisher",
-                "set_languages",
-                "clear_languages",
-                "add_format",
-                "remove_format",
-                "set_cover",
-                "remove_book",
-            )
-            if getattr(args, dest, None)
-        )
+        verb_count = sum(1 for dest in SINGLE_BOOK_DESTS if getattr(args, dest, None))
         verb_count += max(0, len(getattr(args, "add_tag", None) or []) - 1)
         verb_count += max(0, len(getattr(args, "remove_tag", None) or []) - 1)
         quiet = bool(getattr(args, "quiet", False)) or verb_count > 1

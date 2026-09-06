@@ -33,6 +33,7 @@ from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
 from cquarry_cli.tui import interactive_menu
+from cquarry_cli.setwrite import dispatch_set_write
 from cquarry_cli.writeops import dispatch_write
 
 
@@ -468,6 +469,213 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show per-format book counts and total bytes",
     )
 
+    # --- Set-oriented writes: one target set, id-less --batch-* verbs ---
+    s = p.add_argument_group(
+        "set writes (dry-run by default; --apply requires --backup-dir "
+        "and Calibre closed)"
+    )
+    src = s.add_mutually_exclusive_group()
+    src.add_argument(
+        "--ids",
+        dest="set_ids",
+        default=None,
+        metavar="ID[,ID...]",
+        help="Target set: explicit book ids (set mode)",
+    )
+    src.add_argument(
+        "--from-search",
+        dest="from_search",
+        default=None,
+        metavar="EXPR",
+        help="Target set: books matching a Calibre search expression, "
+        "resolved read-only before anything opens writable",
+    )
+    src.add_argument(
+        "--from-untagged",
+        dest="from_untagged",
+        action="store_true",
+        help="Target set: every untagged book (the phase-3 entry state)",
+    )
+    src.add_argument(
+        "--from-manifest",
+        dest="from_manifest",
+        default=None,
+        metavar="FILE",
+        help="Target set: ids one per line or comma-separated in FILE; the "
+        "only source that unlocks --batch-clear-rating",
+    )
+    s.add_argument(
+        "--batch-add-tag",
+        dest="batch_add_tag",
+        action="append",
+        metavar="TAG",
+        default=None,
+        help="Add a tag to every targeted book (repeatable)",
+    )
+    s.add_argument(
+        "--batch-remove-tag",
+        dest="batch_remove_tag",
+        action="append",
+        metavar="TAG",
+        default=None,
+        help="Remove a tag from every targeted book (repeatable)",
+    )
+    s.add_argument(
+        "--batch-clear-tags",
+        dest="batch_clear_tags",
+        action="store_true",
+        help="Detach every tag from every targeted book",
+    )
+    s.add_argument(
+        "--batch-clear-rating",
+        dest="batch_clear_rating",
+        action="store_true",
+        help="Clear the rating on every targeted book; ONLY legal with "
+        "--from-manifest (the NON-NEGOTIABLES bulk-ratings ban)",
+    )
+    s.add_argument(
+        "--batch-set-column",
+        dest="batch_set_column",
+        nargs=2,
+        metavar=("LABEL", "VALUE"),
+        default=None,
+        help="Write a custom-column value on every targeted book "
+        "(#reading_status/#status/#date_read are refused)",
+    )
+    s.add_argument(
+        "--batch-clear-column",
+        dest="batch_clear_column",
+        metavar="LABEL",
+        default=None,
+        help="Clear a custom-column value on every targeted book",
+    )
+    s.add_argument(
+        "--batch-add-column-value",
+        dest="batch_add_column_value",
+        action="append",
+        nargs=2,
+        metavar=("LABEL", "VALUE"),
+        default=None,
+        help="Append a value to a multi-valued custom column on every "
+        "targeted book (repeatable; deduped per book)",
+    )
+    s.add_argument(
+        "--batch-set-title",
+        dest="batch_set_title",
+        metavar="TITLE",
+        default=None,
+        help="Rename every targeted book",
+    )
+    s.add_argument(
+        "--batch-set-authors",
+        dest="batch_set_authors",
+        metavar="NAMES",
+        default=None,
+        help="Replace authors on every targeted book ('Name One; Name Two')",
+    )
+    s.add_argument(
+        "--batch-set-pubdate",
+        dest="batch_set_pubdate",
+        metavar="DATE",
+        default=None,
+        help="Set the publication date on every targeted book",
+    )
+    s.add_argument(
+        "--batch-clear-pubdate",
+        dest="batch_clear_pubdate",
+        action="store_true",
+        help="Clear the publication date on every targeted book",
+    )
+    s.add_argument(
+        "--batch-set-publisher",
+        dest="batch_set_publisher",
+        metavar="NAME",
+        default=None,
+        help="Set the publisher on every targeted book",
+    )
+    s.add_argument(
+        "--batch-clear-publisher",
+        dest="batch_clear_publisher",
+        action="store_true",
+        help="Clear the publisher on every targeted book",
+    )
+    s.add_argument(
+        "--batch-set-languages",
+        dest="batch_set_languages",
+        metavar="CODES",
+        default=None,
+        help="Replace the languages on every targeted book",
+    )
+    s.add_argument(
+        "--batch-clear-languages",
+        dest="batch_clear_languages",
+        action="store_true",
+        help="Clear the languages on every targeted book",
+    )
+    s.add_argument(
+        "--batch-set-series",
+        dest="batch_set_series",
+        metavar="NAME",
+        default=None,
+        help="Put every targeted book in a series (--series-index optional)",
+    )
+    s.add_argument(
+        "--batch-clear-series",
+        dest="batch_clear_series",
+        action="store_true",
+        help="Remove every targeted book from its series",
+    )
+    s.add_argument(
+        "--batch-set-identifier",
+        dest="batch_set_identifier",
+        nargs=2,
+        metavar=("TYPE", "VALUE"),
+        default=None,
+        help="Set an identifier (isbn, goodreads, ...) on every targeted book",
+    )
+    s.add_argument(
+        "--batch-clear-identifier",
+        dest="batch_clear_identifier",
+        metavar="TYPE",
+        default=None,
+        help="Clear an identifier type on every targeted book",
+    )
+    s.add_argument(
+        "--batch-set-cover",
+        dest="batch_set_cover",
+        metavar="YES/NO",
+        default=None,
+        help="Set the catalogued has_cover flag on every targeted book",
+    )
+    s.add_argument(
+        "--batch-remove-format",
+        dest="batch_remove_format",
+        metavar="FMT",
+        default=None,
+        help="Drop a format row from every targeted book (files untouched)",
+    )
+    s.add_argument(
+        "--apply",
+        dest="apply",
+        action="store_true",
+        help="Execute the planned set write (default is a dry run)",
+    )
+    s.add_argument(
+        "--backup-dir",
+        dest="backup_dir",
+        metavar="DIR",
+        default=None,
+        help="REQUIRED with --apply: metadata.db is copied here first; must "
+        "sit outside the library directory",
+    )
+    s.add_argument(
+        "--commit-per-book",
+        dest="commit_per_book",
+        action="store_true",
+        help="With --apply: one transaction per book instead of one for the "
+        "whole pass (escape hatch for very large sets)",
+    )
+
     return p
 
 
@@ -480,17 +688,29 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser()
         args = parser.parse_args(argv)
-        if args.series_index is not None and not args.set_series:
+        if (
+            args.series_index is not None
+            and not args.set_series
+            and not args.batch_set_series
+        ):
             print(
-                "ERROR: --series-index is only valid together with --set-series.",
+                "ERROR: --series-index is only valid together with --set-series "
+                "or --batch-set-series.",
                 file=sys.stderr,
             )
             return 2
         db_path = find_db(args.db)
 
-        # Write verbs (opt-in) are dispatched before any read mode opens the
-        # database read-only; writeops owns WritableCalibreDB and the
-        # error-to-exit-code mapping (validation -> 2, lock/write -> 1).
+        # Set writes dispatch FIRST so a single-book/set combination is
+        # rejected before any single-book verb executes; it returns None
+        # when no set-mode flag is present. Write verbs (opt-in) are
+        # dispatched before any read mode opens the database read-only;
+        # writeops owns WritableCalibreDB and the error-to-exit-code
+        # mapping (validation -> 2, lock/write -> 1).
+        handled = dispatch_set_write(args, db_path)
+        if handled is not None:
+            return handled
+
         handled = dispatch_write(args, db_path)
         if handled is not None:
             return handled

@@ -387,7 +387,7 @@ phantom 0-rating row that reads as unrated; and the library NON-NEGOTIABLES ban
 bulk edits of ratings, which the design honors by making the rating clear legal
 ONLY against a manifest of ids that same run imported.*
 
-- [ ] **Target-set mechanism** — exactly one source per invocation, mutually
+- [x] **Target-set mechanism** — exactly one source per invocation, mutually
       exclusive (else exit 2): `--ids ID[,ID...]`, `--from-search 'EXPR'`
       (resolved read-only via the search engine before anything opens
       writable), `--from-untagged` (reuses `find_untagged`), `--from-manifest
@@ -395,21 +395,35 @@ ONLY against a manifest of ids that same run imported.*
       aborted before `--apply`). All existing single-book verbs stay
       byte-for-byte unchanged; combining a target source with inline ids is a
       usage error.
-- [ ] **Set-mode verbs** (id-less `--batch-*` forms reusing the existing action
+      *(Shipped in 3.29.0. Mutual exclusion is enforced at the argparse
+      level and re-checked in `setwrite`; `--ids` and `--from-manifest`
+      ids are validated against the library read-only and unknown ids
+      abort exit 2 before anything opens writable; duplicate ids collapse
+      preserving order. Set writes dispatch before single-book verbs so a
+      combination is refused before anything executes.)*
+- [x] **Set-mode verbs** (id-less `--batch-*` forms reusing the existing action
       builders and `run_write_batch`): add/remove tag, clear tags, clear
       rating, set/clear column, add-column-value (append for `is_multiple`
       columns), set/clear pubdate, set title/authors/publisher/languages/
       series (+`--series-index`), set/clear identifier, set cover, remove
       format. `--remove-book` is NOT available in set mode: deletion stays
       per-book, explicit, and recoverable.
-- [ ] **Dry-run by default.** Prints the target source verbatim, the resolved
+      *(Shipped in 3.29.0: 21 verb flags over the shared writeops action
+      builders quieted, with the cquarry 1.13 helpers landing as three new
+      builders (`action_clear_tags`, `action_clear_rating`,
+      `action_add_column_value`); the set runner lives in
+      `src/cquarry_cli/setwrite.py`.)*
+- [x] **Dry-run by default.** Prints the target source verbatim, the resolved
       id count and list, and a per-verb preview; `--apply` executes and
       nothing opens `WritableCalibreDB` without it. On apply: Calibre-closed
       guard (anchored `pgrep ^calibre`), mandatory `--backup-dir` (the
       `stamp_pdf.py` precedent), then ONE `batch()` transaction;
       `--commit-per-book` as the documented non-default escape hatch for very
       large sets.
-- [ ] **The rating carve-out, mechanically encoded:** `--batch-clear-rating` is
+      *(Shipped in 3.29.0, all as written. The backup dir must sit outside
+      the library directory, not merely exist; the pgrep guard is the
+      `fetch_library_codes.py` one, timeout meaning assume-running.)*
+- [x] **The rating carve-out, mechanically encoded:** `--batch-clear-rating` is
       accepted only when the target source is `--from-manifest`;
       `--from-search`, `--from-untagged`, and `--ids` are refused with exit 2.
       The NON-NEGOTIABLES' bulk-ratings ban stays enforced for every set
@@ -417,21 +431,34 @@ ONLY against a manifest of ids that same run imported.*
       the manifest proves which ids that run imported. Set-mode verbs also
       refuse `#reading_status`, `status`, and `date_read` by label with exit 2
       (belt-and-braces on the absolute ban).
-- [ ] **Reporting:** per-verb `applied / already-so / failed` counts plus a
+      *(Shipped in 3.29.0; the label refusal is case-insensitive and strips
+      the `#`.)*
+- [x] **Reporting:** per-verb `applied / already-so / failed` counts plus a
       per-id failure list, and `--format json`
       (`{target, verbs, results[{id, verb, status, detail}], committed}`) so
       an AI caller consumes the run. Exit 0/1/2. Requires threading the
       setters' `changed` returns through the actions (today the batch summary
       prints "ok" unconditionally, so applied vs already-so is not
       distinguishable).
-- [ ] **Depends on cquarry** (its roadmap Phase 11): `clear_tags(book_id)`,
+      *(Shipped in 3.29.0, in two halves: the changed-return threading landed
+      on main early (honest applied/already-so batch summaries, single-verb
+      output untouched), and set mode consumes it for per-verb counts, the
+      stderr failure list, and the JSON report (which adds a `dry_run`
+      flag). Any failed row rolls the whole pass back and reports
+      `committed: false`, exit 1.)*
+- [x] **Depends on cquarry** (its roadmap Phase 11): `clear_tags(book_id)`,
       `add_custom_column_values(book_id, label, values)` (Pattern-A append
       with dedupe against the `UNIQUE(book, value)` link table), optional
       `clear_rating` alias. Everything else already exists in
       `cquarry.write`.
-- [ ] **Skill sync**: phase-3-import names the set forms where it teaches
+      *(cquarry 1.13.0 shipped all three; the pyproject floor moves to
+      `>=1.13.0` in this release.)*
+- [x] **Skill sync**: phase-3-import names the set forms where it teaches
       per-id loops, if any land in its workflow. Floor, not ceiling, per the
       standing rule.
+      *(Done in 3.29.0: the skill's CLI-verbs paragraph names the sources,
+      the `--batch-*` forms, the dry-run/apply lifecycle, and calls out the
+      rating carve-out so phase-3 rating changes stay per-book.)*
 
 Open questions (Brandon): flag naming (shared sources + `--batch-*` verbs, as
  specced, vs per-verb `@file` in the existing id slot); whether
@@ -439,6 +466,8 @@ Open questions (Brandon): flag naming (shared sources + `--batch-*` verbs, as
 location (mandatory `--backup-dir` vs automatic `.bak-*` beside the DB); and
 whether `--set-rating ID 0` should be remapped to a clear or rejected in the
 single-book path (it currently writes the phantom row).
+ *(Answered 2026-09-06, all four: as specced on naming, manifest-only, and
+ `--backup-dir`; `--set-rating ID 0` remaps to a true clear.)*
 
 Non-goals: no `add_book` (cquarry Phase 10); no book deletion in set mode; no
 set-mode comments/description writes (description curation is phase 3's

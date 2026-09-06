@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.28.0  
+**Version:** 3.29.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -20,7 +20,7 @@ Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a s
 ### 2.1 Decoupled Shared Library Architecture
 The CalibreQuarry architecture relies on a strict separation of concerns, decoupling the CLI/TUI frontend from the database and search logic. 
 
-**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.7: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, unknown virtual libraries raise instead of matching nothing, and the `--set-*`/`--remove-book` write verbs run on `WritableCalibreDB` 1.7 (`set_pubdate`, `batch()`).
+**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.13.0: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, unknown virtual libraries raise instead of matching nothing, the `--set-*`/`--remove-book` write verbs run on `WritableCalibreDB` (`set_pubdate`, `batch()`), `analytics.genre_distribution()` powers `--analytics genres`, and the set-mode verbs consume the 1.13 write helpers (`clear_tags`, `add_custom_column_values`, `clear_rating`).
 
 **`cquarry_cli` (Internal Package)**: The frontend modules live in `src/cquarry_cli/`:
 
@@ -105,12 +105,41 @@ The path is saved to config on first successful resolution.
 | `--output PATH` | Write to a file instead of stdout |
 | `--quiet` | Suppress decorative output |
 
+### 3.2 Writes (opt-in)
+
+Single-book verbs: `--set-title`, `--set-authors`, `--set-rating` (0 remaps
+to a true clear since 3.29.0), `--set-comments`/`--clear-comments`,
+`--set-column`/`--clear-column`, `--add-tag`/`--remove-tag`,
+`--set-identifier`/`--clear-identifier`, `--set-series`
+(+`--series-index`)/`--clear-series`, `--set-publisher`/`--clear-publisher`,
+`--set-languages`/`--clear-languages`, `--add-format`/`--remove-format`,
+`--set-cover`, and guarded `--remove-book` (dry-run until
+`--confirm-remove`). Several verbs in one invocation share one `batch()`
+transaction.
+
+Set mode: exactly one target source per invocation (`--ids`,
+`--from-search` resolved read-only, `--from-untagged`, `--from-manifest`;
+hand-supplied ids are validated against the library and unknown ids abort
+before anything opens writable) feeds any number of id-less `--batch-*`
+verbs (`add`/`remove`/`clear` tags, `clear` rating, set/clear column,
+add-column-value, set/clear pubdate, set title/authors/publisher/languages/
+series, set/clear identifier, set cover, remove format). Deletion has no
+set form. Dry-run by default; `--apply` requires a closed Calibre and a
+`--backup-dir` outside the library directory, then runs as ONE
+`batch()` transaction (`--commit-per-book` is the non-default escape
+hatch). `--batch-clear-rating` is legal ONLY with `--from-manifest` (the
+library NON-NEGOTIABLES bulk-ratings ban, mechanically encoded); the
+column verbs refuse `#reading_status`, `status`, and `date_read` by
+label. Reporting is per-verb applied/already-so/failed plus a per-id
+failure list; `--format json` emits `{target, verbs, results, committed,
+dry_run}`. Exit 0 committed/dry-run, 1 failures or lock, 2 usage.
+
 ---
 
 ## 4. What CalibreQuarry Is Not
 
 - **Not a Calibre replacement.** It reads the database — it does not manage it.
-- **Read-only by default; writes are explicit, opt-in verbs only.** Every read mode (`--catalog`, `--stats`, `--search`, `--export`, …) opens `metadata.db` strictly `mode=ro`. The only write paths are the explicit `--set-*` / `--remove-book` verbs, which route through cquarry's separate `WritableCalibreDB` module and require Calibre to be closed. Nothing in the read path can ever mutate the database.
+- **Read-only by default; writes are explicit, opt-in verbs only.** Every read mode (`--catalog`, `--stats`, `--search`, `--export`, …) opens `metadata.db` strictly `mode=ro`. The only write paths are the explicit `--set-*` / `--remove-book` verbs and the set-mode `--batch-*` verbs (§3.2), which route through cquarry's separate `WritableCalibreDB` module and require Calibre to be closed. Nothing in the read path can ever mutate the database.
 - **Not a converter.** It does not touch book files themselves.
 - **Not a server.** It has no web interface and no network access.
 
