@@ -33,6 +33,7 @@ from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
 from cquarry_cli.tui import interactive_menu
+from cquarry_cli.manifest import DEFAULT_AUDIENCE
 from cquarry_cli.setwrite import dispatch_set_write
 from cquarry_cli.writeops import dispatch_write
 
@@ -676,6 +677,68 @@ def build_parser() -> argparse.ArgumentParser:
         "whole pass (escape hatch for very large sets)",
     )
 
+    # --- The acquisition run verbs (Phase 17) ---
+    sub = p.add_subparsers(dest="subcommand")
+    run_p = sub.add_parser(
+        "run",
+        help="The acquisition pathway: vet (phase1), import (phase2), curate (phase3)",
+    )
+    run_p.add_argument(
+        "phase",
+        choices=("phase1", "phase2", "phase3"),
+        help="phase1: vet a downloads dir into a manifest; phase2: import "
+        "the signed manifest; phase3: curate + mechanical pass",
+    )
+    run_p.add_argument(
+        "dir",
+        nargs="?",
+        default=None,
+        help="phase1: the downloads directory to vet",
+    )
+    run_p.add_argument(
+        "--manifest", metavar="FILE", help="phase2/3: the batch manifest"
+    )
+    run_p.add_argument(
+        "--backup-dir",
+        dest="backup_dir",
+        metavar="DIR",
+        default=None,
+        help="phase2 (required): metadata.db copied here first; outside the library",
+    )
+    run_p.add_argument(
+        "--audience",
+        default=None,
+        help=f"phase2: the cc9 #audience value (default: {DEFAULT_AUDIENCE})",
+    )
+    run_p.add_argument(
+        "--yes", action="store_true", help="phase2: non-interactive acknowledgment"
+    )
+    run_p.add_argument(
+        "--answer-file",
+        dest="answer_file",
+        metavar="FILE",
+        help="phase3: JSON answers {book_id: {tags, comments_html, fixes}} "
+        "instead of TTY prompts",
+    )
+    run_p.add_argument(
+        "--bindery-report",
+        dest="bindery_report",
+        metavar="FILE",
+        help="phase1: also write bindery's raw phase-1 JSON here",
+    )
+    run_p.add_argument(
+        "--stamp",
+        action="store_true",
+        help="phase1: drive stamp_pdf on PDFs whose filename parses "
+        "(file-side write; originals backed up)",
+    )
+    run_p.add_argument(
+        "--apply-lossy",
+        dest="apply_lossy",
+        action="store_true",
+        help="phase1: apply bindery's gated lossy repairs (file-side write)",
+    )
+
     return p
 
 
@@ -688,6 +751,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser()
         args = parser.parse_args(argv)
+        if getattr(args, "subcommand", None) == "run":
+            from cquarry_cli.run import dispatch_run
+
+            return dispatch_run(args)
         if (
             args.series_index is not None
             and not args.set_series
