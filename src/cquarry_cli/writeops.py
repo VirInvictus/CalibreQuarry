@@ -10,7 +10,11 @@ is ever opened (exit 2).
 Several verbs in one invocation (e.g. ``--set-title ... --set-pubdate ...``)
 run through :func:`run_write_batch`: one ``WritableCalibreDB``, one
 ``cquarry.batch()`` transaction, so a multi-field curation pass commits
-exactly once and any failure rolls the whole pass back.
+exactly once and any failure rolls the whole pass back. Action builders
+return ``(exit_code, status)`` where status is ``"applied"`` or
+``"already-so"`` (cquarry's ``changed`` returns), so the batch summary
+reports real outcomes instead of a blanket ok; verbs whose library call
+cannot distinguish use ``"applied"``.
 
 The write path is reached on purpose only from ``cli.py`` and ``tui.py``;
 read modes never import this module (nor ``cquarry.write``).
@@ -49,7 +53,8 @@ def run_write(db_path: str, action) -> int:
 
     try:
         with WritableCalibreDB(db_path) as wdb:
-            return action(wdb)
+            rc, _status = action(wdb)
+            return rc
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -67,26 +72,33 @@ def run_write_batch(db_path: str, actions, *, quiet: bool = False) -> int:
 
     All-or-nothing: a failure anywhere rolls back every action in the pass
     (cquarry >= 1.7 batch semantics), so a multi-field curation pass commits
-    exactly once instead of once per verb. Each action runs quiet; a one-line
-    summary prints after the commit.
+    exactly once instead of once per verb. Each action runs quiet; the
+    post-commit summary lists per-verb status (applied vs already-so) so a
+    verb that found the row already in the wanted state is visible instead
+    of hiding behind a blanket ok.
     """
     import sqlite3 as _sqlite3
 
     from cquarry.write import WritableCalibreDB
 
     try:
+        results: list[tuple[str, str]] = []
         with WritableCalibreDB(db_path) as wdb:
             with wdb.batch():
-                for _label, action in actions:
-                    rc = action(wdb)
+                for label, action in actions:
+                    rc, status = action(wdb)
                     if rc:
-                        raise ValueError(f"verb failed with exit code {rc}")
+                        raise ValueError(f"{label} failed with exit code {rc}")
+                    results.append((label, status or "applied"))
         if not quiet:
-            for label, _action in actions:
-                print(f"ok: {label}")
+            for label, status in results:
+                print(f"{status}: {label}")
+            applied = sum(1 for _label, status in results if status == "applied")
+            already = len(results) - applied
             print(
-                f"{len(actions)} mutations committed as one transaction "
-                "(queued for OPF regeneration where applicable)."
+                f"Committed as one transaction: {applied} applied, "
+                f"{already} already-so (queued for OPF regeneration "
+                "where applicable)."
             )
         return 0
     except ValueError as e:
@@ -116,36 +128,37 @@ def run_write_batch(db_path: str, actions, *, quiet: bool = False) -> int:
 
 def action_set_title(book_id, title, *, quiet=False):
     def _do(wdb):
+        # update_title reports no changed flag; honest status unavailable.
         wdb.update_title(book_id, title)
         if not quiet:
             print(
                 f"Renamed book {book_id} to {title!r} "
                 "(queued for OPF regeneration on Calibre's next startup)."
             )
-        return 0
+        return 0, "applied"
 
     return _do
 
 
 def action_set_authors(book_id, names, *, quiet=False):
     def _do(wdb):
-        wdb.set_authors(book_id, names)
+        changed = wdb.set_authors(book_id, names)
         if not quiet:
             print(
                 f"Set authors of book {book_id} to {' & '.join(names)} "
                 "(queued for OPF regeneration)."
             )
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_set_rating(book_id, stars, *, quiet=False):
     def _do(wdb):
-        wdb.set_rating(book_id, stars)
+        changed = wdb.set_rating(book_id, stars)
         if not quiet:
             print(f"Rated book {book_id} at {stars:g} stars.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
@@ -156,17 +169,17 @@ def action_set_pubdate(book_id, value, *, quiet=False):
         if not quiet:
             state = "Set" if changed else "Already set:"
             print(f"{state} pubdate of book {book_id} to {value!r}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_set_comments(book_id, text, *, quiet=False):
     def _do(wdb):
-        wdb.set_comments(book_id, text)
+        changed = wdb.set_comments(book_id, text)
         if not quiet:
             print(f"Comments updated on book {book_id}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
@@ -179,20 +192,20 @@ def action_set_column(book_id, label, value, *, quiet=False):
     def _do(wdb):
         # set_custom_column refuses non-editable/composite columns
         # and validates enumerations itself.
-        wdb.set_custom_column(book_id, label, value)
+        changed = wdb.set_custom_column(book_id, label, value)
         if not quiet:
             print(f"Set #{label.lstrip('#')} = {value!r} on book {book_id}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_clear_column(book_id, label, *, quiet=False):
     def _do(wdb):
-        wdb.set_custom_column(book_id, label, None)
+        changed = wdb.set_custom_column(book_id, label, None)
         if not quiet:
             print(f"Cleared #{label.lstrip('#')} on book {book_id}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
@@ -213,7 +226,7 @@ def action_add_tag(book_id, tags, *, quiet=False):
                 else f" ({len(clean) - added} already present)"
             )
             print(f"Added {added} tag(s) to book {book_id}{tail}.")
-        return 0
+        return 0, "applied" if added else "already-so"
 
     return _do
 
@@ -233,7 +246,7 @@ def action_remove_tag(book_id, tags, *, quiet=False):
             if missing:
                 msg += f" Not present: {', '.join(missing)}."
             print(msg)
-        return 0
+        return 0, "applied" if removed else "already-so"
 
     return _do
 
@@ -249,7 +262,7 @@ def action_set_identifier(book_id, id_type, value, *, quiet=False):
             else:
                 state = "cleared" if changed else "already absent"
                 print(f"Identifier {id_type!r} on book {book_id} {state}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
@@ -260,48 +273,48 @@ def action_clear_identifier(book_id, id_type, *, quiet=False):
         if not quiet:
             state = "cleared" if changed else "already absent"
             print(f"Identifier {id_type!r} on book {book_id} {state}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_set_series(book_id, name, index=None, *, quiet=False):
     def _do(wdb):
-        wdb.set_series(book_id, name, index)
+        changed = wdb.set_series(book_id, name, index)
         if not quiet:
             idx = f" #{index:g}" if index is not None else ""
             print(f"Set series of book {book_id} to {name!r}{idx}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_clear_series(book_id, *, quiet=False):
     def _do(wdb):
-        wdb.set_series(book_id, None)
+        changed = wdb.set_series(book_id, None)
         if not quiet:
             print(f"Removed book {book_id} from its series.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_set_publisher(book_id, name, *, quiet=False):
     def _do(wdb):
-        wdb.set_publisher(book_id, name)
+        changed = wdb.set_publisher(book_id, name)
         if not quiet:
             print(f"Set publisher of book {book_id} to {name!r}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_clear_publisher(book_id, *, quiet=False):
     def _do(wdb):
-        wdb.set_publisher(book_id, None)
+        changed = wdb.set_publisher(book_id, None)
         if not quiet:
             print(f"Cleared publisher of book {book_id}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
@@ -310,33 +323,34 @@ def action_set_languages(book_id, codes, *, quiet=False):
     def _do(wdb):
         # set_languages canonicalizes names/codes ("English" -> "eng"),
         # splits a bare comma-string, and replaces the whole list.
-        wdb.set_languages(book_id, codes)
+        changed = wdb.set_languages(book_id, codes)
         if not quiet:
             print(f"Set languages of book {book_id} to: {codes}")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_clear_languages(book_id, *, quiet=False):
     def _do(wdb):
-        wdb.set_languages(book_id, None)
+        changed = wdb.set_languages(book_id, None)
         if not quiet:
             print(f"Cleared languages of book {book_id}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_add_format(book_id, fmt, name, size, *, quiet=False):
     def _do(wdb):
+        # add_format reports no changed flag; honest status unavailable.
         wdb.add_format(book_id, fmt, name, size)
         if not quiet:
             print(
                 f"Registered format {fmt.upper()} on book {book_id} "
                 f"({name}.{fmt.lower()}, {size} bytes)."
             )
-        return 0
+        return 0, "applied"
 
     return _do
 
@@ -348,17 +362,17 @@ def action_remove_format(book_id, fmt, *, quiet=False):
             state = "Removed" if changed else "Format"
             verb = "removed from" if changed else "not present on"
             print(f"{state} {fmt.upper()} {verb} book {book_id}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
 
 def action_set_cover(book_id, has_cover, *, quiet=False):
     def _do(wdb):
-        wdb.set_has_cover(book_id, has_cover)
+        changed = wdb.set_has_cover(book_id, has_cover)
         if not quiet:
             print(f"Cover flag for book {book_id} set to {bool(has_cover)}.")
-        return 0
+        return 0, "applied" if changed else "already-so"
 
     return _do
 
@@ -382,15 +396,16 @@ def action_remove_book(book_id, *, confirm=False, quiet=False):
                 f"({title!r}, formats: {', '.join(fmts) or 'none'})."
             )
             print("Re-run with --confirm-remove to delete.")
-            return 0
+            return 0, "applied"
 
         return _describe
 
     def _do_remove(wdb):
+        # remove_book reports no changed flag; honest status unavailable.
         wdb.remove_book(book_id)
         if not quiet:
             print(f"Book {book_id} removed.")
-        return 0
+        return 0, "applied"
 
     return _do_remove
 

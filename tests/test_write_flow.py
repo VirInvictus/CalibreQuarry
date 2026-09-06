@@ -336,7 +336,10 @@ class TestBatchedWriteVerbs(_TempDBCase):
             con.close()
         self.assertEqual((title, pubdate), ("Batched", "2001-02-03 00:00:00+00:00"))
         self.assertEqual(tags, ["Curated"])
-        self.assertIn("3 mutations committed as one transaction", out.getvalue())
+        self.assertIn("applied: add tag 'Curated' to book 1", out.getvalue())
+        self.assertIn(
+            "Committed as one transaction: 3 applied, 0 already-so", out.getvalue()
+        )
 
     def test_multi_verb_failure_rolls_everything_back(self):
         out, err = io.StringIO(), io.StringIO()
