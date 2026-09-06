@@ -13,7 +13,7 @@
 
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. 
 
-> **Architecture Note:** CalibreQuarry acts as the frontend interface for the [cquarry](../cquarry/) shared library. The database connection logic and the Calibre search grammar engine were extracted into the `cquarry` package so that other tools in the ecosystem (like Hermitage and Carrel-calibre-web) can guarantee identical behavior and query resolution.
+> **Architecture Note:** CalibreQuarry acts as the frontend interface for the [cquarry](https://github.com/VirInvictus/cquarry) shared library. The database connection logic and the Calibre search grammar engine were extracted into the `cquarry` package so that other tools in the ecosystem (like Hermitage and Carrel-calibre-web) can guarantee identical behavior and query resolution.
 
 Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries.
 
