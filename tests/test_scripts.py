@@ -1158,3 +1158,85 @@ class TestCommentsCensus(unittest.TestCase):
         self.assertEqual(bodies, {1: "<p>One.</p>", 3: "<p>Three.</p>"})
         scoped = self.census.load_bodies(db_path, [3])
         self.assertEqual(scoped, {3: "<p>Three.</p>"})
+
+
+class TestCheckPdf(unittest.TestCase):
+    """Phase 17 box 2's battery: classification is pure; the tool
+    invocations are mocked so the suite never needs qpdf/poppler."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.check_pdf = _load("check_pdf")
+
+    def test_qpdf_classes(self):
+        classify = self.check_pdf.classify_qpdf
+        self.assertEqual(classify("", 0), "clean")
+        self.assertEqual(classify("operation succeeded with warnings", 3), "warnings")
+        self.assertEqual(classify("invalid xref", 2), "errors")
+        self.assertEqual(classify("", None), "unavailable")
+        # exit 3 WITHOUT the benign line is not downgraded
+        self.assertEqual(classify("boom", 3), "errors")
+
+    def test_unknown_header_reported_without_subprocess(self):
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.write(fd, b"not a pdf at all")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        report = self.check_pdf.check_file(path)
+        self.assertEqual(report["kind"], "unknown")
+        self.assertEqual(report["findings"][0]["kind"], "header")
+
+    def test_djvu_uses_djvused_page_count(self):
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".djvu")
+        os.write(fd, b"AT&TFORM\x00\x00\x00\x00DJVM")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        with mock.patch(
+            "subprocess.run",
+            return_value=mock.Mock(returncode=0, stdout="42\n"),
+        ):
+            report = self.check_pdf.check_file(path)
+        self.assertEqual(report["kind"], "djvu")
+        self.assertEqual(report["pages"], 42)
+
+    def test_pdf_battery_collects_findings(self):
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.write(fd, b"%PDF-1.4 fake")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+
+        def fake_run(cmd, timeout=120, **kwargs):
+            name = cmd[0]
+            if name == "qpdf" and cmd[1] == "--check":
+                return mock.Mock(returncode=2, stdout="", stderr="invalid xref")
+            if name == "qpdf":
+                return mock.Mock(returncode=0, stdout="7\n")
+            if name == "pdffonts":
+                return mock.Mock(
+                    returncode=0,
+                    stdout="name type encoding emb sub uni object ID\n"
+                    "----------------- ------- --\n"
+                    "ABC-Font TrueType Special no no yes 8 0\n"
+                    "DEF-Font Type1C Special yes yes yes 9 0\n",
+                )
+            if name == "pdftotext":
+                return mock.Mock(returncode=0, stdout="some text\n")
+            if name == "pdfimages":
+                return mock.Mock(returncode=0, stdout="page num\n---\n  1  1\n")
+            return mock.Mock(returncode=0, stdout="")
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            report = self.check_pdf.check_file(path)
+        kinds = [f["kind"] for f in report["findings"]]
+        self.assertIn("qpdf_errors", kinds)
+        self.assertIn("unembedded_fonts", kinds)
+        self.assertEqual(report["pages"], 7)
+        self.assertEqual(report["unembedded_fonts"], 1)
+        self.assertEqual(report["text_layer"], "present")
+        self.assertEqual(report["image_count"], 1)

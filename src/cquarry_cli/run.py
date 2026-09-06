@@ -179,6 +179,29 @@ def _drm_verdicts(downloads_dir: str) -> dict[str, str]:
     return verdicts
 
 
+def _pdf_battery(downloads_dir: str) -> dict[str, Any]:
+    """check_pdf.py over every PDF/DJVU in the directory (the phase-1
+    battery: header, pages, qpdf real-vs-benign, fonts, text layer)."""
+    targets = [
+        os.path.join(downloads_dir, name)
+        for name in sorted(os.listdir(downloads_dir))
+        if os.path.splitext(name)[1].lower() in (".pdf", ".djvu")
+    ]
+    if not targets:
+        return {}
+    out = os.path.join(downloads_dir, "_pdf_battery.json")
+    _run(
+        [sys.executable, str(_scripts_dir() / "check_pdf.py"), *targets, "--json", out],
+        timeout=1800,
+    )
+    try:
+        data = json.loads(Path(out).read_text())
+        Path(out).unlink()
+    except OSError, json.JSONDecodeError:
+        return {}
+    return {r["path"]: r for r in data.get("files", [])}
+
+
 def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
     """bindery run phase1 --json (the EPUB slice). Read-only unless the
     signed-consent flag is passed (phase 2's repair step uses that)."""
@@ -255,6 +278,7 @@ def run_phase1(
 
     dup_report = _screen_duplicates(downloads_dir, db_path)
     drm = _drm_verdicts(downloads_dir)
+    battery = _pdf_battery(downloads_dir)
     dup_paths = {
         entry.get("path") or entry.get("file")
         for entry in dup_report.get("files", dup_report.get("duplicates", []))
@@ -270,6 +294,13 @@ def run_phase1(
             entry["repairs"].append("stamped via stamp_pdf (--stamp)")
         drm_status = drm.get(path, "unscanned")
         entry["checks"]["drm"] = drm_status
+        batt = battery.get(path)
+        if batt is not None:
+            entry["checks"]["pdf_battery"] = {
+                "pages": batt.get("pages"),
+                "qpdf_check": batt.get("qpdf_check"),
+                "findings": len(batt.get("findings", [])),
+            }
         if drm_status and drm_status.lower() not in ("clean", "unscanned"):
             reason = f"DRM: {drm_status}"
             entry["verdict"] = "quarantined"
