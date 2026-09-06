@@ -11,7 +11,7 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - `search()` raises `ParseException` for unknown virtual libraries or saved searches; only `resolve_vl()` / `resolve_saved_search()` raise `ValueError` (with an available-names message).
 - Raw comments payloads are HTML; run them through `cquarry.helpers.strip_html()` before terminal output.
 - **Write verbs** (`--set-*`, `--add-tag`, `--remove-tag`, `--clear-*`, `--remove-book`) are opt-in and funnel through `run_write()` in `src/cquarry_cli/writeops.py`, dispatched by `cli.py` for flags and called directly by `tui.py` for menu flows; it owns the WritableCalibreDB lifecycle and the error-to-exit-code mapping (argument problems exit 2, lock/write errors exit 1). Read modes never import `cquarry.write` or `writeops`; keep it that way.
-- **Dependency policy.** `cquarry` is tracked at `@main` and must never be pinned to a tag or commit, and `uv.lock` stays out of the repo: installs always pull the latest. `vir-tui` rides a PyPI floor (`>=2.2.0`) rather than `@main`; bump the floor deliberately when adopting new vir-tui features.
+- **Dependency policy.** `cquarry` and `vir-tui` ride PyPI floors (see `pyproject.toml`; bump a floor deliberately when adopting new features of that library), never git deps, and `uv.lock` stays out of the repo so installs resolve the floors fresh. CI pre-installs cquarry from git `@main` so main is tested against the library's head.
 
 ## Programmer-facing contract notes (3.24.0 onward)
 

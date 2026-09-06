@@ -14,9 +14,9 @@ build/
 .vscode/
 .idea/
 
-# uv re-resolves the @main git deps on every sync; a committed lock would
-# freeze cquarry/vir-tui at the moment it was generated, defeating the
-# "latest, always" dependency policy. Keep it local-only.
+# Dependencies are PyPI floors (see pyproject.toml); installs resolve them
+# fresh on every sync, and a committed lock would freeze exactly what the
+# policy leaves open. Keep it local-only.
 uv.lock
 
 # Output files
