@@ -48,6 +48,7 @@ What's done, what's next. Updated as of v3.26.0.
 - [x] **Cover quality audit** — flag books with covers below a resolution threshold
 - [x] **Author statistics** — per-author breakdowns (book count, ratings, formats, series)
 - [x] **Wing overlap analysis** — show which books appear in multiple virtual libraries
+- [x] **Genre share breakdown** — every top-level genre as a % of the whole library (`--analytics genres`, rendered over cquarry >= 1.12's `genre_distribution()`)
 - [x] **Format migration report** — identify books only available in deprecated formats (MOBI, LIT)
 - [x] **Color CLI output** — ANSI color for terminal output in non-interactive mode
 - [x] **Tag dump** — flat list of every tag with book counts, replacing `calibredb list_categories -r tags`

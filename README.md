@@ -49,7 +49,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with pending OPF sync |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
-| **Analytics** | `--analytics {author,pace,tags,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, Wing-overlap analysis |
+| **Analytics** | `--analytics {author,pace,tags,genres,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, genre share breakdown, Wing-overlap analysis |
 | **Export** | `--export` | Full library export to JSON, CSV, or an AI-readable flat format (includes native page counts) |
 | **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
 | **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
@@ -132,9 +132,11 @@ cquarry --recent 10 --db ~/Calibre/metadata.db
 # Series completeness and gap detection
 cquarry --series --db ~/Calibre/metadata.db
 
-# Extended analytics: per-author stats, reading pace, tag tree, wing overlap
+# Extended analytics: per-author stats, reading pace, tag tree, genre
+# shares, wing overlap
 cquarry --analytics author --db ~/Calibre/metadata.db
 cquarry --analytics pace --db ~/Calibre/metadata.db
+cquarry --analytics genres --db ~/Calibre/metadata.db
 
 # Export full library to JSON (or CSV, or an AI-readable flat format)
 cquarry --export --db ~/Calibre/metadata.db --format json --output library.json

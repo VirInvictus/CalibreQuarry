@@ -1,7 +1,12 @@
 import sys
 from collections import Counter, defaultdict
 
-from cquarry.analytics import addition_timeline, author_stats, vl_overlap
+from cquarry.analytics import (
+    addition_timeline,
+    author_stats,
+    genre_distribution,
+    vl_overlap,
+)
 from cquarry.db import CalibreDB
 from cquarry.helpers import normalize_author_display, tags_to_tree
 
@@ -71,6 +76,32 @@ def show_tag_tree(db: CalibreDB, *, quiet: bool = False) -> None:
             _print_tree(node[key], indent + 1)
 
     _print_tree(tree, indent=1)
+
+
+def show_genre_breakdown(db: CalibreDB, *, quiet: bool = False) -> None:
+    """Show every top-level genre as a share of the whole library.
+
+    Rendered over cquarry.analytics' genre_distribution, sliced to the
+    roots of the tag hierarchy (genre = first dot-path segment).
+    """
+    dist = genre_distribution(db)
+
+    if not quiet:
+        print(f"=== Genre Breakdown ({db.count_books()} books) ===\n")
+
+    if not dist:
+        print("No books in this library.")
+        return
+
+    roots = [(name, share) for name, share in dist.items() if "." not in name]
+    width = max(len(name) for name, _ in roots)
+    max_share = roots[0][1]  # tree order: biggest root first
+    for name, share in roots:
+        bar_len = int(share * 40 / max_share) if max_share else 0
+        bar = "\u2588" * bar_len
+        print(f"  {name:<{width}}  {share * 100:5.1f}%  {bar}")
+    print()
+    print("  Multi-genre books count once per genre, so shares can sum over 100%.")
 
 
 def show_wing_overlap(db: CalibreDB, *, quiet: bool = False) -> None:

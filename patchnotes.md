@@ -1,3 +1,22 @@
+# 3.27.0 (2026-09-06)
+
+### `--analytics genres`: every genre's share of the library
+
+- **Genre breakdown by percentage.** `--analytics genres` renders
+  cquarry 1.12's new `genre_distribution()`: every top-level genre (the
+  root of the dot-path tag hierarchy) as a share of the whole library,
+  biggest first, with a bar per genre. A book counts once per genre even
+  when several of its tags share an ancestor; a book tagged into two
+  roots lands in both, so the shares are honest fractions of the library
+  and can sum over 100% (the output says so). Untagged books get their
+  own row when present. The deeper levels of the hierarchy stay where
+  they belong: `--analytics tags` remains the taxonomy tree.
+- **TUI menu.** The Analytics section gains a "Genre Breakdown" entry
+  (between Tag Tree and Wing Overlap) backed by the same renderer through
+  the pager. Shares and ordering are cquarry's math; percentages, bars,
+  and the caveat are this repo's formatting, per the frontend-only split.
+- Suite 213 → 216.
+
 # 3.26.0 (2026-09-02)
 
 ### Phase 15 closes: batch dossiers, the clear verb, and the fetch script's single-pass rewrite

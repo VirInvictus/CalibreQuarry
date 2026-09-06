@@ -22,6 +22,7 @@ from vir_tui import (
 from cquarry_cli import writeops
 from cquarry_cli.modes.analytics import (
     show_author_stats,
+    show_genre_breakdown,
     show_pace_stats,
     show_tag_tree,
     show_wing_overlap,
@@ -83,6 +84,7 @@ def _select_main() -> tuple | str | None:
                 "Author Stats",
                 "Reading Pace",
                 "Tag Tree",
+                "Genre Breakdown",
                 "Wing Overlap",
             ],
         ),
@@ -482,6 +484,11 @@ def _menu_session() -> int:
                     reset_terminal()
                     run_with_capture("Tag Tree", lambda: show_tag_tree(db))
                 elif result == (1, 3):
+                    reset_terminal()
+                    run_with_capture(
+                        "Genre Breakdown", lambda: show_genre_breakdown(db)
+                    )
+                elif result == (1, 4):
                     reset_terminal()
                     run_with_capture("Wing Overlap", lambda: show_wing_overlap(db))
                 elif result == (2, 0):

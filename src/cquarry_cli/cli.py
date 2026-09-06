@@ -8,6 +8,7 @@ from cquarry.integrity import find_untagged
 from cquarry_cli import VERSION
 from cquarry_cli.modes.analytics import (
     show_author_stats,
+    show_genre_breakdown,
     show_pace_stats,
     show_tag_tree,
     show_wing_overlap,
@@ -73,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--stats", action="store_true", help="Show library statistics")
     group.add_argument(
         "--analytics",
-        choices=["author", "pace", "tags", "overlap"],
+        choices=["author", "pace", "tags", "genres", "overlap"],
         default=None,
         help="Extended analytics and visualizations",
     )
@@ -566,6 +567,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             elif args.analytics == "tags":
                 show_tag_tree(db, quiet=args.quiet)
+                return 0
+            elif args.analytics == "genres":
+                show_genre_breakdown(db, quiet=args.quiet)
                 return 0
             elif args.analytics == "overlap":
                 show_wing_overlap(db, quiet=args.quiet)
