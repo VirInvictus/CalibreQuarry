@@ -15,7 +15,7 @@ from cquarry_cli.modes.analytics import (
 )
 from cquarry_cli.modes.audit import run_audit
 from cquarry_cli.modes.catalog import write_all_wings, write_catalog
-from cquarry_cli.modes.detail import show_book
+from cquarry_cli.modes.detail import show_book, show_book_json
 from cquarry_cli.modes.display import (
     show_entities,
     show_reading_progress,
@@ -872,6 +872,16 @@ def main(argv: list[str] | None = None) -> int:
                     return 2
                 else:
                     ids = args.book
+                if args.format == "json":
+                    # Phase 17: machine-readable dossiers (phase 3's input).
+                    ok = show_book_json(db, ids, quiet=args.quiet)
+                    return 0 if ok else 1
+                if args.format in ("csv", "ai"):
+                    print(
+                        "ERROR: --book supports --format json only.",
+                        file=sys.stderr,
+                    )
+                    return 2
                 ok = True
                 for i, book_id in enumerate(ids):
                     if i and not args.quiet:

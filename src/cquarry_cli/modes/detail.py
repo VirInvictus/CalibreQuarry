@@ -228,3 +228,30 @@ def show_book(db: CalibreDB, book_id: int, *, quiet: bool = False) -> bool:
         print(f"  uuid: {b.get('uuid') or '?'}")
         print(f"  library: {db.db_path}")
     return True
+
+
+def show_book_json(db: CalibreDB, ids, *, quiet: bool = False) -> bool:
+    """Emit dossiers as one JSON array (Phase 17: --book --format json).
+
+    The machine-readable form of :func:`show_book` for phase 3's structured
+    input: cquarry's ``get_book_dossier(include_comments=True)`` dicts
+    verbatim (comments stay raw HTML; render through ``strip_html``), so
+    the renderer adds nothing and cannot drift. Always an array, even for a
+    single id, so callers never type-switch. Missing ids are reported on
+    stderr and return False (the found dossiers still print), matching the
+    text path's contract.
+    """
+    dossiers = []
+    ok = True
+    for book_id in ids:
+        d = db.get_book_dossier(book_id, include_comments=True)
+        if d is None:
+            print(f"ERROR: no book with id {book_id} in this library.", file=sys.stderr)
+            ok = False
+            continue
+        dossiers.append(d)
+    if quiet:
+        print(json.dumps(dossiers, separators=(",", ":"), default=str))
+    else:
+        print(json.dumps(dossiers, indent=1, default=str))
+    return ok
