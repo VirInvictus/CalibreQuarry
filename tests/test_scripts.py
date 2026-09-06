@@ -1090,3 +1090,71 @@ class TestStampPdfGuards(unittest.TestCase):
             rc = stamp_pdf.main()
         self.assertEqual(rc, 2)
         self.assertIn("EPUB", buf.getvalue())
+
+
+class TestCommentsCensus(unittest.TestCase):
+    """Phase 17 box 4: the description mechanical sweep as a standing
+    tool. The sweep itself is pure text logic; the DB path is exercised
+    against a throwaway fixture."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.census = _load("comments_census")
+
+    def test_clean_description_has_no_findings(self):
+        text = (
+            "<p>A desert planet. The well-known co-op of spice traders "
+            "moves carefully.</p>"
+        )
+        self.assertEqual(self.census.sweep_text(text), [])
+
+    def test_each_mechanical_defect_is_caught(self):
+        cases = {
+            "double_hyphen": "<p>He said -- quietly.</p>",
+            "spaced_hyphen_dash": "<p>the dark -and stormy- night</p>",
+            "markdown_bold": "<p>**New York Times** bestseller</p>",
+            "tag_debris": "<p>Line one.<br>Also <div>nested</div></p>",
+            "body_shape": "A description that lost its markup.",
+            "soft_hyphen": "<p>ena\u00adblement</p>",
+            "zero_width": "<p>zero\u200bwidth</p>",
+            "mojibake": "<p>cafÃ© society</p>",
+            "lost_ligature": "<p>the ?nal chapter</p>",
+        }
+        for kind, text in cases.items():
+            with self.subTest(kind=kind):
+                kinds = [f["kind"] for f in self.census.sweep_text(text)]
+                self.assertIn(kind, kinds)
+
+    def test_legitimate_hyphens_and_questions_pass(self):
+        text = "<p>A well-known co-op; what could go wrong? Nothing.</p>"
+        kinds = [f["kind"] for f in self.census.sweep_text(text)]
+        self.assertEqual(kinds, [])
+
+    def test_accented_text_is_not_mojibake(self):
+        text = "<p>Café society, über alles, naïve-belle.</p>"
+        kinds = [f["kind"] for f in self.census.sweep_text(text)]
+        self.assertNotIn("mojibake", kinds)
+
+    def test_find_duplicates_groups_exact_matches_only(self):
+        groups = self.census.find_duplicates(
+            {7: "<p>Same body.</p>", 9: "<p>Same body.</p>", 12: "<p>Other.</p>"}
+        )
+        self.assertEqual(groups, [[7, 9]])
+        self.assertEqual(self.census.find_duplicates({7: "<p>One.</p>"}), [])
+
+    def test_load_bodies_reads_ro_fixture(self):
+        fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, db_path)
+        con = sqlite3.connect(db_path)
+        con.executescript(
+            "CREATE TABLE comments (book INTEGER, text TEXT);"
+            "INSERT INTO comments VALUES (1, '<p>One.</p>'), (2, ''), "
+            "(3, '<p>Three.</p>');"
+        )
+        con.commit()
+        con.close()
+        bodies = self.census.load_bodies(db_path, None)
+        self.assertEqual(bodies, {1: "<p>One.</p>", 3: "<p>Three.</p>"})
+        scoped = self.census.load_bodies(db_path, [3])
+        self.assertEqual(scoped, {3: "<p>Three.</p>"})
