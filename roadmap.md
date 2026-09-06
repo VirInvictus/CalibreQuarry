@@ -507,7 +507,7 @@ DB-side pass, verify counts, docs updated). The "bulk edits of ratings" ban is
 interpreted as a ban on library-wide predicates: phase 2's clear is scoped to
 the ids THAT RUN imported, from its own manifest, never a search expression.
 
-- [ ] **The manifest** (`acquisition-manifest/1`): JSON, one per batch, in the
+- [x] - [ ] **The manifest** (`acquisition-manifest/1`): JSON, one per batch, in the
       library-local `.claude/manifests/`. Carries per-file verdicts, checks,
       repairs + backup paths, stamps, duplicates + recommendations,
       quarantines, `decisions_needed`, and `approved_for_import`; phase 2
@@ -515,7 +515,7 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       phase 3 consumes it and emits the batch record. Machine-readable
       hand-off between the phases and the calling agent; the prose
       `.claude/project_preimport_*.md` record stays as the human summary.
-- [ ] **`cquarry run phase1 DIR`**: orchestrates the inventory, `audit_drm.py`,
+- [x] - [ ] **`cquarry run phase1 DIR`**: orchestrates the inventory, `audit_drm.py`,
       `screen_duplicate.py --format json`, `stamp_pdf.py` driving, quarantine
       moves, and the final report, plus a NEW `scripts/check_pdf.py` standing
       wrapper for the per-file PDF/DJVU battery (header, page count,
@@ -525,15 +525,15 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       as a subprocess for the EPUB slice and also accepts
       `--bindery-report FILE` so the slices can be run peer-style by hand.
       Read-only against `metadata.db`.
-- [ ] **`--book --format json`**: machine-readable dossier output (cquarry's
+- [x] - [ ] **`--book --format json`**: machine-readable dossier output (cquarry's
       `get_book_dossier` already composes the dict; `show_book` renders text
       only today). Phase 3's structured input.
-- [ ] **`scripts/comments_census.py`**: the description mechanical sweep as a
+- [x] - [ ] **`scripts/comments_census.py`**: the description mechanical sweep as a
       standing tool (`--`, spaced-hyphen dashes, `**`, `<br>`/`<div>` tags,
       non-`<p>` body shape, soft hyphens, zero-width characters, mojibake,
       ligature `?`, exact-duplicate bodies), retiring the inline three-liner
       the skill re-derives every run.
-- [ ] **`cquarry run phase2 --manifest FILE [--audience ...] [--yes]`**: guard
+- [x] - [ ] **`cquarry run phase2 --manifest FILE [--audience ...] [--yes]`**: guard
       Calibre closed + `.bak`; import each approved file through cquarry's
       `add_book` (seed title/authors/identifiers/language/pubdate/publisher
       from the manifest stamps; `calibredb add` as the documented fallback if
@@ -549,7 +549,7 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       real curation stays phase 3; and a clobber watch comparing phase-1 stamp
       authors against post-download authors, recorded in the manifest for
       phase 3 to restore from.
-- [ ] **`cquarry run phase3 --manifest FILE [--answer-file FILE]`**: validate →
+- [x] - [ ] **`cquarry run phase3 --manifest FILE [--answer-file FILE]`**: validate →
       batch set = manifest ids cross-checked against `find_untagged` → dossier
       fetch (`--book --format json`) → decision gates (tag-by-precedent,
       description curation, field fixes) rendered as prompts on a TTY or
@@ -558,11 +558,20 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       `bindery run phase3` + `reconcile_file_metadata.py --apply --repair-pdf
       --id` → re-validate to 0 errors → emit the `.claude/project_import_*.md`
       batch record from the manifest.
-- [ ] **Skill sync (same release, both skills + the library `CLAUDE.md`)**: the
+- [x] - [ ] **Skill sync (same release, both skills + the library `CLAUDE.md`)**: the
       pathway amendment above; the phase-1 skill names `run phase1` as the
       orchestrated form with its manual command list kept as the appendix; the
       phase-3 skill names `run phase3`; the phase-2 section records the cc6
       `source` decision below.
+      *(All seven boxes shipped in 3.30.0, 2026-09-06. The manifest module
+      carries the six decisions structurally; the verbs drive the companion
+      scripts, bindery, and calibredb through mocked-subprocess tests (294
+      suite total) against fixture libraries. The pathway amendment landed
+      verbatim in the library `CLAUDE.md`; both skills name the verbs.
+      Remaining before real use: Brandon's seeded facility run of the full
+      phase1 -> phase2 -> phase3 pass against the acceptance criteria
+      below: the suite proves the contracts, the facility run proves the
+      pathway.)*
 
 Acceptance criteria: a seeded test-Downloads run produces a schema-valid
 manifest whose `approved_for_import` matches the hand-derived list; phase 2

@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.29.0  
+**Version:** 3.30.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -91,6 +91,9 @@ The path is saved to config on first successful resolution.
 | Wings | `--wings` | List virtual libraries with book counts |
 | Tags | `--tags` | Flat dump of every tag in the library with its book count |
 | Interactive | (no args) | Launch the Curses TUI with scrollable output pager |
+| Run: phase1 | `run phase1 DIR` | Vet a downloads directory into an `acquisition-manifest/1` batch (duplicate screen, DRM audit, PDF/DJVU battery, bindery's EPUB slice); read-only against `metadata.db` |
+| Run: phase2 | `run phase2 --manifest FILE` | Import the SIGNED manifest as ONE `batch()` through `add_book`; `#source`/`#audience` stamped, tags+rating cleared on the imported ids only, downloads after the commit (failures become decisions), resumable |
+| Run: phase3 | `run phase3 --manifest FILE` | Curate via TTY prompts or `--answer-file` in ONE `batch()`, then bindery phase3 + file reconciliation + re-validation to 0 errors and the prose batch record |
 
 ### 3.1 Modifiers
 

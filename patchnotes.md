@@ -1,3 +1,54 @@
+# 3.30.0 (2026-09-06)
+
+### Phase 17 closes: `run phase1/phase2/phase3` and the acquisition manifest
+
+- **The manifest (`acquisition-manifest/1`).** One JSON per batch in the
+  library-local `.claude/manifests/`, RETAINED as the durable
+  machine-readable record (the prose `.claude/project_*.md` files stay the
+  human summary). Per-file verdicts, checks, lossy flags, filename-derived
+  stamps, provenance, import outcomes, `decisions_needed` (fixed taxonomy),
+  and `approved_for_import`. The six 2026-09-06 decisions are structural:
+  provenance stamps `#source`, `#audience` is unconditional `Brandon`
+  (no per-file column), a signed report is standing consent for the listed
+  lossy repairs, refused duplicates and download failures are decisions
+  while the batch continues, and phase 2 is non-interactive.
+- **`cquarry run phase1 DIR`** vets a downloads directory into a manifest:
+  duplicate screening and the DRM scan drive the companion scripts, the
+  PDF/DJVU battery rides the new `scripts/check_pdf.py`, bindery's phase-1
+  EPUB slice runs read-only (`--bindery-report` captures its JSON), and
+  `--stamp` / `--apply-lossy` are the file-side consents. Read-only against
+  `metadata.db`; DRM-locked files quarantine; clean files approve.
+- **`cquarry run phase2 --manifest FILE`** imports the signed manifest.
+  Guards first (signed; no blocking decisions; Calibre closed; mandatory
+  `--backup-dir` outside the library), then ONE `batch()`: `add_book` from
+  the manifest stamps (cquarry 1.14), the pathway reset (clear tags +
+  rating) scoped to the imported ids, `#source` and `#audience` stamped.
+  Metadata downloads run after the commit via `fetch-ebook-metadata` +
+  `calibredb set_metadata`; failures and ambiguities become decisions, and
+  a post-download author clobber watch records what the download changed.
+  Resumable: imported ids are written back and skipped on re-run.
+- **`cquarry run phase3 --manifest FILE`** curates the imports: the batch
+  set is manifest ids crossed with `find_untagged`, dossiers come from
+  `--book --format json`, and the decision gates (tags by precedent,
+  description rewrite, field fixes) run as TTY prompts or from an
+  `--answer-file` in ONE `batch()`. Then `bindery run phase3` and
+  `reconcile_file_metadata.py --apply --repair-pdf` drive, the validator
+  re-runs (exit 1 unless clean), and the prose batch record lands beside
+  the manifest.
+- **`--book --format json`** emits `get_book_dossier` dicts verbatim as a
+  JSON array (raw comments included) - phase 3's structured input.
+- **`scripts/comments_census.py`** stands up the phase-3 skill's inline
+  three-liner: a read-only census of the mechanical description defects
+  (double hyphens, spaced-hyphen dashes, markdown bold, tag debris, body
+  shape, soft hyphens, zero-width characters, mojibake, lost ligatures,
+  exact-duplicate bodies) with `--id` scoping and a `--json` report.
+- **Skill sync + the pathway amendment.** The library `CLAUDE.md` carries
+  the 2026-09-06 amendment (phase 2 tool-driven, sign-off = the signed
+  manifest, the ratings ban as an anti-library-wide-predicate rule); the
+  phase-1 skill names `run phase1` (its manual commands stay the
+  appendix), the phase-3 skill names `run phase3` and the set forms.
+- Suite 280 -> 294.
+
 # 3.29.0 (2026-09-06)
 
 ### Phase 16: set-oriented write verbs, one target set at a time
