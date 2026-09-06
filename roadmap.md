@@ -581,6 +581,14 @@ skips (when the import refuses a file as already-in-library: stop for a
 decision, or import anyway under `--duplicates` and flag the pair for phase 3);
 download residue (GUI one-keystroke fallback vs push to phase 3); manifest
 retention (archive after phase 3 vs keep as the durable record).
+ *(Answered 2026-09-06, all six: stamp `#source` from manifest
+ provenance; `#audience` unconditional `Brandon`; a signed phase-1
+ report IS standing consent for `--apply-lossy`, scoped to the files
+ the report listed; duplicate-refusal files are refused and flagged as
+ `decisions_needed` while the batch continues; failed/ambiguous
+ metadata downloads push to phase 3 (phase 2 stays non-interactive);
+ manifests are KEPT in `.claude/manifests/` as the durable
+ machine-readable record. Scheduling: build starts now, 2026-09-06.)*
 
 Non-goals: no GUI automation; no Goodreads/Amazon API work (downloads ride
 Calibre's own source plugins); no taxonomy or genre decisions in phase 2; no
