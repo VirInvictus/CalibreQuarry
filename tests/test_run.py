@@ -142,11 +142,11 @@ class TestRunPhase1(RunCase):
             ),
             mock.patch(
                 "cquarry_cli.run._drm_verdicts",
-                return_value={bad: "ADEPT", good: "clean", dup: "clean"},
+                return_value={bad: "DRM", good: "CLEAN", dup: "CLEAN"},
             ),
             mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
         ):
-            rc = run_phase1(self.downloads, self.db_path)
+            rc = run_phase1(self.downloads, self.db_path, quarantine=True)
         self.assertEqual(rc, 0)
         self.assertFalse(os.path.exists(bad))  # quarantined away
         self.assertTrue(os.path.isdir(os.path.join(self.downloads, "_quarantine")))
@@ -164,6 +164,68 @@ class TestRunPhase1(RunCase):
         self.assertEqual(man["approved_for_import"], [good])
         entry = manifest.file_by_path(man, good)
         self.assertEqual(entry["stamps"]["authors"], ["Ann Leckie"])
+
+    def test_benign_and_na_verdicts_never_quarantine(self):
+        # The sweep's finding: audit_drm's BENIGN (font obfuscation) and
+        # N/A (DJVU) are not locks; quarantining them moved every DJVU in
+        # a batch and contradicted phase 1's dry promise.
+        epub = self._make_file("font_obf.epub")
+        djvu = self._make_file("plain_scan.djvu", payload=b"DJVUDATA")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch(
+                "cquarry_cli.run._drm_verdicts",
+                return_value={epub: "BENIGN", djvu: "N/A"},
+            ),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path)
+        self.assertEqual(rc, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.downloads, "_quarantine")))
+        self.assertTrue(os.path.exists(epub))
+        self.assertTrue(os.path.exists(djvu))
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertEqual(man["decisions_needed"], [])
+        self.assertEqual(man["quarantines"], [])
+
+    def test_drm_hit_without_the_flag_is_recorded_but_stays(self):
+        path = self._make_file("locked.epub")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={path: "DRM"}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path)
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(path))  # dry: nothing moved
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertEqual(man["quarantines"][0]["moved_to"], None)
+        self.assertEqual(man["decisions_needed"][0]["kind"], "manual_repair")
+        self.assertNotIn(path, man["approved_for_import"])
+
+    def test_error_verdict_quarantines_like_drm(self):
+        # ERROR is the other half of audit_drm's is_problem set: a scan
+        # that could not verify gets the same conservative treatment.
+        path = self._make_file("unreadable.epub")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={path: "ERROR"}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quarantine=True)
+        self.assertEqual(rc, 0)
+        self.assertFalse(os.path.exists(path))
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertNotEqual(man["quarantines"][0]["moved_to"], None)
 
     def test_missing_directory_exits_two(self):
         rc = run_phase1(os.path.join(self.temp_dir, "nope"), self.db_path)

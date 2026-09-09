@@ -742,6 +742,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="phase1: apply bindery's gated lossy repairs (file-side write)",
     )
+    run_p.add_argument(
+        "--quarantine",
+        action="store_true",
+        help="phase1: MOVE true DRM hits into _quarantine/ (file-side "
+        "write). Without it the verdict and decision are recorded and "
+        "the file stays where it is",
+    )
 
     return p
 

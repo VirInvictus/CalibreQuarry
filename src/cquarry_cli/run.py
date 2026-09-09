@@ -8,8 +8,9 @@ the companion ``scripts/`` tools and ``bindery run`` are the driven
 instruments. The 2026-09-06 decisions are encoded here:
 
 - phase 1 is READ-ONLY against ``metadata.db`` and dry against book files
-  unless ``--stamp`` (PDF stamping) or ``--apply-lossy`` (bindery's gated
-  content repairs) are passed; both are file-side consents.
+  unless ``--stamp`` (PDF stamping), ``--apply-lossy`` (bindery's gated
+  content repairs), or ``--quarantine`` (moving true DRM hits aside) are
+  passed; all three are file-side consents.
 - phase 2 refuses to start unless the manifest is signed (the signature is
   the standing lossy consent for exactly the files the report listed),
   ``decisions_needed`` is empty, and Calibre is closed; it backs
@@ -298,10 +299,14 @@ def run_phase1(
     bindery_report: str | None = None,
     stamp: bool = False,
     apply_lossy: bool = False,
+    quarantine: bool = False,
     quiet: bool = False,
 ) -> int:
     """Vet a downloads directory and emit the batch manifest. Read-only
-    against metadata.db; file-side writes only under --stamp/--apply-lossy."""
+    against metadata.db; file-side writes only under --stamp (PDF
+    stamping), --apply-lossy (bindery's gated repairs), or --quarantine
+    (moving true DRM hits aside). Without --quarantine a DRM hit is
+    recorded in the manifest and the file stays where it is."""
     downloads_dir = os.path.abspath(downloads_dir)
     if not os.path.isdir(downloads_dir):
         print(f"ERROR: no such directory: {downloads_dir}", file=sys.stderr)
@@ -338,14 +343,24 @@ def run_phase1(
                 "qpdf_check": batt.get("qpdf_check"),
                 "findings": len(batt.get("findings", [])),
             }
-        if drm_status and drm_status.lower() not in ("clean", "unscanned"):
+        # Quarantine audit_drm's own problem set only (its is_problem:
+        # DRM, plus ERROR, a scan that could not verify). BENIGN (font
+        # obfuscation, permission flags) and N/A (DJVU) are not locks and
+        # never move a file; the docs' dry promise is for them too.
+        if drm_status.upper() in ("DRM", "ERROR"):
             reason = f"DRM: {drm_status}"
             entry["verdict"] = "quarantined"
-            entry["repairs"].append(_quarantine(downloads_dir, path, reason))
-            manifest.add_decision(man, "manual_repair", file=path, detail=reason)
+            if quarantine:
+                entry["repairs"].append(_quarantine(downloads_dir, path, reason))
+                moved_to = os.path.join(downloads_dir, "_quarantine")
+            else:
+                # Dry: the verdict and the decision are recorded, the
+                # file stays where it is for Brandon to handle.
+                moved_to = None
             man["quarantines"].append(
-                {"path": path, "reason": reason, "moved_to": os.path.dirname(path)}
+                {"path": path, "reason": reason, "moved_to": moved_to}
             )
+            manifest.add_decision(man, "manual_repair", file=path, detail=reason)
             continue
         if path in dup_paths:
             entry["verdict"] = "duplicate_refused"
@@ -851,6 +866,7 @@ def dispatch_run(args) -> int:
             bindery_report=args.bindery_report,
             stamp=args.stamp,
             apply_lossy=args.apply_lossy,
+            quarantine=args.quarantine,
             quiet=quiet,
         )
     if args.phase == "phase2":
