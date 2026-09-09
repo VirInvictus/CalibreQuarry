@@ -1,3 +1,25 @@
+# 3.31.0 (2026-09-09)
+
+### Cascade: cquarry 1.17 adoption
+
+- **The LibraryThing exporter runs on `export_rows()`.** `build_rows`
+  retired its hand-rolled correlated-subquery SQL for cquarry 1.17's flat
+  row provider (cquarry 1.16's native custom-column lists underneath);
+  same columns, same author_sort/title order, same sentinel and empty
+  shaping, so the CSV stays byte-identical for the same library state.
+- **Native-list display.** With cquarry 1.16, multi-valued custom columns
+  read back as native lists; the csv/ai export writers and the catalog
+  renderer re-join them with the historical comma form so output shape is
+  unchanged (JSON keeps the native list).
+- **cquarry floor moves to >=1.17.0** (the promoted APIs this release
+  adopts).
+- **Test fixture fidelity:** the phase-2 fixture's `#source` column now
+  mirrors the real library (enumeration, normalized storage, the real
+  enum values) instead of a text+direct shape no real Calibre schema
+  creates -- cquarry 1.15's datatype dispatch refuses that shape, and the
+  multi-file import test payloads are now distinct so add_book's
+  byte-identity floor is exercised honestly.
+
 # 3.30.0 (2026-09-06)
 
 ### Phase 17 closes: `run phase1/phase2/phase3` and the acquisition manifest

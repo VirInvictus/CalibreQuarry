@@ -135,6 +135,10 @@ def write_catalog(
             custom_str = ""
             if show_custom:
                 val = custom_data.get(book["id"])
+                if isinstance(val, list):
+                    # cquarry 1.16 native lists; catalog text uses the
+                    # historical comma form.
+                    val = ", ".join(str(v) for v in val)
                 if val:
                     custom_str = f" <{show_custom}: {val}>"
 

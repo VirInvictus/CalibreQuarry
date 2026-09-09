@@ -61,11 +61,17 @@ CREATE TABLE custom_columns (
     id INTEGER PRIMARY KEY, label TEXT UNIQUE, name TEXT, datatype TEXT,
     is_multiple BOOL, editable BOOL DEFAULT 1, display TEXT DEFAULT '{}'
 );
-CREATE TABLE custom_column_10 (id INTEGER PRIMARY KEY, book INTEGER, value TEXT);
+CREATE TABLE custom_column_10 (id INTEGER PRIMARY KEY, value TEXT UNIQUE);
+CREATE TABLE books_custom_column_10_link (book INTEGER, value INTEGER,
+    UNIQUE(book, value));
 CREATE TABLE custom_column_11 (id INTEGER PRIMARY KEY, value TEXT UNIQUE);
 CREATE TABLE books_custom_column_11_link (book INTEGER, value INTEGER,
     UNIQUE(book, value));
-INSERT INTO custom_columns VALUES (10, 'source', 'Source', 'text', 0, 1, '{}');
+-- #source mirrors the real library: enumeration, normalized storage, the
+-- real enum values (cquarry 1.17's dispatch refuses the text+direct shape
+-- this fixture used to model, which no real Calibre schema creates).
+INSERT INTO custom_columns VALUES (10, 'source', 'Source', 'enumeration', 0, 1,
+    '{"enum_values": ["Standard Ebooks", "Library Genesis", "Bought EPUB", "Bought physical", "ripped", "Anna''s Archive", "Free", "Gifted", "Other"]}');
 INSERT INTO custom_columns VALUES (11, 'audience', 'Audience', 'text', 1, 1, '{}');
 """
 
@@ -215,8 +221,10 @@ class TestRunPhase2(RunCase):
         self.assertEqual(rc, 2)
 
     def test_import_stamps_audience_source_and_records_download(self):
+        # Distinct payloads: add_book's byte-identity floor (cquarry 1.15)
+        # refuses two catalogued-identical files in one pass, as it should.
         first = self._make_file("Fifth Head of Data.epub")
-        second = self._make_file("Ancillary Justice.epub")
+        second = self._make_file("Ancillary Justice.epub", payload=b"ANCILLARY")
         man_path = self._manifest(first, second)
         rc, backup = self._import(man_path)
         self.assertEqual(rc, 0)
@@ -240,7 +248,10 @@ class TestRunPhase2(RunCase):
         rc, _ = self._import(man_path)
         self.assertEqual(rc, 0)
         con = sqlite3.connect(self.db_path)
-        source = con.execute("SELECT value FROM custom_column_10").fetchall()
+        source = con.execute(
+            "SELECT c.value FROM books_custom_column_10_link l "
+            "JOIN custom_column_10 c ON c.id = l.value"
+        ).fetchall()
         audience = con.execute(
             "SELECT c.value FROM books_custom_column_11_link l "
             "JOIN custom_column_11 c ON c.id = l.value"

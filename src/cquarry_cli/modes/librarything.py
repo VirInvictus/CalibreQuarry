@@ -101,79 +101,44 @@ def tag_list(taxonomy: str | None, translators: str | None) -> str:
 def build_rows(
     db: CalibreDB, want_call_number: bool, matching_ids: set[int] | None = None
 ) -> tuple[list, list]:
-    cols = db.get_custom_columns()
-
-    def _col_sql(name: str, is_mult: bool) -> str:
-        c = cols.get(name)
-        if not c:
-            return "NULL"
-        cid = c["id"]
-        if is_mult:
-            return f"(SELECT GROUP_CONCAT(v.value, '|') FROM books_custom_column_{cid}_link l JOIN custom_column_{cid} v ON v.id=l.value WHERE l.book=b.id)"
-        if c["datatype"] in ("text", "enumeration", "series"):
-            return f"(SELECT v.value FROM books_custom_column_{cid}_link l JOIN custom_column_{cid} v ON v.id=l.value WHERE l.book=b.id)"
-        return f"(SELECT value FROM custom_column_{cid} WHERE book=b.id)"
-
-    trans_sql = _col_sql("#translators", True)
-    status_sql = _col_sql("#reading_status", False)  # Fallback to #status if not found
-    if status_sql == "NULL":
-        status_sql = _col_sql("#status", False)
-    date_sql = _col_sql("#date_read", False)
-
-    query = f"""
-            SELECT b.id, b.title, b.author_sort, b.pubdate,
-                   (SELECT val FROM identifiers WHERE book=b.id AND type='isbn'),
-                   (SELECT p.name FROM books_publishers_link pl
-                     JOIN publishers p ON p.id=pl.publisher WHERE pl.book=b.id),
-                   (SELECT GROUP_CONCAT(t.name, '|') FROM books_tags_link tl
-                     JOIN tags t ON t.id=tl.tag WHERE tl.book=b.id),
-                   (SELECT r.rating FROM books_ratings_link rl
-                     JOIN ratings r ON r.id=rl.rating WHERE rl.book=b.id),
-                   {trans_sql},
-                   {status_sql},
-                   {date_sql},
-                   (SELECT val FROM identifiers WHERE book=b.id AND type='lcc'),
-                   (SELECT pages FROM books_pages_link WHERE book=b.id)
-              FROM books b ORDER BY b.author_sort, b.title
-    """
-    records = db.conn.execute(query).fetchall()
+    """Flat rows for the LibraryThing CSV, composed through cquarry's
+    export_rows (cquarry 1.17). The old inline correlated-subquery SQL this
+    used to run is retired with it; same columns, same order, same shaping
+    (author_sort then title, sentinels and empties as before)."""
+    records = db.export_rows()
+    records.sort(key=lambda r: (r["author_sort"] or "", r["title"] or ""))
 
     read, main = [], []
-    for (
-        bid,
-        title,
-        author_sort,
-        pubdate,
-        isbn,
-        publisher,
-        tags,
-        rating,
-        translators,
-        status,
-        date_read,
-        lcc,
-        pages,
-    ) in records:
+    for r in records:
+        if matching_ids is not None and r["id"] not in matching_ids:
+            continue
         year = ""
-        if pubdate and not pubdate.startswith(SENTINEL_PUBDATE):
-            year = pubdate[:4].lstrip("0")
+        if r["pubdate"] and not r["pubdate"].startswith(SENTINEL_PUBDATE):
+            year = r["pubdate"][:4].lstrip("0")
+        # cquarry 1.8's to_isbn13 returns None for garbage; the CSV
+        # column stays "" exactly as before.
+        isbn = to_isbn13(r["identifiers"].get("isbn")) or ""
+        translators = r.get("#translators")
+        if isinstance(translators, list):
+            translators = "|".join(translators)
+        translators = translators or ""
+        status = r.get("#reading_status") or r.get("#status") or ""
+        date_read = r.get("#date_read") or ""
+        lcc = (r["identifiers"].get("lcc") or "") if want_call_number else ""
         row = [
-            title or "",
-            author_sort or "",
+            r["title"] or "",
+            r["author_sort"] or "",
             year,
-            # cquarry 1.8's to_isbn13 returns None for garbage; the CSV
-            # column stays "" exactly as before.
-            to_isbn13(isbn) or "",
-            publisher or "",
-            tag_list(tags, translators),
-            str(rating // 2) if rating else "",
+            isbn,
+            r["publisher"] or "",
+            tag_list("|".join(r["tags"]), translators),
+            str(r["rating"] // 2) if r["rating"] else "",
             "",  # REVIEW: deliberately empty
             date_read[:10] if date_read else "",
-            str(pages) if pages and pages > 0 else "",
-            (lcc or "") if want_call_number else "",
+            str(r["pages"]) if r["pages"] and r["pages"] > 0 else "",
+            lcc,
         ]
-        if matching_ids is None or bid in matching_ids:
-            (read if status == READ_STATUS else main).append(row)
+        (read if status == READ_STATUS else main).append(row)
     return read, main
 
 

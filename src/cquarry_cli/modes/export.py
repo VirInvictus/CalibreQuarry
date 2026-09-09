@@ -51,6 +51,14 @@ def _open_out(output: str | None):
         yield sys.stdout, None
 
 
+def _custom_display(value):
+    """Multi-valued custom columns are native lists since cquarry 1.16;
+    CSV and text output re-join them with the historical comma form."""
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return value
+
+
 def _book_to_dict(b, custom_data, show_custom, author_details=False) -> dict:
     d = {
         "id": b["id"],
@@ -124,7 +132,9 @@ def _serialize(
                     u for u in (b.get("author_links") or []) if u
                 )
             if show_custom:
-                row[show_custom] = custom_data.get(b["id"], "")
+                row[show_custom] = _custom_display(
+                    custom_data.get(b["id"], "")
+                )
             w.writerow(row)
     elif fmt == "ai":
         for b in books:
@@ -144,7 +154,7 @@ def _serialize(
             if stars is not None:
                 line.append(f"{stars}/5")
             if show_custom:
-                val = custom_data.get(b["id"])
+                val = _custom_display(custom_data.get(b["id"]))
                 if val:
                     line.append(f"<{show_custom}: {val}>")
             stream.write(" ".join(line) + "\n")
