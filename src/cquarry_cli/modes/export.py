@@ -132,9 +132,7 @@ def _serialize(
                     u for u in (b.get("author_links") or []) if u
                 )
             if show_custom:
-                row[show_custom] = _custom_display(
-                    custom_data.get(b["id"], "")
-                )
+                row[show_custom] = _custom_display(custom_data.get(b["id"], ""))
             w.writerow(row)
     elif fmt == "ai":
         for b in books:
