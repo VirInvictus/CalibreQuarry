@@ -26,6 +26,7 @@ from cquarry_cli.run import (
     run_phase1,
     run_phase2,
     run_phase3,
+    sign_manifest,
 )
 
 # The phase-2 import fixture: the add_book INSERT-path hazards (AUTOINCREMENT
@@ -428,6 +429,23 @@ class TestRunPhase2(RunCase):
         rc, _ = self._import(man_path)
         self.assertEqual(rc, 2)
 
+    def test_phase2_refuses_a_tampered_manifest(self):
+        # The seal (the sweep's P0): a manifest edited after signing must
+        # fail the load loudly, never import the tampered content.
+        path = self._make_file("Fifth Head.epub")
+        man_path = self._manifest(path)
+        with open(man_path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["files"][0]["stamps"]["title"] = "Tampered"
+        with open(man_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        rc, _ = self._import(man_path)
+        self.assertEqual(rc, 2)
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 0)  # nothing imported from the forged stamps
+
     def test_import_stamps_audience_source_and_records_download(self):
         # Distinct payloads: add_book's byte-identity floor (cquarry 1.15)
         # refuses two catalogued-identical files in one pass, as it should.
@@ -479,6 +497,49 @@ class TestRunPhase2(RunCase):
         count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
         con.close()
         self.assertEqual(count, 1)  # the second run imported nothing new
+
+
+class TestRunSign(RunCase):
+    """`cquarry run sign`: the sanctioned sealing path. Hand-editing
+    `"signed": true` stopped being a signature the moment signatures bound
+    to content."""
+
+    def _unsigned_manifest(self):
+        man = manifest.new_manifest(self.downloads)
+        path = self._make_file("Fifth Head.epub")
+        entry = manifest.new_file_entry(path)
+        entry["size"] = os.path.getsize(path)
+        entry["verdict"] = "approved_for_import"
+        entry["stamps"] = {"title": "Fifth Head", "authors": ["Ann Leckie"]}
+        manifest.add_file(man, entry)
+        manifest.approve(man, [path])
+        man_path = os.path.join(self.temp_dir, "batch.json")
+        manifest.save(man, man_path)
+        return man_path
+
+    def test_signs_and_loads(self):
+        man_path = self._unsigned_manifest()
+        self.assertEqual(sign_manifest(man_path), 0)
+        man = manifest.load(man_path)
+        self.assertTrue(man["signed"])
+        self.assertTrue(man["signature"])
+
+    def test_resign_after_a_post_sign_edit(self):
+        man_path = self._unsigned_manifest()
+        self.assertEqual(sign_manifest(man_path), 0)
+        with open(man_path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["files"][0]["stamps"]["title"] = "Corrected"
+        with open(man_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with self.assertRaises(ValueError):
+            manifest.load(man_path)
+        self.assertEqual(sign_manifest(man_path), 0)
+        man = manifest.load(man_path)
+        self.assertEqual(man["files"][0]["stamps"]["title"], "Corrected")
+
+    def test_missing_manifest_exits_two(self):
+        self.assertEqual(sign_manifest(os.path.join(self.temp_dir, "nope.json")), 2)
 
 
 class TestRunPhase3(RunCase):

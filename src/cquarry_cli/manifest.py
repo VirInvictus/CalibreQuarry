@@ -14,8 +14,12 @@ Shape (all writers must keep this honest; :func:`validate` is the gate):
 - manifest-level: ``schema``, ``created``/``updated``, ``downloads_dir``,
   ``signed``/``signed_at`` (Brandon's sign-off of the phase-1 report;
   the signature IS standing consent for the lossy repairs the report
-  listed, per the 2026-09-06 decision), ``files``, ``quarantines``,
-  ``decisions_needed``, ``approved_for_import``.
+  listed, per the 2026-09-06 decision), ``signature`` (the seal:
+  an HMAC over the approved set, the per-file stamps and lossy flags,
+  and the decisions list, recomputed by every load of a signed
+  manifest so a post-sign edit fails loudly instead of importing),
+  ``files``, ``quarantines``, ``decisions_needed``,
+  ``approved_for_import``.
 - per-file: path, format, size, ``provenance`` (the ``#source`` stamp's
   origin, stamped mechanically at import per the 2026-09-06 decision),
   ``verdict``, ``checks``, ``lossy`` (flagged repairs; applied only when
@@ -33,6 +37,8 @@ Shape (all writers must keep this honest; :func:`validate` is the gate):
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 from datetime import UTC, datetime
@@ -53,6 +59,14 @@ FILE_VERDICTS = (
     "duplicate_refused",
     "needs_decision",
 )
+
+#: The seal is tamper-EVIDENCE, not secret authentication: the key is a
+#: constant of the schema, so anybody can recompute it. What it buys is that
+#: an edit after sign() no longer validates quietly: every load of a signed
+#: manifest recomputes the seal over the fields an import would act on and
+#: refuses a mismatch loudly. Re-sign (``cquarry run sign``) after a
+#: deliberate edit; that is the human approving the new content.
+_SEAL_KEY = b"cquarry acquisition-manifest/1 seal key v1"
 
 DECISION_KINDS = (
     "duplicate",
@@ -81,6 +95,7 @@ _REQUIRED_TOP = (
     "approved_for_import",
     "signed",
     "signed_at",
+    "signature",
 )
 _REQUIRED_FILE = (
     "path",
@@ -121,6 +136,7 @@ def new_manifest(downloads_dir: str) -> dict[str, Any]:
         "downloads_dir": os.path.abspath(downloads_dir),
         "signed": False,
         "signed_at": None,
+        "signature": None,
         "files": [],
         "quarantines": [],
         "decisions_needed": [],
@@ -161,11 +177,23 @@ def add_file(manifest: dict[str, Any], entry: dict[str, Any]) -> None:
 
 
 def approve(manifest: dict[str, Any], paths: list[str]) -> None:
-    """Mark files approved for import (the phase-1 verdict the signer sees)."""
-    known = {f["path"] for f in manifest["files"]}
+    """Mark files approved for import (the phase-1 verdict the signer sees).
+
+    The verdict field is the source of truth, so every listed path must
+    already carry verdict ``approved_for_import``: a list entry that
+    disagrees with its file's verdict is how a rejected file rides into
+    phase 2, and validate() refuses that pairing even when the manifest is
+    edited by hand after the fact."""
+    known = {f["path"]: f for f in manifest["files"]}
     for path in paths:
-        if path not in known:
+        entry = known.get(path)
+        if entry is None:
             raise ValueError(f"cannot approve unknown file: {path!r}")
+        if entry["verdict"] != "approved_for_import":
+            raise ValueError(
+                f"cannot approve {path!r}: its verdict is "
+                f"{entry['verdict']!r}; set the verdict first"
+            )
     manifest["approved_for_import"] = sorted(
         set(manifest["approved_for_import"]) | set(paths)
     )
@@ -182,12 +210,49 @@ def add_decision(manifest: dict[str, Any], kind: str, **detail: Any) -> dict[str
     return entry
 
 
+def _seal_payload(data: dict[str, Any]) -> dict[str, Any]:
+    """The manifest content the seal binds: the approved set, the per-file
+    stamps and lossy flags, and the decisions list. Stamps because phase 2
+    imports them as metadata; the decisions because removing a blocking
+    decision is as much an attack as adding an approval. Import outcomes
+    (imported ids, download records) are deliberately outside: they are the
+    phases' own product, written after the gate."""
+    files = [
+        f for f in data.get("files") or [] if isinstance(f, dict) and f.get("path")
+    ]
+    return {
+        "schema": data.get("schema"),
+        "approved_for_import": sorted(data.get("approved_for_import") or []),
+        "stamps": {f["path"]: f.get("stamps") for f in files},
+        "lossy": {f["path"]: f.get("lossy") for f in files},
+        "decisions_needed": data.get("decisions_needed") or [],
+    }
+
+
+def _compute_seal(data: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        _seal_payload(data), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hmac.new(_SEAL_KEY, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_seal(data: Any) -> bool:
+    """Recompute the seal over the current content and compare (unsigned
+    manifests trivially verify; the gate is ``signed`` + a matching seal)."""
+    if not isinstance(data, dict) or not data.get("signed"):
+        return True
+    return bool(data.get("signature")) and data["signature"] == _compute_seal(data)
+
+
 def sign(manifest: dict[str, Any]) -> None:
-    """Brandon signs the phase-1 report: standing consent for the lossy
-    repairs the report listed, and the gate phase 2 refuses to run
-    without."""
+    """Brandon signs the phase-1 report (``cquarry run sign``): standing
+    consent for the lossy repairs the report listed, and the gate phase 2
+    refuses to run without. Signing also seals the approved set, the
+    stamps, the lossy flags, and the decisions list: any later edit to
+    those fails every load until the manifest is re-signed."""
     manifest["signed"] = True
     manifest["signed_at"] = datetime.now(UTC).isoformat()
+    manifest["signature"] = _compute_seal(manifest)
 
 
 def file_by_path(manifest: dict[str, Any], path: str) -> dict[str, Any] | None:
@@ -197,8 +262,13 @@ def file_by_path(manifest: dict[str, Any], path: str) -> dict[str, Any] | None:
     return None
 
 
-def validate(data: Any) -> list[str]:
-    """Return every structural problem with ``data`` (empty list = valid)."""
+def validate(data: Any, *, check_seal: bool = True) -> list[str]:
+    """Return every structural problem with ``data`` (empty list = valid).
+
+    With ``check_seal`` (the default, and how every consumer loads), a
+    signed manifest must also carry a seal matching its content. The sign
+    verb passes ``check_seal=False`` so a deliberate post-sign edit can be
+    loaded, re-approved, and re-signed instead of dead-ending."""
     errors: list[str] = []
     if not isinstance(data, dict):
         return ["manifest must be a JSON object"]
@@ -212,6 +282,7 @@ def validate(data: Any) -> list[str]:
         errors.append("files must be a list")
         return errors
     known_paths: set[str] = set()
+    verdicts: dict[str, Any] = {}
     for entry in files:
         if not isinstance(entry, dict):
             errors.append("every file entry must be an object")
@@ -223,6 +294,7 @@ def validate(data: Any) -> list[str]:
         if path in known_paths:
             errors.append(f"duplicate file entry: {path!r}")
         known_paths.add(path)
+        verdicts[path] = entry.get("verdict")
         for key in _REQUIRED_FILE:
             if key not in entry:
                 errors.append(f"{path}: missing file key: {key}")
@@ -249,12 +321,33 @@ def validate(data: Any) -> list[str]:
     for path in data.get("approved_for_import", []):
         if path not in known_paths:
             errors.append(f"approved_for_import names an unlisted file: {path!r}")
+        elif verdicts.get(path) != "approved_for_import":
+            errors.append(
+                f"{path}: listed in approved_for_import but its verdict is "
+                f"{verdicts.get(path)!r}; phase 2 imports only what the "
+                "verdict approved"
+            )
+    if check_seal and data.get("signed"):
+        if not data.get("signature"):
+            errors.append(
+                "signed manifest carries no seal; sign it with `cquarry run sign`"
+            )
+        elif data["signature"] != _compute_seal(data):
+            errors.append(
+                "seal mismatch: the manifest was modified after signing; "
+                "re-sign it (`cquarry run sign`) if the edit was deliberate"
+            )
     return errors
 
 
 def save(manifest: dict[str, Any], path: str) -> None:
-    """Stamp ``updated`` and write atomically (temp + os.replace)."""
+    """Stamp ``updated`` and write atomically (temp + os.replace). A signed
+    manifest is re-sealed over its current content: the writer owns the
+    state it is saving, so a phase-2 append leaves the retained manifest
+    verifiable for phase 3 rather than sealed in the past."""
     manifest["updated"] = datetime.now(UTC).isoformat()
+    if manifest.get("signed"):
+        manifest["signature"] = _compute_seal(manifest)
     problems = validate(manifest)
     if problems:
         raise ValueError("refusing to save an invalid manifest: " + "; ".join(problems))
@@ -267,7 +360,10 @@ def save(manifest: dict[str, Any], path: str) -> None:
 
 
 def load(path: str) -> dict[str, Any]:
-    """Load and validate a manifest; raises ValueError listing problems."""
+    """Load and validate a manifest; raises ValueError listing problems.
+    For a signed manifest the problems include a missing or mismatching
+    seal (an edit after signing), so phase 2 and phase 3 never consume
+    content the signature did not cover."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     problems = validate(data)

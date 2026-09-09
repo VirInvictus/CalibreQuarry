@@ -685,9 +685,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.add_argument(
         "phase",
-        choices=("phase1", "phase2", "phase3"),
-        help="phase1: vet a downloads dir into a manifest; phase2: import "
-        "the signed manifest; phase3: curate + mechanical pass",
+        choices=("phase1", "sign", "phase2", "phase3"),
+        help="phase1: vet a downloads dir into a manifest; sign: seal the "
+        "reviewed manifest for phase 2; phase2: import the signed "
+        "manifest; phase3: curate + mechanical pass",
     )
     run_p.add_argument(
         "dir",
@@ -696,7 +697,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="phase1: the downloads directory to vet",
     )
     run_p.add_argument(
-        "--manifest", metavar="FILE", help="phase2/3: the batch manifest"
+        "--manifest",
+        metavar="FILE",
+        help="sign/phase2/phase3: the batch manifest",
     )
     run_p.add_argument(
         "--backup-dir",

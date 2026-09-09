@@ -793,12 +793,54 @@ def run_phase3(
     return 0 if validator_clean else 1
 
 
+def sign_manifest(manifest_path: str) -> int:
+    """Seal the reviewed manifest for phase 2 (``cquarry run sign``).
+
+    Loads the raw JSON and checks structure but NOT the seal, so both the
+    first sign and a re-sign after a deliberate post-sign edit work; the
+    human re-signing IS the approval of the new content."""
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            man = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"ERROR: cannot read the manifest: {e}", file=sys.stderr)
+        return 2
+    if not isinstance(man, dict):
+        print("ERROR: the manifest is not a JSON object.", file=sys.stderr)
+        return 2
+    problems = manifest.validate(man, check_seal=False)
+    if problems:
+        print("ERROR: invalid manifest: " + "; ".join(problems), file=sys.stderr)
+        return 2
+    again = bool(man.get("signed"))
+    manifest.sign(man)
+    try:
+        manifest.save(man, manifest_path)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    lossy = sum(1 for f in man["files"] if f["lossy"]["flagged"])
+    print(
+        f"{'Re-signed' if again else 'Signed'}: {manifest_path} "
+        f"({len(man['approved_for_import'])} approved, {lossy} lossy-flagged)."
+    )
+    print("phase 2 recomputes the seal at load and refuses any later edit.")
+    return 0
+
+
 def dispatch_run(args) -> int:
-    """The `cquarry run` subcommand dispatch (phase1/phase2/phase3)."""
+    """The `cquarry run` subcommand dispatch (phase1/sign/phase2/phase3)."""
     from cquarry_cli.cli import find_db
 
-    db_path = find_db(getattr(args, "db", None))
     quiet = bool(getattr(args, "quiet", False))
+    # The seal works on the manifest file alone: no library needs to be
+    # discoverable, so sign dispatches before the db resolution.
+    if args.phase == "sign":
+        if not args.manifest:
+            print("ERROR: run sign needs --manifest FILE.", file=sys.stderr)
+            return 2
+        return sign_manifest(args.manifest)
+    db_path = find_db(getattr(args, "db", None))
     if args.phase == "phase1":
         if not args.dir:
             print("ERROR: run phase1 needs the downloads directory.", file=sys.stderr)

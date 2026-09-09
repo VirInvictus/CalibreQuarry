@@ -22,6 +22,7 @@ class TestManifestSchema(unittest.TestCase):
         self.manifest = manifest.new_manifest(os.path.join(self.temp_dir, "dl"))
         self.entry = manifest.new_file_entry("book.epub")
         self.entry.update(size=1234, provenance="Standard Ebooks")
+        self.entry["verdict"] = "approved_for_import"
         manifest.add_file(self.manifest, self.entry)
         manifest.approve(self.manifest, ["book.epub"])
 
@@ -117,6 +118,110 @@ class TestManifestSchema(unittest.TestCase):
             manifest.manifests_dir("/home/bdkl/docs/Calibre Library"),
             os.path.join("/home/bdkl/docs/Calibre Library", ".claude", "manifests"),
         )
+
+
+class TestManifestSeal(unittest.TestCase):
+    """The signature is a real seal (the sweep's P0: `sign()` used to set a
+    bare boolean in the same editable file, so a manifest whose rejected
+    file was listed as approved passed phase 2, proven end to end)."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.manifest = manifest.new_manifest(os.path.join(self.temp_dir, "dl"))
+        self.entry = manifest.new_file_entry("book.epub")
+        self.entry.update(
+            size=1234,
+            provenance="Standard Ebooks",
+            stamps={"title": "Book", "authors": ["A. Author"]},
+        )
+        self.entry["verdict"] = "approved_for_import"
+        manifest.add_file(self.manifest, self.entry)
+        self.rejected = manifest.new_file_entry("sketchy.epub")
+        self.rejected["verdict"] = "rejected"
+        manifest.add_file(self.manifest, self.rejected)
+        manifest.approve(self.manifest, ["book.epub"])
+        self.path = os.path.join(self.temp_dir, "m.json")
+
+    def tearDown(self):
+        for name in ("m.json", "m.json.cquarry-tmp"):
+            path = os.path.join(self.temp_dir, name)
+            if os.path.exists(path):
+                os.remove(path)
+        os.rmdir(self.temp_dir)
+
+    def _roundtrip(self):
+        manifest.save(self.manifest, self.path)
+        return manifest.load(self.path)
+
+    def test_signing_seals_the_manifest(self):
+        manifest.sign(self.manifest)
+        loaded = self._roundtrip()  # save() re-seals the signed manifest
+        self.assertTrue(loaded["signed"])
+        self.assertTrue(loaded["signature"])
+        self.assertTrue(manifest.verify_seal(loaded))
+        self.assertEqual(manifest.validate(loaded), [])
+
+    def test_unsigned_manifest_needs_no_seal(self):
+        self.assertFalse(self.manifest["signed"])
+        loaded = self._roundtrip()
+        self.assertIsNone(loaded["signature"])
+        self.assertEqual(manifest.validate(loaded), [])
+
+    def test_editing_stamps_after_signing_fails_load(self):
+        manifest.sign(self.manifest)
+        manifest.save(self.manifest, self.path)
+        with open(self.path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["files"][0]["stamps"]["title"] = "Tampered"
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with self.assertRaisesRegex(ValueError, "seal mismatch"):
+            manifest.load(self.path)
+
+    def test_listing_a_rejected_file_as_approved_fails_validate(self):
+        # The sweep's proven attack, now caught twice: the verdict
+        # cross-check fires even if the seal is recomputed, and the seal
+        # alone fires when it is not.
+        self.manifest["approved_for_import"].append("sketchy.epub")
+        problems = manifest.validate(self.manifest)
+        self.assertTrue(any("sketchy.epub" in p and "verdict" in p for p in problems))
+        self.manifest["signed"] = True
+        self.manifest["signature"] = "0" * 64
+        problems = manifest.validate(self.manifest)
+        self.assertTrue(any("verdict" in p for p in problems))
+
+    def test_removing_a_blocking_decision_after_signing_fails_load(self):
+        manifest.add_decision(
+            self.manifest, "manual_repair", file="book.epub", detail="DRM: ADEPT"
+        )
+        manifest.sign(self.manifest)
+        manifest.save(self.manifest, self.path)
+        with open(self.path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["decisions_needed"] = []
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with self.assertRaisesRegex(ValueError, "seal mismatch"):
+            manifest.load(self.path)
+
+    def test_resign_after_a_deliberate_edit(self):
+        # The re-sign path: structure checks hold, the stale seal does not
+        # block, and re-signing approves the new content.
+        manifest.sign(self.manifest)
+        manifest.save(self.manifest, self.path)
+        with open(self.path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["files"][0]["stamps"]["title"] = "Corrected"
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with self.assertRaises(ValueError):
+            manifest.load(self.path)
+        self.assertEqual([p for p in manifest.validate(data, check_seal=False)], [])
+        manifest.sign(data)
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        loaded = manifest.load(self.path)
+        self.assertEqual(loaded["files"][0]["stamps"]["title"], "Corrected")
 
 
 if __name__ == "__main__":
