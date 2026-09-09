@@ -242,6 +242,8 @@ class TestPhase1Seams(RunCase):
         # reverse of run.py's stamp parser — so the seeded match mirrors
         # that split; with embedded metadata the real fields come from
         # ebook-meta and no fallback happens.)
+        if shutil.which("ebook-meta") is None:
+            self.skipTest("needs Calibre's ebook-meta on PATH")
         epub = self._make_file("Seeded Author - Seeded Title.epub")
         con = sqlite3.connect(self.db_path)
         from cquarry.write import register_udfs
@@ -325,6 +327,13 @@ class TestPhase1Seams(RunCase):
         "books": [{"path": "/tmp/downloads/x.epub", "status": "problem"}],
     }
 
+    # The bindery seam tests pin the entry-point lookup so they exercise
+    # the report handling on hosts without a bindery installed (CI); the
+    # absent-entry-point degrade has its own test below.
+    @staticmethod
+    def _has_bindery():
+        return mock.patch("shutil.which", return_value="/opt/bindery/bin/bindery")
+
     def test_bindery_phase1_reads_the_report_file_and_tolerates_trouble(self):
         # Exit 2 is bindery's "trouble found" — the normal outcome over a
         # directory holding any problem book — with the report still
@@ -336,7 +345,10 @@ class TestPhase1Seams(RunCase):
             seen["report"] = cmd[cmd.index("--json") + 1]
             return real_side_effect(cmd, **kw)
 
-        with mock.patch("cquarry_cli.run._run", side_effect=side_effect):
+        with (
+            self._has_bindery(),
+            mock.patch("cquarry_cli.run._run", side_effect=side_effect),
+        ):
             shape = _bindery_phase1(self.downloads, apply_lossy=False)
         self.assertEqual(shape["summary"]["problem"], 1)
         self.assertFalse(os.path.exists(seen["report"]))  # temp file cleaned up
@@ -346,20 +358,29 @@ class TestPhase1Seams(RunCase):
         # rc 1 is a broken invocation or an epub-less tree: no report, and
         # the slice is simply unavailable.
         proc = mock.Mock(returncode=1, stdout="", stderr="no .epub files under root")
-        with mock.patch("cquarry_cli.run._run", return_value=proc):
+        with (
+            self._has_bindery(),
+            mock.patch("cquarry_cli.run._run", return_value=proc),
+        ):
             self.assertEqual(_bindery_phase1(self.downloads, apply_lossy=False), {})
 
     def test_bindery_phase1_raises_when_trouble_writes_no_report(self):
         # The pre-run-slices entry point: argparse rejects `run` with its
         # own exit 2 and no report. The seam names it instead of sailing on.
         proc = mock.Mock(returncode=2, stdout="", stderr="invalid choice: 'run'")
-        with mock.patch("cquarry_cli.run._run", return_value=proc):
+        with (
+            self._has_bindery(),
+            mock.patch("cquarry_cli.run._run", return_value=proc),
+        ):
             with self.assertRaisesRegex(RuntimeError, "no readable report"):
                 _bindery_phase1(self.downloads, apply_lossy=False)
 
     def test_bindery_phase1_raises_on_unexpected_exit_codes(self):
         proc = mock.Mock(returncode=3, stdout="", stderr="boom")
-        with mock.patch("cquarry_cli.run._run", return_value=proc):
+        with (
+            self._has_bindery(),
+            mock.patch("cquarry_cli.run._run", return_value=proc),
+        ):
             with self.assertRaisesRegex(RuntimeError, "bindery run phase1 failed"):
                 _bindery_phase1(self.downloads, apply_lossy=False)
 
