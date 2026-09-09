@@ -604,3 +604,293 @@ Calibre's own source plugins); no taxonomy or genre decisions in phase 2; no
 bulk anything (every write is manifest-scoped); no replacement of the manual
 path (the skills' command lists remain the fallback and the documentation of
 record).
+
+## Phase 18: hardening backlog from the 2026-09-08 audit sweep (proposed 2026-09-08, digging only)
+
+*Context: a five-agent adversarial sweep of the whole repo (write path, run
+verbs, read surface, tests and scripts, docs), prompted by the bindery-cli
+sweep earlier the same day. No code was changed; findings were demonstrated
+against synthetic /tmp fixtures, never the real library. The headline: the
+suite is hermetic and genuinely good (298 tests, 1.6 s, all fixture-based),
+Phase 16's set-write rollback held under everything thrown at it, but the
+Phase 17 run verbs carry three P0-class findings and have plausibly never run
+end to end against real files, and the read surface has one proven
+data-destroyer. Three upstream (cquarry) fix candidates surfaced and are
+noted for that repo's own sweep.*
+
+*Verification postscript (2026-09-08, an independent batch re-derived the
+five sharpest claims; all five CONFIRMED, with sharpening): the run.py
+bindery seam has a THIRD break even after `--json` gains its FILE argument.
+bindery's phase1 signals "trouble found" with exit 2, its normal outcome for
+a downloads dir with any problem book, and run.py treats rc not in (0,1) as
+failure, so the seam raises on exactly the case phase 1 exists to surface;
+the installed bindery is 0.30.0, so the old-verb half is hypothetical today.
+"Crashes on every non-empty directory" means "any directory holding an
+ebook-extension file"; a djvu-only directory crashes at the
+screen_duplicate exit-2 seam instead. The `--output` hole is shared by
+`--search --output` and the annotations export (same `_open_out`), and the
+overwrite truncates the inode rather than renaming. The Ctrl-C torn-write
+window is the single-verb `run_write` path only (all batched paths roll
+back) and needs the interrupt to land between a setter's write and its
+`_mark_dirty`; the CLI then prints "Interrupted by user." with no hint a
+write landed. `tests/test_run.py` mocks both broken seams (`_screen_duplicates`
+and `_bindery_phase1`), which is how a green suite coexists with a phase1
+that crashes on real input.*
+
+### Run verbs (Phase 17): the flagship pathway is draft-quality
+
+- [ ] **Fix the two broken phase-1 seams (P0).** `run.py:282-286` calls
+      `.get` on screen_duplicate's JSON, which is a bare list, so
+      `run phase1` dies with AttributeError on any non-empty directory; the
+      same comprehension would flag every screened file as a duplicate
+      because the filter on actual hits is missing. And `run.py:208` invokes
+      `bindery run phase1 DIR --json` with no value for `--json` (bindery
+      requires a FILE), while the `bindery` on PATH also predates the run
+      verb; either way the seam raises. Both slipped through because every
+      test mocks these seams. Fix: consume the list and keep only hit
+      records; pass a temp file to `--json`; pin the bindery entry point.
+- [ ] **Make the manifest signature a real seal (P0).** `sign()` sets a bare
+      `signed = true` boolean in the same editable JSON file
+      (`manifest.py:185-191`); nothing binds it to contents, and
+      `validate()` never cross-checks `approved_for_import` against the
+      per-file verdict, so a manifest whose rejected file is listed as
+      approved passes and phase 2 imports it (proven end to end). Fix:
+      stdlib HMAC over the canonical approved-set + stamps + lossy list,
+      recomputed by phase 2, plus the verdict cross-check.
+- [ ] **Stop phase 1 from moving files without consent (P1).** The docs
+      promise phase 1 is dry against book files without `--stamp`/
+      `--apply-lossy`, but `_quarantine()` runs unconditionally for any
+      verdict that is not clean/unscanned, which includes audit_drm's BENIGN
+      (font obfuscation) and N/A (DJVU), i.e. every DJVU in the batch gets
+      moved and a manual_repair decision recorded (`run.py:304-311`).
+      Quarantine only true DRM hits, gate the move behind a flag.
+- [ ] **Make quarantine and stamping non-destructive (P1).** `_quarantine`
+      moves onto `basename` collisions, destroying the earlier file, and
+      records the wrong `moved_to` directory (`run.py:218-223`, `309-311`).
+      `--stamp` is a silent no-op: run.py points stamp_pdf's backup dir
+      inside the vetted tree, which stamp_pdf itself refuses, and the
+      failure is dropped without a message; `_stamp_backups` is also never
+      excluded from the inventory, so a second run sweeps the backups
+      (`run.py:276`, `106`). Collision-checked destinations, backups
+      outside the tree, warn on nonzero exits.
+- [ ] **Close phase 2's accounting holes (P1).** The "never imported twice"
+      docstring invariant is unimplemented (only the manifest's own
+      `imported_id` is checked; add_book copies unconditionally), and the
+      resume record is saved only after the unguarded download segment, so
+      a crash there duplicates the import on rerun (`run.py:444-482`,
+      `544`). `--audience` with no flag stamps the literal string `'None'`
+      into `#audience` (`cli.py:708-712` + `run.py:481` + cquarry's
+      `str(v).strip()`). The `--backup-dir` copy is a fixed-name file, so
+      the second run to the same dir destroys the only restore point, and a
+      raw copy2 can snapshot a hot journal (`run.py:372-374`). The rollback
+      message claims "library restored" when nothing was restored, and
+      add_book's file copies for books that succeeded before the failure
+      stay behind as orphan directories (`run.py:486-490`). `--yes` is a
+      dead flag; `--apply-lossy` on phase 1 is accepted and never used.
+- [ ] **Give phase 3 the same rails as every other write path (P1).** It
+      opens WritableCalibreDB with no closed-Calibre check (phase 2 and set
+      mode both enforce `pgrep ^calibre`), and its fixes fallback
+      `set_custom_column` accepts `#reading_status` from the answer file,
+      the exact column the library NON-NEGOTIABLES ban
+      (`run.py:602-691`, `687`; contrast `setwrite.py:131`, `571`). Also:
+      bindery/reconcile exit 2 is a suppressed warning (fully invisible
+      under `--quiet`) while validator-clean alone still exits 0
+      (`run.py:702`, `720`); the post-commit calibredb download segment
+      runs outside both the batch and the guard window.
+- [ ] **Run-verb papercuts:** `_pdf_battery` ignores check_pdf's exit code
+      and only scans the top level while `_inventory` walks recursively
+      (`run.py:193-201`); answer-file loading raises raw tracebacks and
+      silently ignores unknown ids (`run.py:646-649`); `_fetch_metadata`
+      maps a timeout to "ambiguous"; quarantined files never appear in
+      `files[]`, so the schema's `quarantined` verdict is writer-dead;
+      `_existing_book_ids` is dead code; phase 2 shells `calibredb
+      set_metadata`, contradicting the repo's own "No calibredb required"
+      constraint.
+
+### Write path (Phase 16): solid core, real edges
+
+- [ ] **Ctrl-C mid-single-verb-write commits the half-done mutation (P1,
+      upstream component).** `run_write` runs the action bare
+      (`writeops.py:54-57`); cquarry's setters roll back on `Exception`
+      only, and `WritableCalibreDB.__exit__` commits unconditionally, so a
+      KeyboardInterrupt commits the row change without the
+      `metadata_dirtied` row, making the edit invisible to Calibre's OPF
+      sync forever (reproduced). The batched paths are immune. Fix:
+      `wdb.batch()` around the single action in run_write, and/or
+      `__exit__` should skip commit when an exception is in flight (that
+      half belongs to cquarry).
+- [ ] **`--commit-per-book` is mechanically inert and the report lies about
+      it (P1).** The outer batch wraps the per-book inner batches, nested
+      batches join the outer transaction, so the flag changes nothing while
+      the output claims "Committed per book (3 transactions)"
+      (`setwrite.py:594-600`). Implement it for real (with per-book
+      committed/failed reporting) or delete it.
+- [ ] **Empty-string flag values: silently dropped or silently destructive
+      (P1).** `--batch-set-title ""` vanishes (truthiness gates) while
+      `--batch-set-column audience ""` is collected and cquarry treats the
+      empty string as clear, wiping the column on every targeted book with
+      rc 0 (`setwrite.py:216-289`; `write.py:1116`). Validate `is not
+      None`, reject empties with exit 2.
+- [ ] **Promote the banned-column refusal to a shared chokepoint (P2).**
+      `#reading_status`/`status`/`date_read` are refused only at set mode's
+      entrance; single-book `--set-column` and the TUI both write them
+      today (spec scopes the refusal to set mode, so arguably deliberate,
+      but the same column is protected at one door and open at the other
+      two). Fix in the action builders or cquarry's `set_custom_column`.
+- [ ] **Set/write papercuts:** `--batch-set-cover maybe` crashes with a
+      traceback and exit 1 instead of the contracted exit 2
+      (`setwrite.py:330` vs `writeops._ArgError`); the `--batch-clear-rating`
+      manifest gate is honor-system (any id file unlocks a bulk rating
+      clear; the repo's own manifest validator is never consulted,
+      `setwrite.py:397-402`); `--quiet` suppresses the failure detail the
+      module docstring promises survives it (`setwrite.py:462-464`);
+      `--remove-book`'s dry run opens the DB through the read-write handle
+      (`writeops.py:429-447`); backups overwrite by fixed name (both here
+      and in run.py); pgrep guard checked before the backup-dir usage
+      error, TOCTOU window noted; `parse_book_id` accepts `int("5_0")`;
+      dry-run JSON omits the resolved target ids.
+
+### Read surface
+
+- [ ] **A read mode can overwrite metadata.db itself (P0).** No output
+      writer compares its path to the database path:
+      `--export --output <lib>/metadata.db` replaced a fixture database
+      with a JSON report, exit 0 (`export.py:39-51`; same hole in
+      `catalog.py:83`, `audit.py:117`, annotations, exportlt). The
+      read-only guarantee holds at the SQL layer only. Fix: one shared
+      output helper that refuses the db path (and temp+os.replace for
+      no-partial-file).
+- [ ] **The TUI dies wholesale on a malformed database (P0).** `CalibreDB`
+      is constructed outside every exception boundary
+      (`tui.py:426`), so a corrupt or foreign sqlite file at the chosen
+      path ends the session in a raw traceback, including via
+      "Change Database" (which validates only the filename suffix,
+      `tui.py:56-66`).
+- [ ] **The TUI ignores the saved config, then silently rebinds it (P1).**
+      `_resolve_db_for_tui` consults a hard-coded default list that starts
+      with CWD-relative `metadata.db` and never calls `get_db_path()`, so
+      launching the TUI from any directory containing a stray metadata.db
+      overwrites the shared config and the next CLI run reads the wrong
+      library (`tui.py:139-150`).
+- [ ] **`--exportlt` breaks two contracts (P1).** It is the one frontend-only
+      violation in the read surface (raw hand-built SQL over link tables,
+      no schema degradation: crashes on a pre-`books_pages_link` schema,
+      `librarything.py:112-139`), and its self-check verdict is discarded
+      by the CLI: "do not upload" exits 0 (`cli.py:819-822`).
+- [ ] **Search/catalog failures exit 0 (P1).** `--search '((('` prints the
+      parse error and exits 0 while the same failure under `--exportlt
+      --search` exits 1; `--catalog --wing NoSuchWing` exits 0 leaving a
+      stale catalog file (`export.py:205-209`, `cli.py:911`,
+      `catalog.py:45-46`). Normalize: modes return exit codes; catch
+      `ParseException` specifically.
+- [ ] **Read-mode papercuts:** one corrupt epoch in `last_read_positions`
+      tracebacks `--reading-progress` and `--book` (milliseconds-epoch
+      pattern; `display.py:166`, `detail.py:142`); `--exportlt`,
+      `--export-annotations`, `--untagged`, `--format-stats` sit outside
+      the mutually-exclusive group and silently lose to whichever
+      dispatches first (`--format-stats` is even declared in the write-verbs
+      group); TUI Entity Browser pages a raw traceback for an invalid kind;
+      negative `--recent N` prints a nonsense header; `--exportlt --output
+      FILE` creates a directory named FILE; header-only `librarything_read.csv`
+      when nothing is Read; the TUI footer claims "Report written to ..."
+      when nothing was written; `--plugin-data` is silently dropped by
+      `--format json`; `--exportlt` silently deletes matching csv files in
+      the output dir.
+
+### Tests and scripts
+
+- [ ] **Make run_tests.sh actually run the tests (highest-value fix in this
+      audit).** `CLAUDE.md:39` says "Run tests with ./run_tests.sh", but the
+      script runs only the 27-command live-library smoke (read-only, exit
+      codes only, outputs to /tmp) and zero of the 298 unittest tests;
+      anyone following the doc gets smoke-only coverage. Prepend the
+      unittest discover line (and merge test_queries.sh's overlapping
+      queries in), or rename it smoke_library.sh and fix the doc.
+- [ ] **Contract-test the run-verb instruments for real.** The whole P0
+      class exists because screen_duplicate, bindery, and check_pdf seams
+      are mocked in tests; `dispatch_run` (the CLI wiring for every run
+      flag) has zero test references. Thin adapters plus tests that invoke
+      the actual scripts against /tmp fixtures would have caught all three
+      before shipping. Also untested: phase-2 rollback branch,
+      `--stamp`/`_drive_stamp`, `_fetch_metadata` verdict parsing, the
+      setwrite Calibre-running refusal branch, writeops lock-contention
+      mapping, `--commit-per-book` failure semantics, validate_metadata
+      (one test gates phase 3's exit code), and all of tui.py (zero
+      coverage; it calls run_write directly, bypassing the pinned path).
+- [ ] **Suite hygiene:** mid-file `unittest.main()` guards silently
+      truncate direct runs in three files (`test_write_flow.py:167`,
+      `test_scripts.py:213`, `test_audit_drm.py:230`); six near-identical
+      drifting `_SCHEMA` fixture strings want a shared builder;
+      `test_manifest.py:115-119` uses the real library path as a throwaway
+      literal; `fix_cq_lint.sh` is committed junk whose re-run would
+      comment out every `try:` in export.py (delete); the two CI skips
+      (`/usr/share/dict/words`, ghostscript) mean CI runs fewer assertions
+      than this machine.
+- [ ] **Scripts verdict: everything is alive; nothing to delete except
+      fix_cq_lint.sh.** run.py drives six of them (screen_duplicate,
+      audit_drm, check_pdf, stamp_pdf, reconcile_file_metadata,
+      validate_metadata); fetch_library_codes, audit_isbns, spot_check,
+      compress_pdf are standalone live tools; all ruff-clean and
+      type-hinted. Upgrades: audit_conversion_overrides wants to become an
+      `--audit` mode (per the promote-to-cquarry doctrine); db_util is
+      half-consolidated (four scripts still carry private copies of
+      connect_ro/calibre_running); comments_census claims `--json` is "for
+      the phase-3 runner" but run.py never calls it (wire it or reword);
+      taxonomy.example.yaml is reference material for another repo
+      (docs/ would be tidier).
+
+### Documentation
+
+- [ ] **Fix the two user-facing falsehoods in README:** the troubleshooting
+      line claiming saved searches "match nothing" (they work; the same
+      README says so 50 lines earlier, `README.md:391`), and the search
+      engine living at the nonexistent `src/cquarry/search.py` plus "zero
+      dependencies" (it is the cquarry dependency; three runtime deps,
+      `README.md:312`, `:338`). Also clean the six botched
+      "minimal-dependency (uses tqdm)" find-replace artifacts.
+- [ ] **Absorb phases 15-17 into spec.md:** seven shipped modes are absent
+      from the Modes table (`--book` incl. `--format json`, `--entities`,
+      `--reading-progress`, `--columns`, `--info`, `--exportlt`,
+      `--format-stats`); `--set-pubdate`/`--clear-pubdate` are missing from
+      the single-book verb list; spec §5 says "three of them write" while
+      its own table lists four.
+- [ ] **Document the run verbs' flag surface in README** (`--stamp`,
+      `--apply-lossy`, `--bindery-report`, `--audience`, `--yes` are
+      file-side consents living only in patchnotes/help) and add companion
+      script sections for stamp_pdf, screen_duplicate,
+      audit_conversion_overrides, check_pdf, comments_census.
+- [ ] **Housekeeping:** all seven Phase 17 roadmap boxes carry a malformed
+      `- [x] - [ ]` double checkbox; the patchnotes H1 title sits mid-file
+      (entries are prepended above it) and the heading style shifted from
+      `## v` to `# ` around 3.14.0; README's "213 tests" is stale (298).
+      *(Note on the checkboxes: leave Phase 17's boxes ticked, the features
+      exist; the P0s above are correctness debt on top of shipped
+      surface.)*
+
+### Upstream findings (belong to cquarry's own sweep, noted here where found)
+
+- `WritableCalibreDB.__exit__` commits unconditionally, so BaseException
+  (Ctrl-C) mid-write commits a torn edit; setters self-heal only on
+  `Exception` (`cquarry/write.py:290-293`, `447-449`).
+- `add_book` has no duplicate refusal (the "never imported twice" invariant
+  needs a `data`-table check) and leaves orphan book directories when a
+  later book in a shared batch fails.
+- `add_custom_column_values` stringifies None into the literal `'None'`.
+- Promotion candidates the frontend is waiting on: a flat book-row provider
+  for exporters (kills --exportlt's raw SQL), a banned-column chokepoint in
+  `set_custom_column`, and a shared write-session guard (closed-Calibre
+  check + rotated backup + one-batch accounting + orphan compensation).
+
+### Completeness verdict from the sweep
+
+*Not almost complete, and the gap has a precise address. The foundation is
+the strongest in the workspace trio: hermetic 298-test suite, honest
+rollback in set mode, renderers that genuinely derive nothing, and version
+sync enforced four ways. But Phase 17 shipped as scaffolding with contracts
+attached: the pathway's own tests never exercise its two real seams, so the
+verbs fail on first contact with real files, and the manifest's signature is
+a boolean. The one proven data-destroyer (export overwriting metadata.db) is
+a ten-line fix that should not wait. Suggested order when work resumes: the
+two phase-1 seams and the output-path guard first, the manifest HMAC second,
+phase 3's rails third; the facility run that Phase 17's own postscript calls
+for should follow, not precede, those fixes.*
