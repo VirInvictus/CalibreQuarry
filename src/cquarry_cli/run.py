@@ -37,6 +37,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,12 @@ from cquarry_cli.manifest import DEFAULT_AUDIENCE
 _PGREP_TIMEOUT = 15
 
 _EBOOK_EXTS = (".epub", ".pdf", ".mobi", ".azw3", ".djvu")
+
+#: screen_duplicate.py's own screenable set (its EBOOK_EXTENSIONS). run.py
+#: pre-filters the inventory with it so the screener only ever sees files it
+#: screens: a djvu-only tree is a clean screen, not the script's exit-2
+#: "no ebook files to screen" error. Keep the two sets in step.
+_SCREEN_EXTS = (".epub", ".pdf", ".mobi", ".azw3")
 
 _FILENAME_STAMP = re.compile(r"^(?P<author>.+?)\s+-\s+(?P<title>.+?)$")
 
@@ -128,26 +135,37 @@ def _stamps_from_filename(path: str) -> dict[str, Any]:
     return stamp
 
 
-def _screen_duplicates(downloads_dir: str, db_path: str) -> dict[str, Any]:
-    """screen_duplicate.py --format json over the directory."""
+def _screen_duplicates(files: list[str], db_path: str) -> set[str]:
+    """screen_duplicate.py --format json over the inventoried files: the
+    paths with a library or within-batch duplicate hit.
+
+    The JSON report is a bare list holding EVERY screened file, so only
+    records with hits count as duplicates. An unparseable report is a hard
+    error: silence here would approve files the screen never judged."""
+    if not files:
+        return set()
     script = _scripts_dir() / "screen_duplicate.py"
     proc = _run(
-        [
-            sys.executable,
-            str(script),
-            downloads_dir,
-            "--db",
-            db_path,
-            "--format",
-            "json",
-        ]
+        [sys.executable, str(script), *files, "--db", db_path, "--format", "json"]
     )
     if proc.returncode not in (0, 1):
         raise RuntimeError(f"screen_duplicate failed: {proc.stderr.strip()}")
     try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return {}
+        records = json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"screen_duplicate report unreadable: {e}") from e
+    if not isinstance(records, list):
+        raise RuntimeError(
+            "screen_duplicate report is not the documented list shape: "
+            f"{type(records).__name__}"
+        )
+    return {
+        record["file"]
+        for record in records
+        if isinstance(record, dict)
+        and isinstance(record.get("file"), str)
+        and (record.get("library_hits") or record.get("batch_duplicates"))
+    }
 
 
 def _existing_book_ids(db_path: str) -> set[int]:
@@ -203,16 +221,37 @@ def _pdf_battery(downloads_dir: str) -> dict[str, Any]:
 
 
 def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
-    """bindery run phase1 --json (the EPUB slice). Read-only unless the
-    signed-consent flag is passed (phase 2's repair step uses that)."""
-    cmd = ["bindery", "run", "phase1", downloads_dir, "--json"]
-    proc = _run(cmd + (["--apply-lossy"] if apply_lossy else []), timeout=3600)
-    if proc.returncode not in (0, 1):
-        raise RuntimeError(f"bindery run phase1 failed: {proc.stderr.strip()}")
-    try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError:
+    """bindery run phase1 --json FILE (the EPUB slice). Read-only unless the
+    signed-consent flag is passed (phase 2's repair step uses that).
+
+    Exit codes are bindery's library contract: 0 all-clean, 2 trouble found
+    (the normal outcome over a directory holding any problem book; the
+    report is still written), 1 a broken invocation or an epub-less tree
+    (no report; the slice is simply unavailable). Any other code, or a
+    missing report behind 0/2 -- an entry point too old to know the run
+    verb -- is a hard error."""
+    bindery = shutil.which("bindery")
+    if bindery is None:
         return {}
+    fd, report = tempfile.mkstemp(prefix="bindery-phase1-", suffix=".json")
+    os.close(fd)
+    try:
+        cmd = [bindery, "run", "phase1", downloads_dir, "--json", report]
+        proc = _run(cmd + (["--apply-lossy"] if apply_lossy else []), timeout=3600)
+        if proc.returncode == 1:
+            return {}
+        if proc.returncode not in (0, 2):
+            raise RuntimeError(f"bindery run phase1 failed: {proc.stderr.strip()}")
+        try:
+            with open(report, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise RuntimeError(
+                f"bindery run phase1 ended {proc.returncode} but wrote no "
+                f"readable report (is the bindery on PATH run-verb capable?): {e}"
+            ) from e
+    finally:
+        os.unlink(report)
 
 
 def _quarantine(downloads_dir: str, path: str, reason: str) -> str:
@@ -276,14 +315,12 @@ def run_phase1(
     stamp_backups = os.path.join(downloads_dir, "_stamp_backups")
     stamped_files = _drive_stamp(files, stamp_backups) if stamp else []
 
-    dup_report = _screen_duplicates(downloads_dir, db_path)
     drm = _drm_verdicts(downloads_dir)
     battery = _pdf_battery(downloads_dir)
-    dup_paths = {
-        entry.get("path") or entry.get("file")
-        for entry in dup_report.get("files", dup_report.get("duplicates", []))
-        if isinstance(entry, dict)
-    }
+    dup_paths = _screen_duplicates(
+        [f for f in files if os.path.splitext(f)[1].lower() in _SCREEN_EXTS],
+        db_path,
+    )
 
     man = manifest.new_manifest(downloads_dir)
     for path in files:

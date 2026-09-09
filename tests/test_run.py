@@ -4,7 +4,10 @@ The orchestrators drive external instruments (companion scripts, bindery,
 calibredb) through subprocess seams; those seams are mocked here so the
 suite exercises each verb's contract — guards, manifest flow, the one-
 batch import, the decisions taxonomy, and phase 3's answer-file curation —
-against throwaway fixture databases.
+against throwaway fixture databases. The exception is TestPhase1Seams,
+which pins the two phase-1 seams to their instruments' REAL shapes (the
+2026-09-08 sweep found both seams mocked everywhere else, so a phase 1
+that crashed on first real contact shipped green).
 """
 
 import json
@@ -16,7 +19,14 @@ import unittest
 from unittest import mock
 
 from cquarry_cli import manifest
-from cquarry_cli.run import _stamps_from_filename, run_phase1, run_phase2, run_phase3
+from cquarry_cli.run import (
+    _bindery_phase1,
+    _screen_duplicates,
+    _stamps_from_filename,
+    run_phase1,
+    run_phase2,
+    run_phase3,
+)
 
 # The phase-2 import fixture: the add_book INSERT-path hazards (AUTOINCREMENT
 # + books_insert_trg needing title_sort()/uuid4()) plus the #source (direct
@@ -127,7 +137,7 @@ class TestRunPhase1(RunCase):
         with (
             mock.patch(
                 "cquarry_cli.run._screen_duplicates",
-                return_value={"duplicates": [{"path": dup}]},
+                return_value={dup},
             ),
             mock.patch(
                 "cquarry_cli.run._drm_verdicts",
@@ -161,6 +171,204 @@ class TestRunPhase1(RunCase):
     def test_empty_directory_is_clean_zero(self):
         rc = run_phase1(self.downloads, self.db_path)
         self.assertEqual(rc, 0)
+
+
+class TestPhase1Seams(RunCase):
+    """The two phase-1 subprocess seams, against their instruments' real
+    contract (the 2026-09-08 sweep's P0: both seams used to be mocked in
+    every test, and both crashed on first real contact — the duplicate
+    report was read as a dict, and bindery's --json was invoked with no
+    value). Mocked here at the subprocess boundary with the real payload
+    shapes, plus one run against the actual screen_duplicate.py."""
+
+    def test_screen_duplicates_keeps_only_hit_records(self):
+        # screen_duplicate's JSON report is a bare list holding EVERY
+        # screened file; only records with hits mean a duplicate.
+        hit = self._make_file("Hit Author - Hit Title.epub")
+        clean = self._make_file("Clean Author - Clean Title.epub")
+        report = [
+            {
+                "file": hit,
+                "title": "Hit Title",
+                "authors": ["Hit Author"],
+                "isbn": "",
+                "library_hits": [{"id": 1, "title": "Hit Title"}],
+            },
+            {
+                "file": clean,
+                "title": "Clean Title",
+                "authors": ["Clean Author"],
+                "isbn": "",
+                "library_hits": [],
+            },
+            {
+                "file": "/tmp/batch_mate.epub",
+                "title": "Clean Title",
+                "authors": ["Clean Author"],
+                "isbn": "",
+                "library_hits": [],
+                "batch_duplicates": [clean],
+            },
+        ]
+        proc = mock.Mock(returncode=0, stdout=json.dumps(report), stderr="")
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            dups = _screen_duplicates([hit, clean], self.db_path)
+        self.assertEqual(dups, {hit, "/tmp/batch_mate.epub"})
+
+    def test_screen_duplicates_skips_the_subprocess_when_nothing_screenable(self):
+        with mock.patch("cquarry_cli.run._run") as run_mock:
+            self.assertEqual(_screen_duplicates([], self.db_path), set())
+        run_mock.assert_not_called()
+
+    def test_screen_duplicates_raises_on_setup_error(self):
+        # rc 2 is screen_duplicate's setup error (unreadable library);
+        # silence would approve files the screen never judged.
+        proc = mock.Mock(returncode=2, stdout="", stderr="cannot open the library")
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            with self.assertRaisesRegex(RuntimeError, "screen_duplicate failed"):
+                _screen_duplicates([self._make_file("x.epub")], self.db_path)
+
+    def test_screen_duplicates_raises_on_unparseable_report(self):
+        proc = mock.Mock(returncode=0, stdout="not json", stderr="")
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            with self.assertRaisesRegex(RuntimeError, "unreadable"):
+                _screen_duplicates([self._make_file("x.epub")], self.db_path)
+
+    def test_screen_duplicates_against_the_real_script(self):
+        # The instrument itself over the fixture library, no mocks: the
+        # real bare-list report flows through the seam. (The screen tool's
+        # filename fallback reads "A - B" as title A / author B — the
+        # reverse of run.py's stamp parser — so the seeded match mirrors
+        # that split; with embedded metadata the real fields come from
+        # ebook-meta and no fallback happens.)
+        epub = self._make_file("Seeded Author - Seeded Title.epub")
+        con = sqlite3.connect(self.db_path)
+        from cquarry.write import register_udfs
+
+        register_udfs(con)
+        book = con.execute(
+            "INSERT INTO books (title) VALUES ('Seeded Author')"
+        ).lastrowid
+        author = con.execute(
+            "INSERT INTO authors (name) VALUES ('Seeded Title')"
+        ).lastrowid
+        con.execute(
+            "INSERT INTO books_authors_link (book, author) VALUES (?, ?)",
+            (book, author),
+        )
+        con.commit()
+        con.close()
+        self.assertEqual(_screen_duplicates([epub], self.db_path), {epub})
+
+    def test_phase1_hands_the_screen_only_screenable_files(self):
+        # The pre-filter is screen_duplicate's own extension set: a djvu
+        # inventory never reaches it (its exit-2 "no ebook files" was the
+        # djvu-only crash), so the seam runs only when it has work.
+        epub = self._make_file("Ann Leckie - Fifth Head of Data.epub")
+        djvu = self._make_file("broken_scan.djvu", payload=b"DJVUDATA")
+        seen = {}
+
+        def fake_screen(files, db):
+            seen["files"] = files
+            return set()
+
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", side_effect=fake_screen),
+            mock.patch(
+                "cquarry_cli.run._drm_verdicts",
+                return_value={epub: "clean", djvu: "clean"},
+            ),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen["files"], [epub])
+
+    def test_djvu_only_directory_runs_clean(self):
+        # The regression: a djvu-only tree used to die at the screen seam
+        # (AttributeError on the list report, or the script's exit 2).
+        scan = self._make_file("broken_scan.djvu", payload=b"DJVUDATA")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={scan: "clean"}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertEqual(
+            manifest.file_by_path(man, scan)["verdict"], "approved_for_import"
+        )
+
+    @staticmethod
+    def _bindery_proc(returncode, payload=None, stderr=""):
+        def side_effect(cmd, **kw):
+            report = cmd[cmd.index("--json") + 1]
+            if payload is not None:
+                with open(report, "w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+            return mock.Mock(returncode=returncode, stdout="prose", stderr=stderr)
+
+        return side_effect
+
+    _BINDERY_PAYLOAD = {
+        "mode": "phase1",
+        "root": "/tmp/downloads",
+        "apply_lossy": False,
+        "summary": {"books": 1, "clean": 0, "problem": 1, "error": 0},
+        "decisions_needed": [],
+        "books": [{"path": "/tmp/downloads/x.epub", "status": "problem"}],
+    }
+
+    def test_bindery_phase1_reads_the_report_file_and_tolerates_trouble(self):
+        # Exit 2 is bindery's "trouble found" — the normal outcome over a
+        # directory holding any problem book — with the report still
+        # written; it must parse, not raise.
+        seen = {}
+        real_side_effect = self._bindery_proc(2, payload=self._BINDERY_PAYLOAD)
+
+        def side_effect(cmd, **kw):
+            seen["report"] = cmd[cmd.index("--json") + 1]
+            return real_side_effect(cmd, **kw)
+
+        with mock.patch("cquarry_cli.run._run", side_effect=side_effect):
+            shape = _bindery_phase1(self.downloads, apply_lossy=False)
+        self.assertEqual(shape["summary"]["problem"], 1)
+        self.assertFalse(os.path.exists(seen["report"]))  # temp file cleaned up
+        self.assertNotIn(self.downloads, seen["report"])  # never litter the tree
+
+    def test_bindery_phase1_degrades_on_invocation_failure(self):
+        # rc 1 is a broken invocation or an epub-less tree: no report, and
+        # the slice is simply unavailable.
+        proc = mock.Mock(returncode=1, stdout="", stderr="no .epub files under root")
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            self.assertEqual(_bindery_phase1(self.downloads, apply_lossy=False), {})
+
+    def test_bindery_phase1_raises_when_trouble_writes_no_report(self):
+        # The pre-run-slices entry point: argparse rejects `run` with its
+        # own exit 2 and no report. The seam names it instead of sailing on.
+        proc = mock.Mock(returncode=2, stdout="", stderr="invalid choice: 'run'")
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            with self.assertRaisesRegex(RuntimeError, "no readable report"):
+                _bindery_phase1(self.downloads, apply_lossy=False)
+
+    def test_bindery_phase1_raises_on_unexpected_exit_codes(self):
+        proc = mock.Mock(returncode=3, stdout="", stderr="boom")
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            with self.assertRaisesRegex(RuntimeError, "bindery run phase1 failed"):
+                _bindery_phase1(self.downloads, apply_lossy=False)
+
+    def test_bindery_phase1_without_the_entry_point_degrades(self):
+        with (
+            mock.patch("shutil.which", return_value=None),
+            mock.patch("cquarry_cli.run._run") as run_mock,
+        ):
+            self.assertEqual(_bindery_phase1(self.downloads, apply_lossy=False), {})
+        run_mock.assert_not_called()
 
 
 class TestRunPhase2(RunCase):
