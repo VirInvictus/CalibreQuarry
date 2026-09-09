@@ -111,7 +111,8 @@ def _now_stamp() -> str:
 def _inventory(downloads_dir: str) -> list[str]:
     files = []
     for dirpath, _dirnames, filenames in os.walk(downloads_dir):
-        if "/_quarantine" in dirpath.replace(os.sep, "/"):
+        rel = dirpath.replace(os.sep, "/")
+        if "/_quarantine" in rel or "/_stamp_backups" in rel:
             continue
         for name in sorted(filenames):
             if os.path.splitext(name)[1].lower() in _EBOOK_EXTS:
@@ -256,9 +257,19 @@ def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
 
 
 def _quarantine(downloads_dir: str, path: str, reason: str) -> str:
+    """Move one problem file into _quarantine/, never onto an existing
+    file: a basename collision gets a numbered sibling, so two same-named
+    files in different subdirs cannot destroy each other."""
     dest_dir = os.path.join(downloads_dir, "_quarantine")
     os.makedirs(dest_dir, exist_ok=True)
-    dest = os.path.join(dest_dir, os.path.basename(path))
+    base = os.path.basename(path)
+    dest = os.path.join(dest_dir, base)
+    if os.path.exists(dest):
+        stem, ext = os.path.splitext(base)
+        n = 2
+        while os.path.exists(os.path.join(dest_dir, f"{stem}-{n}{ext}")):
+            n += 1
+        dest = os.path.join(dest_dir, f"{stem}-{n}{ext}")
     shutil.move(path, dest)
     return f"{reason}; moved to {dest}"
 
@@ -289,6 +300,14 @@ def _drive_stamp(files: list[str], backups: str) -> list[str]:
         proc = _run(cmd, timeout=600)
         if proc.returncode == 0:
             stamped.append(path)
+        else:
+            # A failed stamp must not be a silent no-op: the file ships
+            # with the wrong metadata and phase 3 needs to know why.
+            print(
+                f"WARNING: stamp_pdf failed on {os.path.basename(path)}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}",
+                file=sys.stderr,
+            )
     return stamped
 
 
@@ -317,7 +336,12 @@ def run_phase1(
         print(f"No ebook files under {downloads_dir}.")
         return 0
 
-    stamp_backups = os.path.join(downloads_dir, "_stamp_backups")
+    # stamp_pdf refuses a backup dir inside the tree it stamps, which made
+    # --stamp a silent no-op; the backups belong outside the vetted tree
+    # (the stamp_pdf.py precedent), where a rerun cannot sweep them either.
+    stamp_backups = os.path.join(
+        tempfile.gettempdir(), f"cquarry-stamp-backups-{_now_stamp()}"
+    )
     stamped_files = _drive_stamp(files, stamp_backups) if stamp else []
 
     drm = _drm_verdicts(downloads_dir)

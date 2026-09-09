@@ -10,17 +10,21 @@ which pins the two phase-1 seams to their instruments' REAL shapes (the
 that crashed on first real contact shipped green).
 """
 
+import io
 import json
 import os
 import shutil
 import sqlite3
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from unittest import mock
 
 from cquarry_cli import manifest
 from cquarry_cli.run import (
     _bindery_phase1,
+    _drive_stamp,
+    _inventory,
     _screen_duplicates,
     _stamps_from_filename,
     run_phase1,
@@ -226,6 +230,70 @@ class TestRunPhase1(RunCase):
         (manifest_path,) = os.listdir(manifests)
         man = manifest.load(os.path.join(manifests, manifest_path))
         self.assertNotEqual(man["quarantines"][0]["moved_to"], None)
+
+    def test_quarantine_collision_gets_a_sibling_not_a_replacement(self):
+        # Two same-named DRM files in different subdirs: the second move
+        # used to land on the first and destroy it.
+        first = self._make_file("same.epub")
+        subdir = os.path.join(self.downloads, "sub")
+        os.makedirs(subdir)
+        second = os.path.join(subdir, "same.epub")
+        with open(second, "wb") as f:
+            f.write(b"SECOND")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch(
+                "cquarry_cli.run._drm_verdicts",
+                return_value={first: "DRM", second: "DRM"},
+            ),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quarantine=True)
+        self.assertEqual(rc, 0)
+        quarantine_dir = os.path.join(self.downloads, "_quarantine")
+        moved = sorted(os.listdir(quarantine_dir))
+        self.assertEqual(moved, ["same-2.epub", "same.epub"])
+        for name in moved:
+            self.assertTrue(os.path.getsize(os.path.join(quarantine_dir, name)) > 0)
+
+    def test_inventory_skips_stamp_backups(self):
+        # A rerun used to sweep _stamp_backups into the batch as books.
+        backups = os.path.join(self.downloads, "_stamp_backups")
+        os.makedirs(backups)
+        with open(os.path.join(backups, "original.pdf"), "wb") as f:
+            f.write(b"ORIGINAL")
+        live = self._make_file("real_book.epub")
+        self.assertEqual(_inventory(self.downloads), [live])
+
+    def test_stamp_backups_live_outside_the_tree(self):
+        seen = {}
+        self._make_file("Ann Leckie - Fifth Head of Data.epub")
+
+        def fake_drive(files, backups):
+            seen["backups"] = backups
+            return []
+
+        with (
+            mock.patch("cquarry_cli.run._drive_stamp", side_effect=fake_drive),
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, stamp=True)
+        self.assertEqual(rc, 0)
+        self.assertFalse(seen["backups"].startswith(self.downloads))
+
+    def test_stamp_failure_warns_instead_of_passing_silently(self):
+        pdf = self._make_file("Ann Leckie - Fifth Head of Data.pdf", payload=b"PDF")
+        proc = mock.Mock(returncode=1, stdout="", stderr="STAMP_FAILED: XMP refuses")
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            err = io.StringIO()
+            with redirect_stderr(err):
+                stamped = _drive_stamp([pdf], "/tmp/cq-stamp-test")
+        self.assertEqual(stamped, [])
+        self.assertIn("STAMP_FAILED", err.getvalue())
 
     def test_missing_directory_exits_two(self):
         rc = run_phase1(os.path.join(self.temp_dir, "nope"), self.db_path)
