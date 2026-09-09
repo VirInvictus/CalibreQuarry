@@ -21,7 +21,9 @@ from contextlib import redirect_stderr
 from unittest import mock
 
 from cquarry_cli import manifest
+from cquarry_cli.cli import main
 from cquarry_cli.run import (
+    _backup_db,
     _bindery_phase1,
     _drive_stamp,
     _inventory,
@@ -294,6 +296,19 @@ class TestRunPhase1(RunCase):
                 stamped = _drive_stamp([pdf], "/tmp/cq-stamp-test")
         self.assertEqual(stamped, [])
         self.assertIn("STAMP_FAILED", err.getvalue())
+
+    def test_apply_lossy_reaches_the_bindery_slice(self):
+        # The sweep: --apply-lossy was accepted and never used.
+        self._make_file("Ann Leckie - Fifth Head of Data.epub")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}) as bindery,
+        ):
+            rc = run_phase1(self.downloads, self.db_path, apply_lossy=True)
+        self.assertEqual(rc, 0)
+        self.assertTrue(bindery.call_args.kwargs["apply_lossy"])
 
     def test_missing_directory_exits_two(self):
         rc = run_phase1(os.path.join(self.temp_dir, "nope"), self.db_path)
@@ -605,7 +620,7 @@ class TestRunPhase2(RunCase):
         man_path = self._manifest(first, second)
         rc, backup = self._import(man_path)
         self.assertEqual(rc, 0)
-        self.assertTrue(os.path.exists(os.path.join(backup, "metadata.db")))
+        self.assertTrue(os.path.exists(backup))  # the pre-run restore point
         con = sqlite3.connect(self.db_path)
         rows = con.execute("SELECT id, title FROM books ORDER BY id").fetchall()
         con.close()
@@ -636,6 +651,74 @@ class TestRunPhase2(RunCase):
         con.close()
         self.assertEqual(source, [("Standard Ebooks",)])
         self.assertEqual(audience, [("Brandon",)])
+
+    def test_crash_in_downloads_still_leaves_the_resume_record(self):
+        # The resume record used to be saved only after the unguarded
+        # download segment, so a crash there cost the imported ids.
+        path = self._make_file("Fifth Head of Data.epub")
+        man_path = self._manifest(path)
+        backup = os.path.join(self.temp_dir, "backups")
+        with (
+            mock.patch("cquarry_cli.run.calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.run._fetch_metadata",
+                side_effect=RuntimeError("network exploded"),
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                run_phase2(man_path, self.db_path, backup_dir=backup)
+        man = manifest.load(man_path)
+        self.assertEqual(man["files"][0]["import"]["imported_id"], 1)
+
+    def test_no_audience_flag_means_the_documented_default(self):
+        # Through the real dispatch: the argparse None used to be stamped
+        # into #audience as the literal string 'None'.
+        path = self._make_file("Fifth Head of Data.epub")
+        man_path = self._manifest(path)
+        backup = os.path.join(self.temp_dir, "backups")
+        with (
+            mock.patch("cquarry_cli.run.calibre_running", return_value=False),
+            mock.patch("cquarry_cli.run._fetch_metadata", return_value="no_result"),
+        ):
+            rc = main(
+                [
+                    "--db",
+                    self.db_path,
+                    "run",
+                    "phase2",
+                    "--manifest",
+                    man_path,
+                    "--backup-dir",
+                    backup,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        try:
+            none_rows = con.execute(
+                "SELECT COUNT(*) FROM books_custom_column_11_link l "
+                "JOIN custom_column_11 c ON c.id = l.value WHERE c.value = 'None'"
+            ).fetchone()[0]
+            brandon = con.execute(
+                "SELECT COUNT(*) FROM books_custom_column_11_link l "
+                "JOIN custom_column_11 c ON c.id = l.value WHERE c.value = 'Brandon'"
+            ).fetchone()[0]
+        finally:
+            con.close()
+        self.assertEqual(none_rows, 0)
+        self.assertEqual(brandon, 1)
+
+    def test_backup_survives_a_second_run(self):
+        bdir = os.path.join(self.temp_dir, "backups")
+        first = _backup_db(self.db_path, bdir)
+        second = _backup_db(self.db_path, bdir)
+        self.assertNotEqual(first, second)
+        self.assertTrue(os.path.exists(first))  # the first restore point survives
+        con = sqlite3.connect(first)
+        try:
+            con.execute("SELECT COUNT(*) FROM books").fetchone()
+        finally:
+            con.close()
 
     def test_resumable_second_run_skips_imported(self):
         path = self._make_file("Fifth Head of Data.epub")

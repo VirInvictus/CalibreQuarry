@@ -715,9 +715,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"phase2: the cc9 #audience value (default: {DEFAULT_AUDIENCE})",
     )
     run_p.add_argument(
-        "--yes", action="store_true", help="phase2: non-interactive acknowledgment"
-    )
-    run_p.add_argument(
         "--answer-file",
         dest="answer_file",
         metavar="FILE",

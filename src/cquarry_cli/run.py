@@ -396,7 +396,7 @@ def run_phase1(
         entry["verdict"] = "needs_decision"
         manifest.add_file(man, entry)
 
-    bindery_shape = _bindery_phase1(downloads_dir, apply_lossy=False)
+    bindery_shape = _bindery_phase1(downloads_dir, apply_lossy=apply_lossy)
     if bindery_report:
         Path(bindery_report).write_text(
             json.dumps(bindery_shape, indent=1), encoding="utf-8"
@@ -438,6 +438,10 @@ def run_phase1(
 
 
 def _backup_db(db_path: str, backup_dir: str) -> str:
+    """A pre-run backup that a second run cannot destroy: the copy is
+    timestamped (a fixed name let rerun two overwrite the only restore
+    point) and taken through sqlite's backup API, so a hot journal can
+    never leave the snapshot internally inconsistent."""
     resolved = Path(backup_dir).expanduser().resolve()
     lib_dir = Path(db_path).resolve().parent
     if resolved == lib_dir or resolved.is_relative_to(lib_dir):
@@ -445,8 +449,23 @@ def _backup_db(db_path: str, backup_dir: str) -> str:
             f"--backup-dir ({resolved}) must sit OUTSIDE the library directory"
         )
     os.makedirs(resolved, exist_ok=True)
-    dest = resolved / "metadata.db"
-    shutil.copy2(db_path, dest)
+    stem = Path(db_path).stem
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = resolved / f"{stem}-{stamp}.db"
+    n = 2
+    while dest.exists():
+        dest = resolved / f"{stem}-{stamp}-{n}.db"
+        n += 1
+    src = sqlite3.connect(db_path)
+    try:
+        dst = sqlite3.connect(str(dest))
+        try:
+            with dst:
+                src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
     return str(dest)
 
 
@@ -473,7 +492,6 @@ def run_phase2(
     *,
     backup_dir: str | None = None,
     audience: str = DEFAULT_AUDIENCE,
-    yes: bool = False,
     quiet: bool = False,
 ) -> int:
     """Import the manifest's approved files. Guards first: signed,
@@ -557,14 +575,21 @@ def run_phase2(
                     wdb.add_custom_column_values(book_id, "#audience", [audience])
                     entry["import"]["fixes"].append("filename-derived stamps applied")
     except Exception as e:
-        # The batch rolled back; the .bak is the recovery. Nothing to record:
-        # a re-run starts clean.
+        # The batch rolled back, so the library was never modified (and
+        # since cquarry 1.15 no orphaned book directories survive it
+        # either). The backup is the belt-and-braces restore point.
         print(
-            f"ERROR: import failed and rolled back ({e}); "
-            f"library restored from before the run ({backup}).",
+            f"ERROR: import failed; the batch rolled back and nothing was "
+            f"written ({e}). Pre-run backup: {backup}.",
             file=sys.stderr,
         )
         return 1
+
+    # The resume record goes to disk BEFORE the download segment: the
+    # downloads are unguarded subprocess work, and a crash there must not
+    # cost the imported ids (a rerun would re-import or refuse on the
+    # byte-identity floor).
+    manifest.save(man, manifest_path)
 
     # The download segment: per-book, Calibre-open-safe, never a guess.
     from cquarry.db import CalibreDB
@@ -901,8 +926,9 @@ def dispatch_run(args) -> int:
             args.manifest,
             db_path,
             backup_dir=args.backup_dir,
-            audience=args.audience,
-            yes=args.yes,
+            # No flag means the documented default, never the literal
+            # string 'None' the old argparse None produced.
+            audience=args.audience or DEFAULT_AUDIENCE,
             quiet=quiet,
         )
     if not args.manifest:
