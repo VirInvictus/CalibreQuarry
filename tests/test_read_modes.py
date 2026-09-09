@@ -310,5 +310,73 @@ class TestInfoAndColumns(_TempDBCase):
         self.assertEqual(rc, 0)
 
 
+class TestOutputGuard(_TempDBCase):
+    """The read surface's last mile (the sweep's P0): a report aimed at
+    metadata.db used to replace the database at exit 0. Every writer now
+    refuses the database and its sidecars, before anything is opened."""
+
+    def _db_bytes(self):
+        with open(self.db_path, "rb") as f:
+            return f.read()
+
+    def _refused(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main([*argv, "--db", self.db_path])
+        self.assertEqual(rc, 2)
+        self.assertIn("refusing", err.getvalue())
+        self.assertEqual(self._db_bytes(), self._sentinel)
+        self.assertFalse(os.path.exists(self.db_path + ".cquarry-tmp"))
+
+    def setUp(self):
+        super().setUp()
+        self._sentinel = self._db_bytes()
+
+    def test_export_over_the_database_is_refused(self):
+        # The sweep's proven attack, verbatim.
+        self._refused(["--export", "--format", "json", "--output", self.db_path])
+
+    def test_audit_catalog_and_annotations_refuse_the_database(self):
+        self._refused(["--audit", "--output", self.db_path])
+        self._refused(["--catalog", "--output", self.db_path])
+        self._refused(["--export-annotations", "--output", self.db_path])
+
+    def test_sidecars_are_refused_too(self):
+        self._refused(
+            ["--export", "--format", "csv", "--output", self.db_path + "-wal"]
+        )
+        self._refused(
+            ["--export", "--format", "csv", "--output", self.db_path + "-journal"]
+        )
+
+    def test_exportlt_refuses_the_library_root_and_the_database(self):
+        # The directory exporters also sweep and write beside the library
+        # files; the root and the db path are both out of bounds.
+        lib_root = os.path.dirname(self.db_path)
+        self._refused(["--exportlt", "--outdir", lib_root])
+        self._refused(["--exportlt", "--outdir", self.db_path])
+
+    def test_normal_outputs_still_write(self):
+        out, err = io.StringIO(), io.StringIO()
+        export_path = self.db_path + ".report.json"
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--export",
+                    "--format",
+                    "json",
+                    "--output",
+                    export_path,
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(export_path))
+        self.assertFalse(os.path.exists(export_path + ".cquarry-tmp"))
+        os.unlink(export_path)
+        self.assertEqual(self._db_bytes(), self._sentinel)
+
+
 if __name__ == "__main__":
     unittest.main()

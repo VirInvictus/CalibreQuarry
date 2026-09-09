@@ -14,6 +14,8 @@ from cquarry.helpers import (
     normalize_author_display,
 )
 
+from cquarry_cli.output import ensure_output_dir, open_output
+
 
 def write_catalog(
     db: CalibreDB,
@@ -75,12 +77,9 @@ def write_catalog(
             if row.get("val")
         }
 
-    # Create the parent directory the way run_audit/run_export already do, so
-    # --output reports/catalog.txt writes instead of exiting 1.
-    out_path = os.path.abspath(output)
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-
-    with open(out_path, "w", encoding="utf-8") as f:
+    # The output guard refuses the database itself (the sweep's P0) and
+    # stages through a temp file, so a failed catalog never truncates.
+    with open_output(output, db.db_path) as (f, out_path):
         header = (
             f"Calibre Library Export \u2014 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         )
@@ -186,7 +185,7 @@ def write_all_wings(
         print("No virtual libraries defined.", file=sys.stderr)
         return
 
-    os.makedirs(outdir, exist_ok=True)
+    ensure_output_dir(outdir, db.db_path)
 
     used: set[str] = set()
     for i, name in enumerate(sorted(vls.keys())):

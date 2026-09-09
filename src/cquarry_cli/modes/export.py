@@ -1,11 +1,11 @@
 import csv
 import json
-import os
 import sys
-from contextlib import contextmanager
 
 from cquarry.db import CalibreDB
 from cquarry.helpers import calibre_rating_to_stars
+
+from cquarry_cli.output import open_output
 
 _CSV_FIELDS = [
     "id",
@@ -34,21 +34,6 @@ def _load_custom(db: CalibreDB, show_custom: str | None) -> dict | None:
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return None
-
-
-@contextmanager
-def _open_out(output: str | None):
-    """Yield (stream, path). A falsy output streams to stdout (path is None)."""
-    if output:
-        out_path = os.path.abspath(output)
-        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        f = open(out_path, "w", newline="", encoding="utf-8")
-        try:
-            yield f, out_path
-        finally:
-            f.close()
-    else:
-        yield sys.stdout, None
 
 
 def _custom_display(value):
@@ -180,7 +165,7 @@ def run_export(
         print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
         return
 
-    with _open_out(output) as (stream, out_path):
+    with open_output(output, db.db_path) as (stream, out_path):
         _serialize(books, stream, fmt, custom_data, show_custom, author_details)
 
     if not quiet:
@@ -239,7 +224,7 @@ def run_search_export(
         print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
         return
 
-    with _open_out(output) as (stream, out_path):
+    with open_output(output, db.db_path) as (stream, out_path):
         if fmt in ("json", "csv", "ai"):
             _serialize(books, stream, fmt, custom_data, show_custom, author_details)
         else:
@@ -300,7 +285,7 @@ def run_annotations_export(
         entry["annotations"].append(row)
 
     payload = list(by_book.values())
-    with _open_out(output) as (stream, out_path):
+    with open_output(output, db.db_path) as (stream, out_path):
         json.dump(payload, stream, indent=2, default=str)
         stream.write("\n")
 

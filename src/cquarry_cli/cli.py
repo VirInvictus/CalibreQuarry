@@ -6,6 +6,8 @@ from cquarry.helpers import find_db
 from cquarry.integrity import find_untagged
 
 from cquarry_cli import VERSION
+from cquarry_cli.manifest import DEFAULT_AUDIENCE
+from cquarry_cli.output import OutputRefusedError
 from cquarry_cli.modes.analytics import (
     show_author_stats,
     show_genre_breakdown,
@@ -33,7 +35,6 @@ from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
 from cquarry_cli.tui import interactive_menu
-from cquarry_cli.manifest import DEFAULT_AUDIENCE
 from cquarry_cli.setwrite import dispatch_set_write
 from cquarry_cli.writeops import dispatch_write
 
@@ -995,6 +996,12 @@ def main(argv: list[str] | None = None) -> int:
             parser.print_help()
             return 2
 
+    except OutputRefusedError as e:
+        # The read surface's output guard: a report aimed at the database
+        # (or its sidecars, or, for directory exporters, the library root)
+        # is an argument-level refusal, exit 2, before anything is written.
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
     except (FileNotFoundError, PermissionError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

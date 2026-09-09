@@ -59,6 +59,8 @@ import sys
 from cquarry.db import CalibreDB
 from cquarry.helpers import to_isbn13
 
+from cquarry_cli.output import ensure_output_dir
+
 # Byte-exact from LibraryThing's own sample (librarything.com/LibraryThingSample.csv,
 # refetched 2026-08-09). Two things are load-bearing and easy to get wrong:
 #
@@ -218,7 +220,10 @@ def run_librarything_export(
     want_call_number: bool = True,
     quiet: bool = False,
 ) -> int:
-    os.makedirs(outdir, exist_ok=True)
+    # The guard refuses the database, its sidecars, and the library root:
+    # this exporter also sweeps stale librarything csv files from outdir,
+    # and none of that may ever land inside the library.
+    ensure_output_dir(outdir, db.db_path)
 
     for stale in os.listdir(outdir):
         if re.match(r"librarything[_ ](read|main).*\.csv$", stale, re.IGNORECASE):

@@ -1,5 +1,4 @@
 import csv
-import os
 from collections import Counter, defaultdict
 
 from cquarry.db import CalibreDB
@@ -22,6 +21,8 @@ from cquarry.integrity import (
     find_untagged,
     find_unrated,
 )
+
+from cquarry_cli.output import open_output
 
 
 def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
@@ -112,9 +113,7 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
             )
 
     fieldnames = ["id", "title", "author", "issue_type", "issues"]
-    out_path = os.path.abspath(output)
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
+    with open_output(output, db.db_path) as (f, out_path):
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for row in issues:
