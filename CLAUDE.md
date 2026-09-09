@@ -19,6 +19,43 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - **`--analytics genres` is a pure renderer over cquarry >= 1.12's `analytics.genre_distribution()`.** That function owns the rollup semantics (genre = first dot-path segment; a book counts once per node even when its tags share an ancestor; shares are fractions of the whole library, so multi-root books push the sum over 1.0; `"untagged"` last). The renderer slices to `--genre-depth N` (default 1 = roots only; deeper levels indent under their parents with the last path segment as the label) and does formatting only: %, bars, the sums-over-100% caveat. Every rendered level stays a share of the whole library, not of its parent.
 - **Set mode (Phase 16, `src/cquarry_cli/setwrite.py`)**: one target source (`--ids`, `--from-search`, `--from-untagged`, `--from-manifest`; hand-supplied ids are validated read-only and unknown ids abort exit 2 before anything opens writable) feeds id-less `--batch-*` verbs. `dispatch_set_write` runs BEFORE `dispatch_write` in `cli.py` so a single-book/set combination is refused before anything executes. Dry-run by default; `--apply` demands a closed Calibre (`pgrep ^calibre` guard, the `fetch_library_codes.py` precedent) and a `--backup-dir` outside the library directory (the `stamp_pdf.py` precedent), then ONE `batch()` transaction; any per-(book, verb) failure rolls the whole pass back (exit 1, `committed: false`). `--batch-clear-rating` is manifest-only, mechanically enforced; column verbs refuse `#reading_status`/`status`/`date_read`; there is deliberately no `--batch-remove-book` and no set-mode rating SET. Verb actions reuse the writeops action builders quieted; new set verbs should do the same rather than opening connections inline.
 
+### Programmer-facing contract notes (3.32.0 onward)
+
+- **The manifest signature is an HMAC seal, not a boolean.** `manifest.sign()`
+  seals the approved set, the per-file stamps and lossy flags, and the
+  decisions list (HMAC-SHA256 over canonical JSON; the key is a schema
+  constant, so the seal is tamper-EVIDENCE, not secret authentication).
+  `validate()` checks the seal by default; `check_seal=False` exists for
+  exactly one caller, the `run sign` verb, so a deliberate post-sign edit
+  can be re-approved instead of dead-ending. `save()` re-seals signed
+  manifests (the writer owns its state; phase 2's appends stay verifiable
+  for phase 3). `approve()` refuses any file whose verdict is not
+  `approved_for_import`. Do not hand-set `signed`; sign via
+  `cquarry run sign --manifest FILE`.
+- **All read-mode file output goes through `src/cquarry_cli/output.py`.**
+  `open_output()` refuses the database path and its `-wal`/`-shm`/`-journal`
+  sidecars and stages through temp + `os.replace`;
+  `ensure_output_dir()` additionally refuses the library root for directory
+  exporters (exportlt sweeps stale csv files, and none of that may land
+  inside the library). Never `open(path, "w")` a user-supplied output path
+  in a mode; the refusal surfaces as `OutputRefusedError`, mapped to exit 2
+  in `cli.main()`.
+- **Run-verb seam contracts are pinned by tests.** `_screen_duplicates`
+  returns the set of hit paths: screen_duplicate's JSON report is a bare
+  list holding every screened file, and only records with `library_hits` or
+  `batch_duplicates` count; run.py pre-filters the inventory with
+  `_SCREEN_EXTS` (keep in step with screen_duplicate's `EBOOK_EXTENSIONS`).
+  `_bindery_phase1` passes `--json FILE` (a temp report read back) and
+  honors bindery's exit contract (0 clean, 2 trouble found with report, 1
+  invocation problem without; anything else, or a missing report on 0/2, is
+  a hard error). If an instrument's shape changes, its seam test fails
+  first; fix the seam and the test together.
+- **The TUI probe-opens the database every menu iteration** (`_db_opens`,
+  which relies on CalibreDB's constructor running `SELECT 1 FROM books`).
+  Change Database requires a real open before `set_db_path`, and a
+  `sqlite3.Error` mid-session degrades to the re-prompt. Keep the
+  construction inside those boundaries.
+
 ## Hard constraints
 - **Frontend Only.** The core database logic and search evaluation are delegated to the external `cquarry` shared library. Do not add database reads or search parsing logic here; contribute them to `cquarry` instead.
 - **Minimal Dependencies.** Only `cquarry`, `vir-tui`, and `tqdm`. No `calibredb` required.
@@ -28,8 +65,9 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - `src/cquarry_cli/cli.py` & `tui.py`: Core CLI arguments and the Curses UI menu.
 - `src/cquarry_cli/modes/`: Implementations for each CLI flag (`catalog.py`, `export.py`, `stats.py`, `detail.py`, `info.py`, etc).
 - `src/cquarry_cli/writeops.py`: Shared write-verb plumbing: `run_write()` owns the WritableCalibreDB lifecycle; `dispatch_write()` maps CLI flags onto per-verb executors the TUI also calls.
-- `src/cquarry_cli/run.py`: The acquisition run verbs (Phase 17): `cquarry run phase1/phase2/phase3` orchestrate the manifest (`manifest.py`, `acquisition-manifest/1`), the companion `scripts/` tools, bindery's run slices, and cquarry 1.14's `add_book` into the three-phase pathway. Phase 1 is read-only against `metadata.db`; phase 2 requires a SIGNED manifest, no blocking decisions, Calibre closed, and `--backup-dir`, then commits as ONE `batch()`; `metadata_download` decisions are phase 2's own product and never block a resume, every other kind blocks; phase 3 writes only what its answer sources decided, then re-validates to 0 errors or exits 1.
+- `src/cquarry_cli/run.py`: The acquisition run verbs (Phase 17): `cquarry run phase1/sign/phase2/phase3` orchestrate the manifest (`manifest.py`, `acquisition-manifest/1`), the companion `scripts/` tools, bindery's run slices, and cquarry 1.14's `add_book` into the three-phase pathway. Phase 1 is read-only against `metadata.db`; `run sign` seals the reviewed manifest (structure checks only, so re-signing after a deliberate edit works); phase 2 requires a SIGNED, SEALED manifest, no blocking decisions, Calibre closed, and `--backup-dir`, then commits as ONE `batch()`; `metadata_download` decisions are phase 2's own product and never block a resume, every other kind blocks; phase 3 writes only what its answer sources decided, then re-validates to 0 errors or exits 1.
 - `src/cquarry_cli/setwrite.py`: Set-oriented writes (Phase 16): target-set resolution, `--batch-*` verbs over the writeops action builders, the dry-run/apply lifecycle, and the set-mode report (text + `--format json`). Write-path code; read modes never import it.
+- `src/cquarry_cli/output.py`: The read surface's output guard (`open_output`, `ensure_output_dir`, `OutputRefusedError`). Read-path code; see the 3.32.0 contract notes.
 - `tests/`: End-to-end integration tests using `cquarry_cli` directly against the database (the unit tests for `cquarry.db` and `cquarry.search` were moved to the `cquarry` library).
 
 > **Important:** The core database logic (`db.py`, `search.py`, `helpers.py`, `config.py`) was extracted into the `cquarry` shared library, and the generic UI formatting and curses menu primitives were extracted to the `vir-tui` shared repository. CalibreQuarry is a frontend over both; do not re-derive database logic inline that the library provides.

@@ -1,3 +1,64 @@
+# 3.32.0 (2026-09-09)
+
+### The four P0s from the deep-dive backlog (Phase 18, batch A)
+
+- **The phase-1 seams work on real input.** `run phase1` crashed on any
+  non-empty directory: the duplicate screen's JSON report is a bare list of
+  per-file records and the runner read it as a dict, and the same
+  comprehension would have flagged every screened file as a duplicate (only
+  records with library or within-batch hits count now; an unparseable report
+  is a hard error instead of a silent pass). The screener is handed exactly
+  the files its own extension set covers, so a djvu-only tree is a clean
+  screen rather than the script's exit-2 setup error. The bindery seam now
+  passes the `--json FILE` argument bindery always required and reads the
+  report back from the file; bindery's exit contract (2 = trouble found, the
+  report is still written; 1 = invocation problem, no report) replaces the
+  raise-on-2 that fired on exactly the case phase 1 exists to surface, and a
+  missing report names a stale entry point instead of sailing on. The seam
+  tests pin the instruments' real payload shapes, including one run against
+  the actual screen_duplicate.py.
+- **The manifest signature is a real seal.** `sign()` used to set a bare
+  `"signed": true` in the same editable JSON, and a manifest whose rejected
+  file was listed as approved passed phase 2 (proven end to end by the
+  sweep). Signing now seals the approved set, the per-file stamps and lossy
+  flags, and the decisions list with HMAC-SHA256 over canonical JSON; every
+  load of a signed manifest recomputes it and refuses a mismatch with a
+  re-sign hint. The seal is tamper-evidence, not secret authentication (the
+  key is a schema constant); the honest re-sign path is the new
+  `cquarry run sign --manifest FILE` verb, which checks structure but not
+  the stale seal so deliberate edits can be re-approved. `approve()` refuses
+  to list a file whose verdict is not `approved_for_import`, and validate()
+  flags any list/verdict disagreement it sees, so the forged-approval attack
+  is caught twice. Phase 2's own appends re-seal on save, keeping the
+  retained manifest verifiable for phase 3. Manifests signed before this
+  release must be re-signed (none exist outside tests: the verbs failed on
+  real input until now).
+- **A read mode can no longer overwrite metadata.db.** No output writer
+  compared its path to the database path: `--export --output
+  <library>/metadata.db` replaced a fixture database with a JSON report,
+  exit 0. New `cquarry_cli/output.py` is the shared last mile for every
+  read-mode file output (`--export`, `--search --output`, `--catalog`,
+  `--audit`, `--export-annotations`, `--exportlt`): the database and its
+  sqlite sidecars are refused before anything opens, the directory
+  exporters also refuse the library root itself (their stale-file sweep
+  would write and delete inside the library), every file stages through a
+  temp copy replaced into place only on clean close, and the refusal exits
+  2 as an argument error.
+- **The TUI survives a malformed database.** CalibreDB was constructed
+  outside every exception boundary in the menu loop, so a corrupt or
+  foreign sqlite file at the chosen path ended the session in a raw
+  traceback, and Change Database validated only the filename suffix. The
+  loop now probe-opens the database every iteration; a failure prints a
+  prose notice and drops into the re-prompt, Change Database refuses a
+  path that does not open and keeps the configured database, and a
+  sqlite3.Error raised mid-session degrades the same way.
+- **Skill sync (same release):** the phase-1-import skill's known-defect
+  paragraph is retired (the seams work as of this release; the
+  scripts-tree caveat for wheel installs stays) and its sign instruction
+  now names `cquarry run sign` with the seal semantics. The
+  phase-3-import skill's manifest references were swept; none went stale.
+- Suite: 298 → 330 tests.
+
 # 3.31.0 (2026-09-09)
 
 ### Cascade: cquarry 1.17 adoption

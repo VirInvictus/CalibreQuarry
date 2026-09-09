@@ -639,7 +639,7 @@ that crashes on real input.*
 
 ### Run verbs (Phase 17): the flagship pathway is draft-quality
 
-- [ ] **Fix the two broken phase-1 seams (P0).** `run.py:282-286` calls
+- [x] **Fix the two broken phase-1 seams (P0).** `run.py:282-286` calls
       `.get` on screen_duplicate's JSON, which is a bare list, so
       `run phase1` dies with AttributeError on any non-empty directory; the
       same comprehension would flag every screened file as a duplicate
@@ -648,15 +648,17 @@ that crashes on real input.*
       requires a FILE), while the `bindery` on PATH also predates the run
       verb; either way the seam raises. Both slipped through because every
       test mocks these seams. Fix: consume the list and keep only hit
-      records; pass a temp file to `--json`; pin the bindery entry point.
-- [ ] **Make the manifest signature a real seal (P0).** `sign()` sets a bare
+      records; pass a temp file to `--json`; pin the bindery entry point. *
+      *(Shipped in 3.32.0, 2026-09-09, bb3f3a3: the list report is consumed with the hit filter on; the screener gets only files its own extension set covers, so a djvu-only tree is a clean screen; bindery gets `--json FILE` via a temp report with its real exit contract honored (2 = trouble found, report written); the seam tests pin the instruments' actual shapes, including one run against the real screen_duplicate.py.)*
+- [x] **Make the manifest signature a real seal (P0).** `sign()` sets a bare
       `signed = true` boolean in the same editable JSON file
       (`manifest.py:185-191`); nothing binds it to contents, and
       `validate()` never cross-checks `approved_for_import` against the
       per-file verdict, so a manifest whose rejected file is listed as
       approved passes and phase 2 imports it (proven end to end). Fix:
       stdlib HMAC over the canonical approved-set + stamps + lossy list,
-      recomputed by phase 2, plus the verdict cross-check.
+      recomputed by phase 2, plus the verdict cross-check. *
+      *(Shipped in 3.32.0, 2026-09-09, d780f75: HMAC-SHA256 over the approved set, stamps, lossy flags, and decisions; every load recomputes it; the re-sign path is the new `cquarry run sign` verb; approve() and validate() refuse any approved-list/verdict disagreement, so the forged-approval attack is caught twice. Spec 3.3 documents the seal; the phase-1-import skill synced same release.)*
 - [ ] **Stop phase 1 from moving files without consent (P1).** The docs
       promise phase 1 is dry against book files without `--stamp`/
       `--apply-lossy`, but `_quarantine()` runs unconditionally for any
@@ -752,20 +754,22 @@ that crashes on real input.*
 
 ### Read surface
 
-- [ ] **A read mode can overwrite metadata.db itself (P0).** No output
+- [x] **A read mode can overwrite metadata.db itself (P0).** No output
       writer compares its path to the database path:
       `--export --output <lib>/metadata.db` replaced a fixture database
       with a JSON report, exit 0 (`export.py:39-51`; same hole in
       `catalog.py:83`, `audit.py:117`, annotations, exportlt). The
       read-only guarantee holds at the SQL layer only. Fix: one shared
       output helper that refuses the db path (and temp+os.replace for
-      no-partial-file).
-- [ ] **The TUI dies wholesale on a malformed database (P0).** `CalibreDB`
+      no-partial-file). *
+      *(Shipped in 3.32.0, 2026-09-09, 1a3e139: cquarry_cli/output.py is that helper for every read-mode file output; db + sidecars refused, directory exporters also refuse the library root, temp + os.replace staging, refusal exits 2. Spec 3.3; test_read_modes replays the sweep's attack verbatim.)*
+- [x] **The TUI dies wholesale on a malformed database (P0).** `CalibreDB`
       is constructed outside every exception boundary
       (`tui.py:426`), so a corrupt or foreign sqlite file at the chosen
       path ends the session in a raw traceback, including via
       "Change Database" (which validates only the filename suffix,
-      `tui.py:56-66`).
+      `tui.py:56-66`). *
+      *(Shipped in 3.32.0, 2026-09-09, f7729e3: the menu loop probe-opens the db every iteration, Change Database demands a real open before rebinding, and a mid-session sqlite3.Error degrades to the re-prompt; tests/test_tui_degrades.py gives tui.py its first coverage.)*
 - [ ] **The TUI ignores the saved config, then silently rebinds it (P1).**
       `_resolve_db_for_tui` consults a hard-coded default list that starts
       with CWD-relative `metadata.db` and never calls `get_db_path()`, so

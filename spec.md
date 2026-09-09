@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.30.0  
+**Version:** 3.32.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -91,8 +91,9 @@ The path is saved to config on first successful resolution.
 | Wings | `--wings` | List virtual libraries with book counts |
 | Tags | `--tags` | Flat dump of every tag in the library with its book count |
 | Interactive | (no args) | Launch the Curses TUI with scrollable output pager |
-| Run: phase1 | `run phase1 DIR` | Vet a downloads directory into an `acquisition-manifest/1` batch (duplicate screen, DRM audit, PDF/DJVU battery, bindery's EPUB slice); read-only against `metadata.db` |
-| Run: phase2 | `run phase2 --manifest FILE` | Import the SIGNED manifest as ONE `batch()` through `add_book`; `#source`/`#audience` stamped, tags+rating cleared on the imported ids only, downloads after the commit (failures become decisions), resumable |
+| Run: phase1 | `run phase1 DIR` | Vet a downloads directory into an `acquisition-manifest/1` batch (duplicate screen, DRM audit, PDF/DJVU battery, bindery's EPUB slice); read-only against `metadata.db`; the emitted manifest is unsigned until `run sign` seals it |
+| Run: sign | `run sign --manifest FILE` | Seal the reviewed manifest for phase 2: structure checks (no seal check, so re-signing after a deliberate edit works), then an HMAC seal over the approved set, the per-file stamps and lossy flags, and the decisions list |
+| Run: phase2 | `run phase2 --manifest FILE` | Import the SIGNED, SEALED manifest as ONE `batch()` through `add_book` (the seal is recomputed at load; a post-sign edit refuses to load until re-signed); `#source`/`#audience` stamped, tags+rating cleared on the imported ids only, downloads after the commit (failures become decisions), resumable |
 | Run: phase3 | `run phase3 --manifest FILE` | Curate via TTY prompts or `--answer-file` in ONE `batch()`, then bindery phase3 + file reconciliation + re-validation to 0 errors and the prose batch record |
 
 ### 3.1 Modifiers
@@ -136,6 +137,21 @@ column verbs refuse `#reading_status`, `status`, and `date_read` by
 label. Reporting is per-verb applied/already-so/failed plus a per-id
 failure list; `--format json` emits `{target, verbs, results, committed,
 dry_run}`. Exit 0 committed/dry-run, 1 failures or lock, 2 usage.
+
+### 3.3 Read-surface output guard
+
+Every read-mode file output (`--export`, `--search --output`, `--catalog`,
+`--audit`, `--export-annotations`, `--exportlt`) goes through
+`cquarry_cli/output.py`. The database path and its sqlite sidecars
+(`-wal`, `-shm`, `-journal`) are refused before anything opens, and the
+directory-target exporters additionally refuse the library root itself
+(their stale-file sweep would write and delete inside the library). A
+refusal is an argument error: exit 2, nothing written. File outputs
+stage through a temp file replaced into place only after the writer
+closes clean, so a failed report never leaves a truncated file. This is
+the last mile of the §4 read-only guarantee: the SQL layer opens
+`mode=ro`, and the output layer can no longer clobber the database from
+the write side of a report.
 
 ---
 
