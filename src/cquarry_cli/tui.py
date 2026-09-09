@@ -1,4 +1,5 @@
 import os
+import sqlite3
 
 from cquarry.config import get_db_path, set_db_path
 from cquarry.db import CalibreDB
@@ -64,6 +65,20 @@ def _resolve_db_input(raw_path: str) -> str | None:
             if path.endswith("metadata.db"):
                 return path
     return None
+
+
+def _db_opens(db_path: str) -> bool:
+    """Probe-open the database. False for a corrupt or foreign sqlite file:
+    CalibreDB's constructor runs a real statement (`SELECT 1 FROM books`)
+    and re-raises what it cannot satisfy, so this is a true open test. The
+    menu loop and Change Database both consult it -- constructing
+    CalibreDB outside every exception boundary used to end the whole
+    session in a raw traceback (the 2026-09-08 sweep's P0)."""
+    try:
+        with CalibreDB(db_path):
+            return True
+    except sqlite3.Error:
+        return False
 
 
 def _select_main() -> tuple | str | None:
@@ -401,6 +416,14 @@ def _menu_session() -> int:
             if not db_path:
                 return 1
             continue
+        if not _db_opens(db_path):
+            _notify(
+                f"Cannot open {db_path}: not a readable Calibre database. Pick another."
+            )
+            db_path = _resolve_db_for_tui()
+            if not db_path:
+                return 1
+            continue
         reset_terminal()
         result = _select_main()
         if result == "fallback":
@@ -417,10 +440,15 @@ def _menu_session() -> int:
             except CancelledError:
                 continue
             resolved = _resolve_db_input(new_path)
-            if resolved is not None:
-                set_db_path(resolved)
-            else:
+            if resolved is None:
                 _notify(f"Not a Calibre database: {new_path} (database unchanged)")
+            elif not _db_opens(resolved):
+                _notify(
+                    f"Cannot open {new_path}: not a readable Calibre "
+                    "database (database unchanged)"
+                )
+            else:
+                set_db_path(resolved)
             continue
         try:
             with CalibreDB(db_path) as db:
@@ -576,5 +604,13 @@ def _menu_session() -> int:
                     _edit_book_session(db_path)
                 elif result == (4, 1):
                     _remove_book_session(db_path)
+        except sqlite3.Error as e:
+            # The database went away or turned unreadable mid-session (a
+            # swap, a crash, a moved library): say so and re-resolve rather
+            # than dying in a traceback.
+            _notify(f"Database error: {e}. Pick another database.")
+            db_path = _resolve_db_for_tui()
+            if not db_path:
+                return 1
         except CancelledError:
             continue
