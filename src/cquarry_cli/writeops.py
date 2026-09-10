@@ -40,6 +40,23 @@ class _ArgError(Exception):
     """
 
 
+#: The library NON-NEGOTIABLES columns: reading_status, status, and
+#: date_read are never written by tools, at any door. This tuple is the
+#: single source shared by set mode's entrance check, the single-book
+#: column verbs, and the TUI (cquarry 1.17 deferred the same policy
+#: upstream, so the frontend owns it).
+FORBIDDEN_COLUMNS = ("reading_status", "status", "date_read")
+
+
+def _refuse_forbidden_column(label, verb: str) -> None:
+    if str(label).lstrip("#").casefold() in FORBIDDEN_COLUMNS:
+        raise _ArgError(
+            f"#{str(label).lstrip('#')} is banned for column writes "
+            "(library NON-NEGOTIABLES: reading_status, status, and "
+            "date_read are never written by tools)."
+        )
+
+
 def run_write(db_path: str, action) -> int:
     """Execute ``action(wdb)`` inside a WritableCalibreDB.
 
@@ -203,6 +220,8 @@ def action_clear_comments(book_id, *, quiet=False):
 
 
 def action_set_column(book_id, label, value, *, quiet=False):
+    _refuse_forbidden_column(label, "--set-column")
+
     def _do(wdb):
         # set_custom_column refuses non-editable/composite columns
         # and validates enumerations itself.
@@ -215,6 +234,8 @@ def action_set_column(book_id, label, value, *, quiet=False):
 
 
 def action_clear_column(book_id, label, *, quiet=False):
+    _refuse_forbidden_column(label, "--clear-column")
+
     def _do(wdb):
         changed = wdb.set_custom_column(book_id, label, None)
         if not quiet:
@@ -380,6 +401,8 @@ def action_clear_rating(book_id, *, quiet=False):
 
 
 def action_add_column_value(book_id, label, value, *, quiet=False):
+    _refuse_forbidden_column(label, "--batch-add-column-value")
+
     def _do(wdb):
         # cquarry >= 1.13: append to an is_multiple Pattern-A column,
         # deduped against the UNIQUE(book, value) link table.
@@ -497,11 +520,23 @@ def op_clear_comments(db_path, book_id, *, quiet=False) -> int:
 
 
 def op_set_column(db_path, book_id, label, value, *, quiet=False) -> int:
-    return run_write(db_path, action_set_column(book_id, label, value, quiet=quiet))
+    try:
+        action = action_set_column(book_id, label, value, quiet=quiet)
+    except _ArgError as e:
+        # The TUI calls these directly; an argument-level refusal prints
+        # and exits 2 instead of a traceback through the menu.
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    return run_write(db_path, action)
 
 
 def op_clear_column(db_path, book_id, label, *, quiet=False) -> int:
-    return run_write(db_path, action_clear_column(book_id, label, quiet=quiet))
+    try:
+        action = action_clear_column(book_id, label, quiet=quiet)
+    except _ArgError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    return run_write(db_path, action)
 
 
 def op_add_tag(db_path, book_id, tags, *, quiet=False) -> int:

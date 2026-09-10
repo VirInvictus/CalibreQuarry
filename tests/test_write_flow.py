@@ -158,6 +158,44 @@ class TestSingleVerbBatchWrap(_TempDBCase):
         self.assertEqual(pending, 0)  # no tag without its OPF-regen row
 
 
+class TestForbiddenColumnChokepoint(_TempDBCase):
+    """The sweep's P2: #reading_status/status/date_read were refused at
+    set mode's door but open at the single-book verbs and the TUI. The
+    refusal now lives in the writeops action builders (the shared
+    chokepoint, cquarry 1.17 having deferred it upstream), so every door
+    is closed and the three names come from one tuple."""
+
+    def test_single_book_set_column_refuses_banned_labels(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                ["--set-column", "1", "reading_status", "read", "--db", self.db_path]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("banned for column writes", err_cap.getvalue())
+
+    def test_single_book_clear_column_refuses_banned_labels(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(["--clear-column", "1", "#status", "--db", self.db_path])
+        self.assertEqual(rc, 2)
+        self.assertIn("banned for column writes", err_cap.getvalue())
+
+    def test_tui_column_ops_refuse_banned_labels(self):
+        from cquarry_cli import writeops
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            rc = writeops.op_set_column(self.db_path, 1, "#reading_status", "read")
+        self.assertEqual(rc, 2)
+        self.assertIn("banned for column writes", err.getvalue())
+        err = io.StringIO()
+        with redirect_stderr(err):
+            rc = writeops.op_clear_column(self.db_path, 1, "DATE_READ")
+        self.assertEqual(rc, 2)
+        self.assertIn("banned for column writes", err.getvalue())
+
+
 class TestAuditPendingOPFSync(_TempDBCase):
     def test_pending_section_lists_queued_books(self):
         con = sqlite3.connect(self.db_path)

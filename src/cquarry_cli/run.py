@@ -48,8 +48,8 @@ from cquarry_cli.manifest import DEFAULT_AUDIENCE
 
 _PGREP_TIMEOUT = 15
 
-#: The library NON-NEGOTIABLES columns, exactly setwrite's
-#: _FORBIDDEN_LABELS; phase 3's answer-file fixes refuse them too.
+#: The library NON-NEGOTIABLES columns (writeops.FORBIDDEN_COLUMNS is
+#: the canonical tuple); phase 3's answer-file fixes refuse them too.
 _BANNED_ANSWER_FIELDS = ("reading_status", "status", "date_read")
 
 _EBOOK_EXTS = (".epub", ".pdf", ".mobi", ".azw3", ".djvu")

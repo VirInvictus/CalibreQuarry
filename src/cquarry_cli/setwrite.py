@@ -46,7 +46,9 @@ _PGREP_TIMEOUT = 15
 
 # Labels no set-mode column verb may touch, however spelled (# prefix and
 # case fold away). The library NON-NEGOTIABLES outrank every convenience.
-_FORBIDDEN_LABELS = ("reading_status", "status", "date_read")
+# The canonical tuple lives in writeops (the action-builder chokepoint
+# every door shares); this alias keeps set mode's entrance check naming.
+_FORBIDDEN_LABELS = writeops.FORBIDDEN_COLUMNS
 
 _SOURCES = ("set_ids", "from_search", "from_untagged", "from_manifest")
 
