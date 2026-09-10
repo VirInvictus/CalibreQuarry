@@ -1020,18 +1020,22 @@ def dispatch_run(args) -> int:
     from cquarry_cli.cli import find_db
 
     quiet = bool(getattr(args, "quiet", False))
-    # The seal works on the manifest file alone: no library needs to be
-    # discoverable, so sign dispatches before the db resolution.
+    # Usage guards precede the library resolution for every phase: a
+    # missing argument must exit 2 whether or not a library is
+    # discoverable, and the seal works on the manifest file alone.
     if args.phase == "sign":
         if not args.manifest:
             print("ERROR: run sign needs --manifest FILE.", file=sys.stderr)
             return 2
         return sign_manifest(args.manifest)
+    if args.phase == "phase1" and not args.dir:
+        print("ERROR: run phase1 needs the downloads directory.", file=sys.stderr)
+        return 2
+    if args.phase in ("phase2", "phase3") and not args.manifest:
+        print(f"ERROR: run {args.phase} needs --manifest FILE.", file=sys.stderr)
+        return 2
     db_path = find_db(getattr(args, "db", None))
     if args.phase == "phase1":
-        if not args.dir:
-            print("ERROR: run phase1 needs the downloads directory.", file=sys.stderr)
-            return 2
         return run_phase1(
             args.dir,
             db_path,
@@ -1042,9 +1046,6 @@ def dispatch_run(args) -> int:
             quiet=quiet,
         )
     if args.phase == "phase2":
-        if not args.manifest:
-            print("ERROR: run phase2 needs --manifest FILE.", file=sys.stderr)
-            return 2
         return run_phase2(
             args.manifest,
             db_path,
@@ -1054,9 +1055,6 @@ def dispatch_run(args) -> int:
             audience=args.audience or DEFAULT_AUDIENCE,
             quiet=quiet,
         )
-    if not args.manifest:
-        print("ERROR: run phase3 needs --manifest FILE.", file=sys.stderr)
-        return 2
     return run_phase3(
         args.manifest,
         db_path,
