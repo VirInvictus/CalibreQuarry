@@ -174,14 +174,6 @@ def _screen_duplicates(files: list[str], db_path: str) -> set[str]:
     }
 
 
-def _existing_book_ids(db_path: str) -> set[int]:
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        return {r[0] for r in con.execute("SELECT id FROM books")}
-    finally:
-        con.close()
-
-
 def _drm_verdicts(downloads_dir: str) -> dict[str, str]:
     """audit_drm.py over the directory, as path -> verdict class."""
     script = _scripts_dir() / "audit_drm.py"
@@ -203,27 +195,40 @@ def _drm_verdicts(downloads_dir: str) -> dict[str, str]:
     return verdicts
 
 
-def _pdf_battery(downloads_dir: str) -> dict[str, Any]:
-    """check_pdf.py over every PDF/DJVU in the directory (the phase-1
-    battery: header, pages, qpdf real-vs-benign, fonts, text layer)."""
-    targets = [
-        os.path.join(downloads_dir, name)
-        for name in sorted(os.listdir(downloads_dir))
-        if os.path.splitext(name)[1].lower() in (".pdf", ".djvu")
-    ]
+def _pdf_battery(files: list[str]) -> dict[str, Any]:
+    """check_pdf.py over the inventory's PDF/DJVU files (the phase-1
+    battery: header, pages, qpdf real-vs-benign, fonts, text layer). The
+    targets come from the same recursive inventory everything else uses,
+    not a top-level re-scan that misses nested files."""
+    targets = [f for f in files if os.path.splitext(f)[1].lower() in (".pdf", ".djvu")]
     if not targets:
         return {}
-    out = os.path.join(downloads_dir, "_pdf_battery.json")
-    _run(
-        [sys.executable, str(_scripts_dir() / "check_pdf.py"), *targets, "--json", out],
-        timeout=1800,
-    )
+    fd, out = tempfile.mkstemp(prefix="cq-pdf-battery-", suffix=".json")
+    os.close(fd)
     try:
-        data = json.loads(Path(out).read_text())
-        Path(out).unlink()
-    except OSError, json.JSONDecodeError:
-        return {}
-    return {r["path"]: r for r in data.get("files", [])}
+        proc = _run(
+            [
+                sys.executable,
+                str(_scripts_dir() / "check_pdf.py"),
+                *targets,
+                "--json",
+                out,
+            ],
+            timeout=1800,
+        )
+        # Exit codes are check_pdf's: 0 clean, 1 structural findings (the
+        # normal trouble outcome, report still written), 2 a file it
+        # could not read at all.
+        if proc.returncode not in (0, 1):
+            raise RuntimeError(f"check_pdf failed: {proc.stderr.strip()}")
+        try:
+            with open(out, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise RuntimeError(f"check_pdf report unreadable: {e}") from e
+    finally:
+        os.unlink(out)
+    return {r["path"]: r for r in data.get("files", []) if isinstance(r, dict)}
 
 
 def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
@@ -349,7 +354,7 @@ def run_phase1(
     stamped_files = _drive_stamp(files, stamp_backups) if stamp else []
 
     drm = _drm_verdicts(downloads_dir)
-    battery = _pdf_battery(downloads_dir)
+    battery = _pdf_battery(files)
     dup_paths = _screen_duplicates(
         [f for f in files if os.path.splitext(f)[1].lower() in _SCREEN_EXTS],
         db_path,
@@ -388,6 +393,10 @@ def run_phase1(
             man["quarantines"].append(
                 {"path": path, "reason": reason, "moved_to": moved_to}
             )
+            # The quarantined file gets a files[] entry too: the schema's
+            # quarantined verdict was writer-dead while the writer skipped
+            # exactly these files.
+            manifest.add_file(man, entry)
             manifest.add_decision(man, "manual_repair", file=path, detail=reason)
             continue
         if path in dup_paths:
@@ -481,13 +490,80 @@ def _fetch_metadata(isbn: str, opf_path: str) -> str:
             timeout=120,
         )
     except subprocess.TimeoutExpired:
-        return "ambiguous"
+        # A hung lookup is a failure, not an ambiguity: there is nothing
+        # to disambiguate.
+        return "failed"
     if proc.returncode != 0 or not os.path.exists(opf_path):
         text = (proc.stdout + proc.stderr).lower()
         if "multiple" in text or "matches" in text:
             return "ambiguous"
         return "no_result"
     return "ok"
+
+
+_OPF_NS = "{http://www.idpf.org/2007/opf}"
+
+
+def _apply_opf(book_id: int, opf_path: str, db_path: str) -> bool:
+    """Apply a downloaded OPF through cquarry's write module (the repo's
+    no-calibredb constraint). The fields are the ones a metadata download
+    is for; anything the OPF does not carry is left as imported. One
+    batch per book; False on any failure."""
+    try:
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(opf_path)
+    except OSError, ET.ParseError:
+        return False
+
+    def local(el):
+        return el.tag.rsplit("}", 1)[-1]
+
+    def first_text(tag):
+        for el in tree.getroot().iter():
+            if local(el) == tag and (el.text or "").strip():
+                return (el.text or "").strip()
+        return None
+
+    def all_texts(tag):
+        return [
+            (el.text or "").strip()
+            for el in tree.getroot().iter()
+            if local(el) == tag and (el.text or "").strip()
+        ]
+
+    from cquarry.write import WritableCalibreDB
+
+    try:
+        with WritableCalibreDB(db_path) as wdb:
+            with wdb.batch():
+                title = first_text("title")
+                if title:
+                    wdb.update_title(book_id, title)
+                creators = all_texts("creator")
+                if creators:
+                    wdb.set_authors(book_id, creators)
+                publisher = first_text("publisher")
+                if publisher:
+                    wdb.set_publisher(book_id, publisher)
+                pubdate = first_text("date")
+                if pubdate:
+                    wdb.set_pubdate(book_id, pubdate)
+                description = first_text("description")
+                if description:
+                    wdb.set_comments(book_id, description)
+                for el in tree.getroot().iter():
+                    if local(el) != "identifier":
+                        continue
+                    scheme = (
+                        el.get(f"{_OPF_NS}scheme") or el.get("scheme") or ""
+                    ).strip()
+                    value = (el.text or "").strip()
+                    if scheme and value:
+                        wdb.set_identifier(book_id, scheme.lower(), value)
+                return True
+    except Exception:
+        return False
 
 
 def run_phase2(
@@ -606,25 +682,12 @@ def run_phase2(
         isbn = (entry["stamps"] or {}).get("isbn")
         outcome = "deferred_to_phase3"
         if not live_after_commit and isbn:
-            opf_path = os.path.join(
-                manifest.manifests_dir(os.path.dirname(db_path)),
-                f"_download_{book_id}.opf",
-            )
+            opf_dir = manifest.manifests_dir(os.path.dirname(db_path))
+            os.makedirs(opf_dir, exist_ok=True)
+            opf_path = os.path.join(opf_dir, f"_download_{book_id}.opf")
             outcome = _fetch_metadata(isbn, opf_path)
-            if outcome == "ok":
-                proc = _run(
-                    [
-                        "calibredb",
-                        "set_metadata",
-                        "--bookid",
-                        str(book_id),
-                        opf_path,
-                        "--library-dir",
-                        os.path.dirname(db_path),
-                    ]
-                )
-                if proc.returncode != 0:
-                    outcome = "failed"
+            if outcome == "ok" and not _apply_opf(book_id, opf_path, db_path):
+                outcome = "failed"
             Path(opf_path).unlink(missing_ok=True)
         entry["import"]["download_outcome"] = outcome
         if outcome != "ok":
@@ -759,9 +822,36 @@ def run_phase3(
         return 2
 
     if answer_file:
-        with open(answer_file, encoding="utf-8") as f:
-            raw = json.load(f)
-        answers = {int(k): v for k, v in raw.items()}
+        try:
+            with open(answer_file, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"ERROR: cannot read the answer file: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(raw, dict):
+            print(
+                "ERROR: the answer file must be a JSON object keyed by book id.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            answers = {int(k): v for k, v in raw.items()}
+        except ValueError, TypeError:
+            print(
+                "ERROR: every answer-file key must be an integer book id.",
+                file=sys.stderr,
+            )
+            return 2
+        known = set(imported_ids)
+        unknown = sorted(set(answers) - known)
+        if unknown:
+            # Extra answers are never silently dropped: they name books
+            # this manifest did not import, which is usually a mistake.
+            print(
+                f"WARNING: answer file names ids this manifest did not "
+                f"import (ignored): {unknown}",
+                file=sys.stderr,
+            )
         for book_id, answer in answers.items():
             for field in answer.get("fixes") or {}:
                 if str(field).lstrip("#").casefold() in _BANNED_ANSWER_FIELDS:

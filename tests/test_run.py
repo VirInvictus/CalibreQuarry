@@ -61,6 +61,7 @@ CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT,
     uncompressed_size INT, name TEXT);
 CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT,
     val TEXT, UNIQUE(book, type));
+CREATE TABLE comments (id INTEGER PRIMARY KEY, book INT, text TEXT);
 CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
 CREATE TABLE metadata_dirtied (id INTEGER PRIMARY KEY, book INTEGER NOT NULL,
     UNIQUE(book));
@@ -150,6 +151,7 @@ class TestRunPhase1(RunCase):
                 "cquarry_cli.run._drm_verdicts",
                 return_value={bad: "DRM", good: "CLEAN", dup: "CLEAN"},
             ),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
             mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
         ):
             rc = run_phase1(self.downloads, self.db_path, quarantine=True)
@@ -162,7 +164,7 @@ class TestRunPhase1(RunCase):
         paths = {f["path"]: f["verdict"] for f in man["files"]}
         self.assertEqual(paths[good], "approved_for_import")
         self.assertEqual(paths[dup], "duplicate_refused")
-        self.assertNotIn(bad, paths)  # moved; recorded in quarantines
+        self.assertEqual(paths[bad], "quarantined")  # in files[] AND quarantines
         self.assertEqual(len(man["quarantines"]), 1)
         kinds = [d["kind"] for d in man["decisions_needed"]]
         self.assertIn("duplicate", kinds)
@@ -707,6 +709,52 @@ class TestRunPhase2(RunCase):
             con.close()
         self.assertEqual(none_rows, 0)
         self.assertEqual(brandon, 1)
+
+    def test_downloaded_opf_applies_without_calibredb(self):
+        # The repo constraint is no calibredb: the ok path now applies the
+        # OPF through cquarry's write module in one batch.
+        path = self._make_file("Fifth Head of Data.epub")
+        man_path = self._manifest(path)
+        backup = os.path.join(self.temp_dir, "backups")
+
+        def fake_fetch(isbn, opf_path):
+            with open(opf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "<?xml version='1.0'?><package "
+                    "xmlns='http://www.idpf.org/2007/opf' "
+                    "xmlns:dc='http://purl.org/dc/elements/1.1/' "
+                    "xmlns:opf='http://www.idpf.org/2007/opf'>"
+                    "<metadata><dc:title>Real Title</dc:title>"
+                    "<dc:creator>Ann Leckie</dc:creator>"
+                    "<dc:publisher>Orbit</dc:publisher>"
+                    "<dc:date>2019-01-01</dc:date>"
+                    "<dc:identifier opf:scheme='ISBN'>9780000000000</dc:identifier>"
+                    "<dc:description>Real description.</dc:description>"
+                    "</metadata></package>"
+                )
+            return "ok"
+
+        with (
+            mock.patch("cquarry_cli.run.calibre_running", return_value=False),
+            mock.patch("cquarry_cli.run._fetch_metadata", side_effect=fake_fetch),
+        ):
+            rc = run_phase2(man_path, self.db_path, backup_dir=backup)
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        title = con.execute("SELECT title FROM books").fetchone()[0]
+        publisher = con.execute(
+            "SELECT p.name FROM books_publishers_link pl "
+            "JOIN publishers p ON p.id = pl.publisher"
+        ).fetchone()[0]
+        comments = con.execute("SELECT text FROM comments").fetchone()[0]
+        ident = con.execute("SELECT type, val FROM identifiers").fetchall()
+        con.close()
+        self.assertEqual(title, "Real Title")
+        self.assertEqual(publisher, "Orbit")
+        self.assertEqual(comments, "Real description.")
+        self.assertIn(("isbn", "9780000000000"), ident)
+        man = manifest.load(man_path)
+        self.assertEqual(man["files"][0]["import"]["download_outcome"], "ok")
 
     def test_downloads_defer_when_calibre_opens_after_the_commit(self):
         # The guard window closed at commit: a Calibre that opens before
