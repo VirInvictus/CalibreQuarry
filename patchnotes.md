@@ -1,5 +1,53 @@
 # CalibreQuarry — Patch Notes
 
+# 3.35.0 (2026-09-10)
+
+### The correctness batch: the stamp convention, provenance seeding, and the qpdf verdicts
+
+- **The filename-stamp convention is decided (roadmap :902).** The stamp
+  writer is the authority: run.py's parser reads "Author - Title", the
+  stamping path emits exactly those values, and the observed corpus
+  (libgen.li's "[Series] Author - Title (year, publisher) - site" names,
+  verified in the 2026-09-10 Redwall run) confirms the direction, so that
+  convention stands. Calibre's own filename fallback guesses the opposite
+  (probed on a metadata-less file: "Brian Jacques - Mossflower.pdf"
+  imports as Title "Brian Jacques"). The decision is now recorded where
+  the readers live: run.py states the convention, stamp_pdf's preview
+  documents that it deliberately mirrors Calibre's opposite guess (that
+  is what a preview of an unstamped import is for), and screen_duplicate
+  names the screening gap metadata-less "Author - Title" files carry. A
+  corpus regression test pins the direction.
+- **`run phase1` seeds the manifest's `provenance` from the filename
+  (the second Redwall box).** The field existed but was never populated,
+  so phase 2's cc6 stamp fell back to a blanket "Anna's Archive"
+  regardless of true source and phase 3 re-derived provenance from
+  filenames every batch (observed 2026-09-08 and 2026-09-10). Phase 1
+  now derives it from the same filename evidence the review already
+  worked with, mapped onto the #source enum's vocabulary: the
+  "-- Anna's Archive" trailer seeds Anna's Archive, libgen.li seeds
+  Library Genesis, z-library.sk/1lib.sk naming seeds Other (the recorded
+  practice of both runs, pending Brandon's Z-Library enum decision), and
+  a name with no marker seeds nothing. The review step corrects the
+  value exactly like the stamps, and phase 2 keeps stamping cc6 from the
+  reviewed value. The HMAC seal now binds provenance alongside the
+  stamps and lossy flags: a post-sign source swap fails every load until
+  re-signing.
+- **check_pdf.py classifies qpdf exit 3 by its documented contract.**
+  qpdf writes its warnings (and the "operation succeeded with warnings"
+  summary) to stderr, so the old stdout marker gate never matched and
+  every warning-only file was recorded as `errors` in the battery
+  report, the CLI summary, and the phase-1 manifest; the Redwall run
+  filed two benign PDFs (unknown-token tolerance; linearization /E +
+  hint-table drift) as structural damage. The class now reads the exit
+  code alone (0 clean, 3 warnings, 2 errors) and a warning finding
+  carries the first warning line as triage evidence. Re-triage confirmed
+  both warning kinds benign; the Multics PDF re-checks clean today
+  because the phase-1 stamp rewrite healed its linearization drift.
+- The parser-disagreement box (:902) and the Redwall run's two (the
+  provenance field, the qpdf exit-3 class) are closed; the
+  `--audit` promotion of `audit_conversion_overrides` is the one box
+  still open, landing next. Suite: 373 → 382 tests.
+
 # 3.34.0 (2026-09-10)
 
 ### Batch C: the read surface, the tests, and the docs (Phase 18 closes)

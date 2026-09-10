@@ -898,16 +898,25 @@ that crashes on real input.*
       the promote-to-cquarry doctrine applies once the predicate is worth
       a library home; until then the standalone script stands.
 
-- [ ] **Filename-stamp parsers disagree on metadata-less files** (observed
+- [x] **Filename-stamp parsers disagree on metadata-less files** (observed
       2026-09-09 while contract-testing :642): run.py's `_FILENAME_STAMP`
       reads `Author - Title`, but Calibre's `ebook-meta` filename
       fallback (which screen_duplicate.py leans on when a file carries no
       embedded metadata) guessed the opposite split in a probe. Both are
       seed data a human reviews before signing, so this is a small
       consistency question, not a data-destroyer; decide one convention
-      and note it in both tools.
+      and note it in both tools. *
+      *(Shipped in 3.35.0, 2026-09-10, ffa30de: the writer decides; the
+      stamping path emits run.py's reading and the observed corpus
+      confirms it (libgen.li names are Author - Title, verified in the
+      09-10 run), so "Author - Title" is THE convention; Calibre's
+      opposite fallback (probed: "Brian Jacques - Mossflower.pdf" imports
+      as Title "Brian Jacques") is noted at all three readers, with
+      stamp_pdf's preview documented as deliberately mirroring Calibre
+      and screen_duplicate naming the metadata-less screening gap. A
+      corpus regression test pins the direction.)*
 
-- [ ] **check_pdf.py classifies qpdf exit 3 (warnings-only) as `errors`**
+- [x] **check_pdf.py classifies qpdf exit 3 (warnings-only) as `errors`**
       (observed 2026-09-10 in the Redwall/Tech phase-1 run, the first
       real-file exercise since the 3.34 args.quiet fix): two PDFs whose
       only qpdf output was warning-class (unknown-token tolerance in one
@@ -919,9 +928,18 @@ that crashes on real input.*
       files all the time)"); the exit-to-class mapping does not honor
       it, so the benign class has no label and every warning-only scan
       reads as structural damage. Fix the mapping and re-triage the two
-      warning kinds this run surfaced.
+      warning kinds this run surfaced. *
+      *(Shipped in 3.35.0, 2026-09-10, 6e075cf: root cause was the
+      channel, not the threshold; qpdf writes its warnings and the
+      summary line to stderr, so the stdout marker gate never matched.
+      The class now reads the documented exit code alone (0 clean, 3
+      warnings, 2 errors), warning findings carry the first warning line
+      as triage evidence, and tests pin exit 3 as its own class.
+      Re-triage: both warning kinds confirmed benign; the Multics PDF
+      re-checks clean today because the phase-1 stamp rewrite healed the
+      linearization drift.)*
 
-- [ ] **`provenance` is never populated, so phase 2's cc6 stamp is always
+- [x] **`provenance` is never populated, so phase 2's cc6 stamp is always
       the default** (observed 2026-09-10 after the Redwall/Tech batch):
       the manifest schema carries a per-file `provenance` field (the
       2026-09-06 decision binds phase 2's cc6 stamp to "the manifest's
@@ -934,7 +952,15 @@ that crashes on real input.*
       every batch. Fix: derive `provenance` in the phase-1 runner from
       the same filename patterns `_FILENAME_STAMP` already works with,
       surface it in the manifest the review step corrects (same flow as
-      stamps), and let phase 2 stamp cc6 from the corrected value.
+      stamps), and let phase 2 stamp cc6 from the corrected value. *
+      *(Shipped in 3.35.0, 2026-09-10, 404537c: phase 1 seeds provenance
+      from the observed site markers, mapped onto the #source enum's
+      vocabulary: Anna's Archive trailer -> Anna's Archive,
+      z-library.sk/1lib.sk -> Other (the recorded practice of both runs,
+      pending Brandon's Z-Library enum decision), libgen.li -> Library
+      Genesis, bare names -> None. The review corrects it like the
+      stamps, phase 2 stamps cc6 from the reviewed value, and the seal
+      now binds provenance so a post-sign source swap fails the load.)*
 
 ### Upstream findings (belong to cquarry's own sweep, noted here where found)
 
