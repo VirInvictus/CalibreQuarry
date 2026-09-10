@@ -708,6 +708,24 @@ class TestRunPhase2(RunCase):
         self.assertEqual(none_rows, 0)
         self.assertEqual(brandon, 1)
 
+    def test_downloads_defer_when_calibre_opens_after_the_commit(self):
+        # The guard window closed at commit: a Calibre that opens before
+        # the download segment is never raced with calibredb.
+        path = self._make_file("Fifth Head of Data.epub")
+        man_path = self._manifest(path)
+        backup = os.path.join(self.temp_dir, "backups")
+        with (
+            mock.patch("cquarry_cli.run.calibre_running", side_effect=[False, True]),
+            mock.patch("cquarry_cli.run._fetch_metadata") as fetch,
+        ):
+            rc = run_phase2(man_path, self.db_path, backup_dir=backup)
+        self.assertEqual(rc, 0)
+        fetch.assert_not_called()
+        man = manifest.load(man_path)
+        self.assertEqual(
+            man["files"][0]["import"]["download_outcome"], "deferred_to_phase3"
+        )
+
     def test_backup_survives_a_second_run(self):
         bdir = os.path.join(self.temp_dir, "backups")
         first = _backup_db(self.db_path, bdir)
@@ -900,6 +918,67 @@ class TestRunPhase3(RunCase):
         man_path = self._ready_manifest([10])
         rc = run_phase3(man_path, self.db_path, answer_file=None)
         self.assertEqual(rc, 2)
+
+    def test_phase3_refuses_when_calibre_is_running(self):
+        # The same rail as phase 2 and set mode; the sweep found phase 3
+        # opening a writable handle with no closed-Calibre check at all.
+        self._rich_library()
+        man_path = self._ready_manifest([10])
+        answers = self._answers()
+        with (
+            mock.patch("cquarry_cli.run.calibre_running", return_value=True),
+            mock.patch("cquarry_cli.run._run") as run_mock,
+        ):
+            rc = run_phase3(man_path, self.db_path, answer_file=answers)
+        self.assertEqual(rc, 2)
+        run_mock.assert_not_called()  # nothing mechanical, nothing written
+        con = sqlite3.connect(self.db_path)
+        untagged = con.execute(
+            "SELECT COUNT(*) FROM books_tags_link WHERE book = 10"
+        ).fetchone()[0]
+        con.close()
+        self.assertEqual(untagged, 0)
+
+    def test_answer_file_may_not_name_banned_columns(self):
+        # The fixes fallback set_custom_column would have taken
+        # #reading_status from the answer file: the NON-NEGOTIABLES column.
+        self._rich_library()
+        man_path = self._ready_manifest([10])
+        answers = os.path.join(self.temp_dir, "banned.json")
+        with open(answers, "w") as f:
+            json.dump({"10": {"fixes": {"#reading_status": "read"}}}, f)
+        with mock.patch("cquarry_cli.run.calibre_running", return_value=False):
+            rc = run_phase3(man_path, self.db_path, answer_file=answers)
+        self.assertEqual(rc, 2)
+        con = sqlite3.connect(self.db_path)
+        kept = con.execute(
+            "SELECT COUNT(*) FROM books_tags_link WHERE book = 10"
+        ).fetchone()[0]
+        con.close()
+        self.assertEqual(kept, 0)  # refused before anything opened writable
+
+    def test_mechanical_trouble_fails_the_verb(self):
+        # bindery's rc 2 (trouble found) used to be a warning suppressed
+        # under --quiet while a clean validator still exited 0.
+        self._rich_library()
+        man_path = self._ready_manifest([10])
+        answers = self._answers()
+        procs = [
+            mock.Mock(returncode=2, stderr="trouble found", stdout=""),
+            mock.Mock(returncode=0, stderr="", stdout=""),
+            mock.Mock(returncode=0, stderr="", stdout=""),
+        ]
+        with mock.patch("cquarry_cli.run._run", side_effect=procs):
+            rc = run_phase3(man_path, self.db_path, answer_file=answers)
+        self.assertEqual(rc, 1)
+        records = sorted(
+            n
+            for n in os.listdir(os.path.join(self.library, ".claude"))
+            if n.startswith("project_import_")
+        )
+        with open(os.path.join(self.library, ".claude", records[-1])) as f:
+            record = f.read()
+        self.assertIn("bindery/reconcile trouble: yes", record)
 
     def test_validator_failure_exits_one(self):
         self._rich_library()

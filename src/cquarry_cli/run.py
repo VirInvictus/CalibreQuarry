@@ -48,6 +48,10 @@ from cquarry_cli.manifest import DEFAULT_AUDIENCE
 
 _PGREP_TIMEOUT = 15
 
+#: The library NON-NEGOTIABLES columns, exactly setwrite's
+#: _FORBIDDEN_LABELS; phase 3's answer-file fixes refuse them too.
+_BANNED_ANSWER_FIELDS = ("reading_status", "status", "date_read")
+
 _EBOOK_EXTS = (".epub", ".pdf", ".mobi", ".azw3", ".djvu")
 
 #: screen_duplicate.py's own screenable set (its EBOOK_EXTENSIONS). run.py
@@ -592,13 +596,16 @@ def run_phase2(
     manifest.save(man, manifest_path)
 
     # The download segment: per-book, Calibre-open-safe, never a guess.
+    # The guard window closed at commit: if Calibre opened since, do not
+    # race it with calibredb; the downloads defer to phase 3.
     from cquarry.db import CalibreDB
 
+    live_after_commit = calibre_running()
     for path, book_id in imported:
         entry = manifest.file_by_path(man, path)
         isbn = (entry["stamps"] or {}).get("isbn")
         outcome = "deferred_to_phase3"
-        if isbn:
+        if not live_after_commit and isbn:
             opf_path = os.path.join(
                 manifest.manifests_dir(os.path.dirname(db_path)),
                 f"_download_{book_id}.opf",
@@ -744,10 +751,27 @@ def run_phase3(
     if already and not quiet:
         print(f"{len(already)} imported book(s) already tagged; skipping them.")
 
+    # The same rail as phase 2 and set mode: no writable open against a
+    # live Calibre. It sits before the answer gates so a refused run
+    # never prompts.
+    if calibre_running():
+        print("ERROR: Calibre is running; close it before phase 3.", file=sys.stderr)
+        return 2
+
     if answer_file:
         with open(answer_file, encoding="utf-8") as f:
             raw = json.load(f)
         answers = {int(k): v for k, v in raw.items()}
+        for book_id, answer in answers.items():
+            for field in answer.get("fixes") or {}:
+                if str(field).lstrip("#").casefold() in _BANNED_ANSWER_FIELDS:
+                    print(
+                        f"ERROR: answer file for book {book_id} names {field!r}: "
+                        f"{'/'.join(_BANNED_ANSWER_FIELDS)} are never written "
+                        "by tools (library NON-NEGOTIABLES).",
+                        file=sys.stderr,
+                    )
+                    return 2
     elif sys.stdin.isatty():
         answers = _prompt_answers(db_path, dossiers)
     else:
@@ -800,7 +824,9 @@ def run_phase3(
             cwd=library_dir,
             timeout=3600,
         )
-        if bindery.returncode not in (0, 1) and not quiet:
+        if bindery.returncode not in (0, 1):
+            # Failure detail survives --quiet: quiet suppresses
+            # decoration, never trouble.
             print(
                 f"bindery run phase3 reported: {bindery.stderr.strip()}",
                 file=sys.stderr,
@@ -818,7 +844,7 @@ def run_phase3(
             cwd=library_dir,
             timeout=3600,
         )
-        if reconcile.returncode not in (0, 1) and not quiet:
+        if reconcile.returncode not in (0, 1):
             print(f"reconcile reported: {reconcile.stderr.strip()}", file=sys.stderr)
         validate = _run(
             [sys.executable, str(scripts / "validate_metadata.py"), library_dir],
@@ -826,8 +852,12 @@ def run_phase3(
             timeout=1800,
         )
         validator_clean = validate.returncode == 0
+        mechanical_trouble = bindery.returncode not in (0, 1) or (
+            reconcile.returncode not in (0, 1)
+        )
     else:
         validator_clean = True
+        mechanical_trouble = False
 
     record_path = os.path.join(
         library_dir,
@@ -840,6 +870,9 @@ def run_phase3(
         f.write(f"- imported: {len(imported_ids)} book(s)\n")
         f.write(f"- curated this run: {curated}\n")
         f.write(f"- validator clean: {validator_clean}\n")
+        f.write(
+            f"- bindery/reconcile trouble: {'yes' if mechanical_trouble else 'no'}\n"
+        )
         f.write(f"- decisions still open: {len(man['decisions_needed'])}\n\n")
         for entry in man["files"]:
             if entry["import"]["imported_id"]:
@@ -854,7 +887,7 @@ def run_phase3(
             f"{'clean' if validator_clean else 'NOT clean'}; record {record_path}."
         )
         print("Remember to declare any new taxonomy vocabulary.")
-    return 0 if validator_clean else 1
+    return 0 if validator_clean and not mechanical_trouble else 1
 
 
 def sign_manifest(manifest_path: str) -> int:
