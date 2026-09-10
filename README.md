@@ -46,7 +46,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Catalog** | `--catalog` | Formatted text catalog grouped by author, with ratings and series info |
 | **All wings** | `--all-wings` | Generate a separate catalog file for every virtual library |
 | **Statistics** | `--stats` | Format breakdown, rating distribution, tag taxonomy, publisher counts |
-| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with pending OPF sync |
+| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with manual conversion overrides and pending OPF sync |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
 | **Analytics** | `--analytics {author,pace,tags,genres,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, genre share breakdown (`--genre-depth N` descends the tag hierarchy), Wing-overlap analysis |
@@ -445,16 +445,17 @@ usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
                --analytics {author,pace,tags,genres,overlap} | --audit |
                --recent [RECENT] | --series | --export | --search QUERY |
                --wings | --tags | --book [BOOK_ID[,BOOK_ID...]] |
-               --entities KIND | --reading-progress | --columns | --info]
-               [--untagged] [--exportlt] [--export-annotations] [--id BOOK_ID]
-               [--plugin-data NAME] [--db DB] [--wing WING] [--output OUTPUT]
-               [--outdir OUTDIR] [--format {json,csv,ai}] [--primary-only]
-               [--show-tags] [--show-id] [--genre-depth N]
-               [--show-custom COL_NAME] [--show-author-details] [--quiet]
-               [--set-title BOOK_ID TITLE] [--set-authors BOOK_ID NAMES]
-               [--set-rating BOOK_ID STARS] [--set-pubdate BOOK_ID DATE]
-               [--clear-pubdate BOOK_ID] [--set-comments BOOK_ID HTML]
-               [--clear-comments BOOK_ID] [--set-column BOOK_ID LABEL VALUE]
+               --entities KIND | --reading-progress | --columns | --info |
+               --exportlt | --export-annotations | --format-stats]
+               [--untagged] [--id BOOK_ID] [--plugin-data NAME] [--db DB]
+               [--wing WING] [--output OUTPUT] [--outdir OUTDIR]
+               [--format {json,csv,ai}] [--primary-only] [--show-tags]
+               [--show-id] [--genre-depth N] [--show-custom COL_NAME]
+               [--show-author-details] [--quiet] [--set-title BOOK_ID TITLE]
+               [--set-authors BOOK_ID NAMES] [--set-rating BOOK_ID STARS]
+               [--set-pubdate BOOK_ID DATE] [--clear-pubdate BOOK_ID]
+               [--set-comments BOOK_ID HTML] [--clear-comments BOOK_ID]
+               [--set-column BOOK_ID LABEL VALUE]
                [--clear-column BOOK_ID LABEL] [--add-tag BOOK_ID TAG]
                [--remove-tag BOOK_ID TAG]
                [--set-identifier BOOK_ID TYPE VALUE]
@@ -464,12 +465,11 @@ usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
                [--set-languages BOOK_ID LANGS] [--clear-languages BOOK_ID]
                [--add-format BOOK_ID FORMAT NAME SIZE]
                [--remove-format BOOK_ID FORMAT] [--set-cover BOOK_ID YES/NO]
-               [--remove-book BOOK_ID] [--confirm-remove] [--format-stats]
-               [--ids ID[,ID...] | --from-search EXPR | --from-untagged |
-               --from-manifest FILE] [--batch-add-tag TAG]
-               [--batch-remove-tag TAG] [--batch-clear-tags]
-               [--batch-clear-rating] [--batch-set-column LABEL VALUE]
-               [--batch-clear-column LABEL]
+               [--remove-book BOOK_ID] [--confirm-remove] [--ids ID[,ID...] |
+               --from-search EXPR | --from-untagged | --from-manifest FILE]
+               [--batch-add-tag TAG] [--batch-remove-tag TAG]
+               [--batch-clear-tags] [--batch-clear-rating]
+               [--batch-set-column LABEL VALUE] [--batch-clear-column LABEL]
                [--batch-add-column-value LABEL VALUE]
                [--batch-set-title TITLE] [--batch-set-authors NAMES]
                [--batch-set-pubdate DATE] [--batch-clear-pubdate]
@@ -497,7 +497,8 @@ options:
   --stats               Show library statistics
   --analytics {author,pace,tags,genres,overlap}
                         Extended analytics and visualizations
-  --audit               Report issues (untagged, unrated, series gaps)
+  --audit               Report issues (untagged, unrated, series gaps,
+                        conversion overrides)
   --recent [RECENT]     Show N most recently added books (default: 20)
   --series              List all series with completeness and gap detection
   --export              Export library to JSON, CSV, or AI format
@@ -554,6 +555,7 @@ options:
                         each author's true sort key and link URL (from
                         cquarry's entity secondary columns) to the output
   --quiet               Minimize output
+  --format-stats        Show per-format book counts and total bytes
 
 write verbs (Calibre must be closed):
   --set-title BOOK_ID TITLE
@@ -612,7 +614,6 @@ write verbs (Calibre must be closed):
                         remove)
   --confirm-remove      With --remove-book: actually delete instead of dry-
                         running
-  --format-stats        Show per-format book counts and total bytes
 
 set writes (dry-run by default; --apply requires --backup-dir and Calibre closed):
   --ids ID[,ID...]      Target set: explicit book ids (set mode)
@@ -840,7 +841,12 @@ to specific books; `--json FILE` writes the machine report for scripting.
 
 Manual per-book conversion overrides (`conversion_options`) make pipeline
 behavior drift book-by-book; this lists which books carry them so the
-overrides are a decision, not a surprise. `--quiet` prints only the ids.
+overrides are a decision, not a surprise. `--quiet` prints only the ids
+(exit 1 when any are found, so the report pipes into a repair workflow).
+The same check also renders inside `cquarry --audit` (the
+`conversion_override` rows and the summary block), through cquarry's
+shared `get_conversion_profiles`; this script remains the standalone,
+pipeable form.
 
 ### `reconcile_file_metadata.py` — sync DB metadata into book files (writes with `--apply`)
 

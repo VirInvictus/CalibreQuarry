@@ -893,10 +893,17 @@ that crashes on real input.*
       exist; the P0s above are correctness debt on top of shipped
       surface.)*
 
-- [ ] **Promote `audit_conversion_overrides` to a real `--audit` mode** (opened
+- [x] **Promote `audit_conversion_overrides` to a real `--audit` mode** (opened
       2026-09-10 from the sweep's scripts verdict, deferred from :829):
       the promote-to-cquarry doctrine applies once the predicate is worth
-      a library home; until then the standalone script stands.
+      a library home; until then the standalone script stands. *
+      *(Shipped in 3.36.0, 2026-09-10, 949aaf6: `--audit` grows the
+      `conversion_override` rows and a summary block, consuming cquarry's
+      `get_conversion_profiles` (the predicate is already home; nothing
+      upstream owed), while the standalone script keeps its pipeable
+      --quiet/exit-1 surface and the mode keeps --audit's exit-0
+      reporting contract. CSV row shape matches the audit's existing
+      five columns.)*
 
 - [x] **Filename-stamp parsers disagree on metadata-less files** (observed
       2026-09-09 while contract-testing :642): run.py's `_FILENAME_STAMP`

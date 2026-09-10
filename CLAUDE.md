@@ -55,6 +55,35 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   and the banned answer-file fields, and mechanical-pass trouble
   (bindery/reconcile rc 2) fails the verb and lands in the batch record.
 
+### Programmer-facing contract notes (3.35.0 onward)
+
+- **The filename-stamp convention is "Author - Title" (decided, not
+  open).** `_FILENAME_STAMP` is the seed parser and `_drive_stamp` the
+  writer; the observed corpus (libgen.li names) confirms the direction.
+  Calibre's filename fallback reads the OPPOSITE order and stamp_pdf's
+  `_derive_from_filename` preview deliberately mirrors Calibre (it
+  previews what an unstamped import would guess); do not "align" either
+  to run.py's reading.
+- **`run phase1` seeds `provenance`.** `run._provenance_from_filename`
+  maps the filename's site markers onto the #source vocabulary
+  (Anna's Archive trailer -> "Anna's Archive"; z-library.sk/1lib.sk ->
+  "Other", pending Brandon's Z-Library enum decision; libgen.* ->
+  "Library Genesis"; no marker -> None). The value is sealed:
+  `manifest._seal_payload` binds provenance alongside stamps and lossy
+  flags, so a post-sign provenance edit fails every load until
+  re-signing. Phase 2's cc6 stamping is unchanged (it always consumed
+  `entry["provenance"]`; it was the phase-1 half that was dead).
+- **check_pdf's qpdf class reads the exit code alone** (qpdf's
+  documented contract: 0 clean, 3 warnings, 2 errors). qpdf writes
+  warnings to stderr; never reintroduce a stdout marker gate, and never
+  count `qpdf_warnings` findings in the structural total.
+- **`--audit` renders conversion overrides (3.36.0).** The
+  `conversion_override` rows and the summary block consume cquarry's
+  `get_conversion_profiles` (the predicate's library home; never
+  re-derive it inline), while `scripts/audit_conversion_overrides.py`
+  remains the standalone, pipeable form (exit 1 on findings). The mode
+  keeps `--audit`'s exit-0 reporting contract.
+
 ### Programmer-facing contract notes (3.32.0 onward)
 
 - **The manifest signature is an HMAC seal, not a boolean.** `manifest.sign()`

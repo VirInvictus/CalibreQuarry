@@ -1,5 +1,29 @@
 # CalibreQuarry — Patch Notes
 
+# 3.36.0 (2026-09-10)
+
+### The audit mode absorbs conversion overrides
+
+- **`--audit` reports manual conversion overrides.** The last open box
+  (promoted from the 3.34 sweep's scripts verdict): the check behind
+  `scripts/audit_conversion_overrides.py` now renders inside the audit
+  mode. Every book carrying a per-book `conversion_options` recipe gets
+  a `conversion_override` row in the CSV (book id, title, author, the
+  format, and the recipe blob's size) plus a summary block naming the
+  affected books, with the pointer to Calibre's conversion dialog where
+  those blobs are inspected or cleared. The rows consume cquarry's
+  `get_conversion_profiles` (the predicate's library home; the frontend
+  renders, never re-derives, and the pickles are never unpickled).
+- **The standalone script stands.** `audit_conversion_overrides.py`
+  keeps its pipeable surface (`--quiet` prints only the ids; exit 1
+  when any are found, so the report feeds a repair workflow). The mode
+  keeps `--audit`'s exit-0 reporting contract; no exit-code change for
+  existing users of either surface.
+- Housekeeping: the `--audit` help line names the new check and the
+  README's full help dump was regenerated from the live parser (the
+  dump had also drifted from the parser on `--format-stats`' position,
+  which this regeneration fixes). Suite: 382 → 385 tests.
+
 # 3.35.0 (2026-09-10)
 
 ### The correctness batch: the stamp convention, provenance seeding, and the qpdf verdicts
