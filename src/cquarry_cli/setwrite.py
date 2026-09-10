@@ -128,6 +128,22 @@ def _resolve_targets(args, db) -> tuple[list[int], str]:
     return ids, target
 
 
+def _reject_empty(value, flag: str) -> None:
+    """Refuse empty-string flag values instead of trusting truthiness.
+
+    The sweep found both failure shapes: `--batch-set-title ""` vanished
+    (the truthiness gates treated it as absent) while `--batch-set-column
+    audience ""` was collected and cquarry treats '' as a clear, wiping
+    the column on every targeted book with rc 0. Clearing has its own
+    explicit --batch-clear-* verbs."""
+    values = value if isinstance(value, (list, tuple)) else [value]
+    if any(isinstance(v, str) and not v.strip() for v in values):
+        raise _UsageError(
+            f"{flag}: an empty value is refused; use the explicit "
+            "--batch-clear-* verbs to clear."
+        )
+
+
 def _check_forbidden_label(label: str, flag: str) -> None:
     if label.lstrip("#").casefold() in _FORBIDDEN_LABELS:
         raise _UsageError(
@@ -142,6 +158,39 @@ def _collect_verbs(args) -> list[tuple[str, str, object]]:
     the writeops action closure for one book, quiet because the run
     reports in aggregate."""
     specs: list[tuple[str, str, object]] = []
+
+    # Every value-bearing flag at once: an empty string is a refused
+    # argument, never a silent no-op or an accidental clear.
+    for flag, value in (
+        ("--batch-add-tag", args.batch_add_tag),
+        ("--batch-remove-tag", args.batch_remove_tag),
+        ("--batch-set-title", args.batch_set_title),
+        ("--batch-set-authors", args.batch_set_authors),
+        ("--batch-set-pubdate", args.batch_set_pubdate),
+        ("--batch-set-publisher", args.batch_set_publisher),
+        ("--batch-set-languages", args.batch_set_languages),
+        ("--batch-set-series", args.batch_set_series),
+        ("--batch-remove-format", args.batch_remove_format),
+        ("--batch-clear-column", getattr(args, "batch_clear_column", None)),
+        ("--batch-clear-identifier", getattr(args, "batch_clear_identifier", None)),
+    ):
+        _reject_empty(value, flag)
+    for flag, pairs in (
+        ("--batch-set-column", getattr(args, "batch_set_column", None)),
+        ("--batch-add-column-value", getattr(args, "batch_add_column_value", None)),
+    ):
+        # A single (label, value) occurrence is a flat 2-tuple; repeated
+        # occurrences are a list of them.
+        if pairs:
+            if isinstance(pairs[0], str):
+                pairs = [pairs]
+            for label, value in pairs:
+                _reject_empty(label, flag)
+                _reject_empty(value, flag)
+    if getattr(args, "batch_set_identifier", None):
+        id_type, value = args.batch_set_identifier
+        _reject_empty(id_type, "--batch-set-identifier")
+        _reject_empty(value, "--batch-set-identifier")
 
     if args.batch_add_tag:
         for tag in args.batch_add_tag:
@@ -349,28 +398,37 @@ def _collect_verbs(args) -> list[tuple[str, str, object]]:
 
 
 def _has_verbs(args) -> bool:
-    return bool(
-        args.batch_add_tag
-        or args.batch_remove_tag
-        or args.batch_clear_tags
-        or args.batch_clear_rating
-        or args.batch_set_column
-        or args.batch_clear_column
-        or args.batch_add_column_value
-        or args.batch_set_title
-        or args.batch_set_authors
-        or args.batch_set_pubdate
-        or args.batch_clear_pubdate
-        or args.batch_set_publisher
-        or args.batch_clear_publisher
-        or args.batch_set_languages
-        or args.batch_clear_languages
-        or args.batch_set_series
-        or args.batch_clear_series
-        or args.batch_set_identifier
-        or args.batch_clear_identifier
-        or args.batch_set_cover
-        or args.batch_remove_format
+    # Value-bearing flags count by PRESENCE: an empty string is a real
+    # argument whose refusal must reach the user, never a missing verb.
+    # The store_true --batch-clear-* flags count by truthiness, since
+    # their False default would read as present.
+    value_flags = (
+        "batch_add_tag",
+        "batch_remove_tag",
+        "batch_set_column",
+        "batch_clear_column",
+        "batch_add_column_value",
+        "batch_set_title",
+        "batch_set_authors",
+        "batch_set_pubdate",
+        "batch_set_publisher",
+        "batch_set_languages",
+        "batch_set_series",
+        "batch_set_identifier",
+        "batch_clear_identifier",
+        "batch_set_cover",
+        "batch_remove_format",
+    )
+    bool_flags = (
+        "batch_clear_tags",
+        "batch_clear_rating",
+        "batch_clear_pubdate",
+        "batch_clear_publisher",
+        "batch_clear_languages",
+        "batch_clear_series",
+    )
+    return any(getattr(args, name, None) is not None for name in value_flags) or any(
+        getattr(args, name, False) for name in bool_flags
     )
 
 

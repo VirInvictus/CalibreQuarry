@@ -533,6 +533,63 @@ class TestApply(_TempDBCase):
         self.assertEqual(rc, 2)
 
 
+class TestEmptyValues(_TempDBCase):
+    """The sweep's pair of empty-string holes: `--batch-set-title ""`
+    vanished through the truthiness gates while `--batch-set-column
+    audience ""` was collected and cquarry treats '' as a clear -- it
+    wiped the column on every targeted book with rc 0. Both are refused
+    arguments now, exit 2."""
+
+    def test_empty_column_value_is_refused_not_a_clear(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                [
+                    "--ids",
+                    "1,2",
+                    "--batch-set-column",
+                    "audience",
+                    "",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("empty value is refused", err_cap.getvalue())
+
+    def test_empty_title_is_refused_not_silently_dropped(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                [
+                    "--ids",
+                    "1",
+                    "--batch-set-title",
+                    "",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("empty value is refused", err_cap.getvalue())
+
+    def test_empty_tag_is_refused(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                [
+                    "--ids",
+                    "1",
+                    "--batch-add-tag",
+                    "",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("empty value is refused", err_cap.getvalue())
+
+
 class TestCommitPerBook(_TempDBCase):
     """The sweep found --commit-per-book mechanically inert: nested
     batches joined the outer transaction while the report claimed per-book
