@@ -61,7 +61,18 @@ def _ebook_meta(path: Path) -> dict[str, str]:
 
 
 def _embedded_fields(path: Path) -> dict[str, object]:
-    """The embedded title / authors / isbn of one candidate file."""
+    """The embedded title / authors / isbn of one candidate file.
+
+    Filename fallback direction note (roadmap :902): for a file with no
+    embedded metadata, ebook-meta reports the filename as "Title - Author",
+    the OPPOSITE of run.py's stamp parser ("Author - Title"). A
+    metadata-less "Author - Title" download therefore screens under
+    swapped fields, so the title+author path can miss a library duplicate
+    for exactly those files (the exact-ISBN path is unaffected, and a
+    swapped seed never false-positives). Acceptable seed quality: the
+    skill's rule is that filename guesses are reviewed, and stamping or
+    phase 3 replaces them.
+    """
     meta = _ebook_meta(path)
     title = meta.get("title") or ""
     authors = [

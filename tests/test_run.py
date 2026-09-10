@@ -131,6 +131,20 @@ class TestFilenameStamps(unittest.TestCase):
         self.assertEqual(stamps["title"], "Fifth Head of Data")
         self.assertEqual(stamps["authors"], ["Ann Leckie"])
 
+    def test_observed_libgen_name_keeps_the_author_first_reading(self):
+        # The decided convention (roadmap :902, 2026-09-10): the stamp
+        # parser reads "Author - Title", the direction the real corpus
+        # uses (libgen.li names, verified in the 09-10 Redwall run).
+        # Calibre's import fallback guesses the opposite on purpose;
+        # stamp_pdf's preview mirrors Calibre, this parser does not.
+        stamps = _stamps_from_filename(
+            "Brian Jacques - Mossflower (2012, Random House UK) - libgen.li.epub"
+        )
+        self.assertEqual(
+            stamps["title"], "Mossflower (2012, Random House UK) - libgen.li"
+        )
+        self.assertEqual(stamps["authors"], ["Brian Jacques"])
+
     def test_unparseable_falls_back_to_stem(self):
         stamps = _stamps_from_filename("random_download_9812.epub")
         self.assertEqual(stamps["title"], "random_download_9812")

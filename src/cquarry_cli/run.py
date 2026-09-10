@@ -60,6 +60,16 @@ _EBOOK_EXTS = (".epub", ".pdf", ".mobi", ".azw3", ".djvu")
 #: "no ebook files to screen" error. Keep the two sets in step.
 _SCREEN_EXTS = (".epub", ".pdf", ".mobi", ".azw3")
 
+#: The stamping path's filename convention, decided 2026-09-10 (roadmap
+#: :902): "Author - Title". The stamp writer (_drive_stamp) emits exactly
+#: these values and the observed corpus confirms the direction (libgen.li
+#: names its files "[Series] Author - Title (year, publisher) - site").
+#: Calibre's own filename fallback guesses the OPPOSITE order ("Title -
+#: Author"; probed 2026-09-10: a metadata-less "Brian Jacques -
+#: Mossflower.pdf" imports as Title "Brian Jacques"), and stamp_pdf's
+#: preview deliberately mirrors that opposite guess because it previews
+#: what an unstamped import would do. The seeds are mechanical and the
+#: manifest review corrects them before signing either way.
 _FILENAME_STAMP = re.compile(r"^(?P<author>.+?)\s+-\s+(?P<title>.+?)$")
 
 
@@ -126,7 +136,11 @@ def _inventory(downloads_dir: str) -> list[str]:
 
 def _stamps_from_filename(path: str) -> dict[str, Any]:
     """Filename-derived seed stamps (mechanical fixes only; the manifest is
-    editable before signing, and phase 3 curates the real metadata)."""
+    editable before signing, and phase 3 curates the real metadata).
+
+    Reads "Author - Title" (the stamping path's convention; see
+    _FILENAME_STAMP), never Calibre's opposite "Title - Author" import
+    guess."""
     stem = os.path.splitext(os.path.basename(path))[0]
     stamp: dict[str, Any] = {"title": stem, "authors": []}
     m = _FILENAME_STAMP.match(stem)

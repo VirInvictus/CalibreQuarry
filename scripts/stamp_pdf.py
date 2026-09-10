@@ -51,6 +51,12 @@ def _derive_from_filename(path: Path) -> tuple[str, str]:
 
     "5E - Wonderland.pdf" -> ("5E", "Wonderland"). A preview aid only — the
     skill's rule is that filename guesses are exactly what stamping replaces.
+
+    Note the direction (roadmap :902, decided 2026-09-10): this mirrors
+    Calibre's import fallback, "Title - Author", which is the OPPOSITE of
+    run.py's stamp parser ("Author - Title", the direction the observed
+    libgen.li corpus actually uses). The opposite is the point: this preview
+    shows the wrong guess an unstamped import would make.
     """
     stem = path.stem.strip()
     if " - " in stem:
