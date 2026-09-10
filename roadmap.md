@@ -899,6 +899,15 @@ that crashes on real input.*
       the promote-to-cquarry doctrine applies once the predicate is worth
       a library home; until then the standalone script stands.
 
+- [ ] **Filename-stamp parsers disagree on metadata-less files** (observed
+      2026-09-09 while contract-testing :642): run.py's `_FILENAME_STAMP`
+      reads `Author - Title`, but Calibre's `ebook-meta` filename
+      fallback (which screen_duplicate.py leans on when a file carries no
+      embedded metadata) guessed the opposite split in a probe. Both are
+      seed data a human reviews before signing, so this is a small
+      consistency question, not a data-destroyer; decide one convention
+      and note it in both tools.
+
 ### Upstream findings (belong to cquarry's own sweep, noted here where found)
 
 - `WritableCalibreDB.__exit__` commits unconditionally, so BaseException
