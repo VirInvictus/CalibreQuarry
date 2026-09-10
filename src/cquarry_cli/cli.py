@@ -84,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument(
         "--audit",
         action="store_true",
-        help="Report issues (untagged, unrated, series gaps)",
+        help="Report issues (untagged, unrated, series gaps, conversion overrides)",
     )
     group.add_argument(
         "--recent",

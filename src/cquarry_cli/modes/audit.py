@@ -112,6 +112,25 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 }
             )
 
+    # Manual conversion overrides (cquarry's get_conversion_profiles; the
+    # frontend renders, never re-derives). The standalone
+    # scripts/audit_conversion_overrides.py keeps its pipeable ids surface;
+    # this is the audit's own view of the same drift.
+    override_issues: list[dict[str, str]] = []
+    book_names = {b["id"]: (b["title"] or "", b["author_sort"] or "") for b in books}
+    for row in db.get_conversion_profiles():
+        title, author = book_names.get(row["book"], ("", ""))
+        override_issues.append(
+            {
+                "id": str(row["book"]),
+                "title": title,
+                "author": author,
+                "issue_type": "conversion_override",
+                "issues": f"[{row['format']}] recipe blob {row['data_size']} bytes",
+            }
+        )
+    issues.extend(override_issues)
+
     fieldnames = ["id", "title", "author", "issue_type", "issues"]
     with open_output(output, db.db_path) as (f, out_path):
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -152,6 +171,23 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
             print("\n" + color(f"Series with gaps: {len(series_issues)}", C_WARN))
             for i in series_issues[:10]:
                 print(f"  {i['title']}: {i['issues']}")
+
+        if override_issues:
+            print(
+                "\n"
+                + color(
+                    f"Manual conversion overrides: {len(override_issues)} book(s)",
+                    C_WARN,
+                )
+            )
+            for i in override_issues[:10]:
+                print(f"  #{i['id']} {i['title']}: {i['issues']}")
+            if len(override_issues) > 10:
+                print(f"  ... and {len(override_issues) - 10} more")
+            print(
+                "  The recipe blobs are Calibre pickles; open the book's "
+                "conversion dialog in Calibre to inspect or clear them."
+            )
 
         # Books whose sidecar .opf Calibre will regenerate at next startup
         # (its metadata_dirtied queue — external writes land here).

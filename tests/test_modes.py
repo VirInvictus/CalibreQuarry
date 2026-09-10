@@ -6,7 +6,9 @@ case-folded sort; a write_catalog that sorts the shared cache in place would
 flip the cached order and fail the assertion.
 """
 
+import contextlib
 import csv
+import io
 import json
 import os
 import sqlite3
@@ -35,10 +37,11 @@ CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher 
 CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT); 
 CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT); 
 CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT); 
-CREATE TABLE identifiers (book INT, type TEXT, val TEXT); 
-CREATE TABLE comments (book INT, text TEXT); 
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT); 
-CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT, datatype TEXT, is_multiple BOOL); 
+CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+CREATE TABLE comments (book INT, text TEXT);
+CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
+CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT, datatype TEXT, is_multiple BOOL);
+CREATE TABLE conversion_options (book INT, format TEXT, data BLOB);
 """
 
 
@@ -209,6 +212,82 @@ class TestAuditCoverChecks(unittest.TestCase):
             issues = self._issues(db_path, tmp)[0]
             self.assertIn("no_cover", issues)
             self.assertNotIn("cover_file_missing", issues)
+
+
+class TestAuditConversionOverrides(unittest.TestCase):
+    """run_audit's conversion_override rows (the promoted
+    audit_conversion_overrides check, rendered the audit's way)."""
+
+    def _library(self, tmp, *, overrides):
+        db_path = os.path.join(tmp, "metadata.db")
+        con = sqlite3.connect(db_path)
+        con.executescript(_SCHEMA)
+        con.execute(
+            "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+            "has_cover,last_modified,series_index,path,uuid) VALUES "
+            "(1,'T1','T1','A','2024-01-01','2020-01-01',0,'2024-01-01',1.0,"
+            "'A/T1 (1)','u1'),"
+            "(2,'T2','T2','B','2024-01-01','2020-01-01',0,'2024-01-01',1.0,"
+            "'A/T2 (2)','u2')"
+        )
+        for book, fmt, blob in overrides:
+            con.execute(
+                "INSERT INTO conversion_options (book, format, data) VALUES (?,?,?)",
+                (book, fmt, blob),
+            )
+        con.commit()
+        con.close()
+        return db_path
+
+    def _rows(self, db_path, tmp, **kw):
+        db = CalibreDB(db_path)
+        out = os.path.join(tmp, "audit.csv")
+        try:
+            run_audit(db, out, **kw)
+        finally:
+            db.close()
+        with open(out, newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+
+    def test_override_rows_carry_book_format_and_blob_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, overrides=[(1, "EPUB", b"\x80\x04pickle")])
+            rows = [
+                r
+                for r in self._rows(db_path, tmp, quiet=True)
+                if r["issue_type"] == "conversion_override"
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["id"], "1")
+            self.assertEqual(rows[0]["title"], "T1")
+            self.assertEqual(rows[0]["author"], "A")
+            self.assertIn("[EPUB]", rows[0]["issues"])
+            self.assertIn("8 bytes", rows[0]["issues"])
+
+    def test_a_library_without_overrides_reports_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, overrides=[])
+            rows = [
+                r
+                for r in self._rows(db_path, tmp, quiet=True)
+                if r["issue_type"] == "conversion_override"
+            ]
+            self.assertEqual(rows, [])
+
+    def test_the_summary_names_the_overrides(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, overrides=[(2, "PDF", b"blobby")])
+            db = CalibreDB(db_path)
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    run_audit(db, os.path.join(tmp, "audit.csv"))
+            finally:
+                db.close()
+            out = buf.getvalue()
+            self.assertIn("Manual conversion overrides: 1 book(s)", out)
+            self.assertIn("#2 T2: [PDF] recipe blob 6 bytes", out)
+            self.assertIn("conversion dialog", out)
 
 
 if __name__ == "__main__":
