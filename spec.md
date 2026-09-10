@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.32.0  
+**Version:** 3.33.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -130,13 +130,23 @@ add-column-value, set/clear pubdate, set title/authors/publisher/languages/
 series, set/clear identifier, set cover, remove format). Deletion has no
 set form. Dry-run by default; `--apply` requires a closed Calibre and a
 `--backup-dir` outside the library directory, then runs as ONE
-`batch()` transaction (`--commit-per-book` is the non-default escape
-hatch). `--batch-clear-rating` is legal ONLY with `--from-manifest` (the
-library NON-NEGOTIABLES bulk-ratings ban, mechanically encoded); the
-column verbs refuse `#reading_status`, `status`, and `date_read` by
-label. Reporting is per-verb applied/already-so/failed plus a per-id
-failure list; `--format json` emits `{target, verbs, results, committed,
-dry_run}`. Exit 0 committed/dry-run, 1 failures or lock, 2 usage.
+`batch()` transaction. `--commit-per-book` is the non-default escape
+hatch and is real: each book is its own outermost transaction, a book
+whose verbs failed rolls back alone (its entries report `rolled_back`,
+`book_committed: false`), and the pass continues. Backups are
+timestamped; a second run never destroys an earlier restore point.
+Empty-string flag values are refused arguments (exit 2): clearing has
+its own explicit `--batch-clear-*` verbs. `--batch-clear-rating` is
+legal ONLY with `--from-manifest` naming a VALID, SEALED batch manifest,
+and only for the ids that manifest records as imported (the library
+NON-NEGOTIABLES bulk-ratings ban, mechanically encoded). The
+`#reading_status`/`status`/`date_read` refusal is a shared chokepoint in
+the writeops action builders, so the single-book verbs and the TUI are
+closed by the same check as set mode. Reporting is per-verb
+applied/already-so/failed plus a per-id failure list (it survives
+`--quiet` on stderr); `--format json` emits `{target, ids, verbs,
+results, committed, dry_run}`. Exit 0 committed/dry-run, 1 failures or
+lock, 2 usage.
 
 ### 3.3 Read-surface output guard
 

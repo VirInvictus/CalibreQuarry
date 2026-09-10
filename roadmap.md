@@ -659,13 +659,14 @@ that crashes on real input.*
       stdlib HMAC over the canonical approved-set + stamps + lossy list,
       recomputed by phase 2, plus the verdict cross-check. *
       *(Shipped in 3.32.0, 2026-09-09, d780f75: HMAC-SHA256 over the approved set, stamps, lossy flags, and decisions; every load recomputes it; the re-sign path is the new `cquarry run sign` verb; approve() and validate() refuse any approved-list/verdict disagreement, so the forged-approval attack is caught twice. Spec 3.3 documents the seal; the phase-1-import skill synced same release.)*
-- [ ] **Stop phase 1 from moving files without consent (P1).** The docs
+- [x] **Stop phase 1 from moving files without consent (P1).** The docs
       promise phase 1 is dry against book files without `--stamp`/
       `--apply-lossy`, but `_quarantine()` runs unconditionally for any
       verdict that is not clean/unscanned, which includes audit_drm's BENIGN
       (font obfuscation) and N/A (DJVU), i.e. every DJVU in the batch gets
       moved and a manual_repair decision recorded (`run.py:304-311`).
-      Quarantine only true DRM hits, gate the move behind a flag.
+      Quarantine only true DRM hits, gate the move behind a flag. *
+      *(Shipped in 3.33.0, 2026-09-09, b96efa1: audit_drm's own is_problem set only (DRM, ERROR); the move gated behind the new --quarantine consent flag; moved_to honest.)*
 - [ ] **Make quarantine and stamping non-destructive (P1).** `_quarantine`
       moves onto `basename` collisions, destroying the earlier file, and
       records the wrong `moved_to` directory (`run.py:218-223`, `309-311`).
@@ -674,8 +675,9 @@ that crashes on real input.*
       failure is dropped without a message; `_stamp_backups` is also never
       excluded from the inventory, so a second run sweeps the backups
       (`run.py:276`, `106`). Collision-checked destinations, backups
-      outside the tree, warn on nonzero exits.
-- [ ] **Close phase 2's accounting holes (P1).** The "never imported twice"
+      outside the tree, warn on nonzero exits. *
+      *(Shipped in 3.33.0, 2026-09-09, afd9c34: numbered quarantine siblings, temp-dir stamp backups, WARNING on stamp failures, both instrument dirs excluded from the inventory.)*
+- [x] **Close phase 2's accounting holes (P1).** The "never imported twice"
       docstring invariant is unimplemented (only the manifest's own
       `imported_id` is checked; add_book copies unconditionally), and the
       resume record is saved only after the unguarded download segment, so
@@ -688,8 +690,9 @@ that crashes on real input.*
       message claims "library restored" when nothing was restored, and
       add_book's file copies for books that succeeded before the failure
       stay behind as orphan directories (`run.py:486-490`). `--yes` is a
-      dead flag; `--apply-lossy` on phase 1 is accepted and never used.
-- [ ] **Give phase 3 the same rails as every other write path (P1).** It
+      dead flag; `--apply-lossy` on phase 1 is accepted and never used. *
+      *(Shipped in 3.33.0, 2026-09-09, 84e7e20: resume record saves before the download segment; --audience defaults to the documented value; timestamped sqlite-API backups; honest rollback message; --yes deleted; --apply-lossy wired to the bindery slice. add_book orphans and the byte-identity floor closed upstream in cquarry 1.15.0.)*
+- [x] **Give phase 3 the same rails as every other write path (P1).** It
       opens WritableCalibreDB with no closed-Calibre check (phase 2 and set
       mode both enforce `pgrep ^calibre`), and its fixes fallback
       `set_custom_column` accepts `#reading_status` from the answer file,
@@ -698,8 +701,9 @@ that crashes on real input.*
       bindery/reconcile exit 2 is a suppressed warning (fully invisible
       under `--quiet`) while validator-clean alone still exits 0
       (`run.py:702`, `720`); the post-commit calibredb download segment
-      runs outside both the batch and the guard window.
-- [ ] **Run-verb papercuts:** `_pdf_battery` ignores check_pdf's exit code
+      runs outside both the batch and the guard window. *
+      *(Shipped in 3.33.0, 2026-09-09, 2b1095e: closed-Calibre guard before the answer gates; banned answer-file fields refused; mechanical trouble always prints, is recorded, and fails the verb; the download segment re-checks the guard and defers.)*
+- [x] **Run-verb papercuts:** `_pdf_battery` ignores check_pdf's exit code
       and only scans the top level while `_inventory` walks recursively
       (`run.py:193-201`); answer-file loading raises raw tracebacks and
       silently ignores unknown ids (`run.py:646-649`); `_fetch_metadata`
@@ -707,11 +711,12 @@ that crashes on real input.*
       `files[]`, so the schema's `quarantined` verdict is writer-dead;
       `_existing_book_ids` is dead code; phase 2 shells `calibredb
       set_metadata`, contradicting the repo's own "No calibredb required"
-      constraint.
+      constraint. *
+      *(Shipped in 3.33.0, 2026-09-09, 9330946: recursive battery with honored exit codes; readable answer-file errors with unknown-id warnings; timeout maps to failed; quarantined files in files[]; dead helper deleted; the calibredb shell-out replaced by _apply_opf over cquarry's write module.)*
 
 ### Write path (Phase 16): solid core, real edges
 
-- [ ] **Ctrl-C mid-single-verb-write commits the half-done mutation (P1,
+- [x] **Ctrl-C mid-single-verb-write commits the half-done mutation (P1,
       upstream component).** `run_write` runs the action bare
       (`writeops.py:54-57`); cquarry's setters roll back on `Exception`
       only, and `WritableCalibreDB.__exit__` commits unconditionally, so a
@@ -720,26 +725,30 @@ that crashes on real input.*
       sync forever (reproduced). The batched paths are immune. Fix:
       `wdb.batch()` around the single action in run_write, and/or
       `__exit__` should skip commit when an exception is in flight (that
-      half belongs to cquarry).
-- [ ] **`--commit-per-book` is mechanically inert and the report lies about
+      half belongs to cquarry). *
+      *(Shipped in 3.33.0, 2026-09-09, 686b180 locally; the __exit__ half shipped upstream in cquarry 1.15.0; an interrupt test proves nothing lands.)*
+- [x] **`--commit-per-book` is mechanically inert and the report lies about
       it (P1).** The outer batch wraps the per-book inner batches, nested
       batches join the outer transaction, so the flag changes nothing while
       the output claims "Committed per book (3 transactions)"
       (`setwrite.py:594-600`). Implement it for real (with per-book
-      committed/failed reporting) or delete it.
-- [ ] **Empty-string flag values: silently dropped or silently destructive
+      committed/failed reporting) or delete it. *
+      *(Shipped in 3.33.0, 2026-09-09, 5e6be70, implemented for real: per-book outermost batches, a failing book rolls back alone with rolled_back/book_committed-false entries, honest partial-rollback reporting, exit 0 only when every book committed.)*
+- [x] **Empty-string flag values: silently dropped or silently destructive
       (P1).** `--batch-set-title ""` vanishes (truthiness gates) while
       `--batch-set-column audience ""` is collected and cquarry treats the
       empty string as clear, wiping the column on every targeted book with
       rc 0 (`setwrite.py:216-289`; `write.py:1116`). Validate `is not
-      None`, reject empties with exit 2.
-- [ ] **Promote the banned-column refusal to a shared chokepoint (P2).**
+      None`, reject empties with exit 2. *
+      *(Shipped in 3.33.0, 2026-09-09, 0b1ee3d: the value sweep refuses empties at exit 2; _has_verbs counts value flags by presence so the refusal names the real problem.)*
+- [x] **Promote the banned-column refusal to a shared chokepoint (P2).**
       `#reading_status`/`status`/`date_read` are refused only at set mode's
       entrance; single-book `--set-column` and the TUI both write them
       today (spec scopes the refusal to set mode, so arguably deliberate,
       but the same column is protected at one door and open at the other
-      two). Fix in the action builders or cquarry's `set_custom_column`.
-- [ ] **Set/write papercuts:** `--batch-set-cover maybe` crashes with a
+      two). Fix in the action builders or cquarry's `set_custom_column`. *
+      *(Shipped in 3.33.0, 2026-09-09, 1ddf073: writeops.FORBIDDEN_COLUMNS enforced in the builders -- every door closed by one check; cquarry 1.17 deferred the policy upstream.)*
+- [x] **Set/write papercuts:** `--batch-set-cover maybe` crashes with a
       traceback and exit 1 instead of the contracted exit 2
       (`setwrite.py:330` vs `writeops._ArgError`); the `--batch-clear-rating`
       manifest gate is honor-system (any id file unlocks a bulk rating
@@ -750,7 +759,8 @@ that crashes on real input.*
       (`writeops.py:429-447`); backups overwrite by fixed name (both here
       and in run.py); pgrep guard checked before the backup-dir usage
       error, TOCTOU window noted; `parse_book_id` accepts `int("5_0")`;
-      dry-run JSON omits the resolved target ids.
+      dry-run JSON omits the resolved target ids. *
+      *(Shipped in 3.33.0, 2026-09-09, d7ba622: all eight -- cover typo exits 2; the rating gate validates a real sealed manifest; failure detail survives --quiet; the dry run is read-only; timestamped backups; '5_0' rejected; ids in the JSON; usage check before the pgrep probe.)*
 
 ### Read surface
 

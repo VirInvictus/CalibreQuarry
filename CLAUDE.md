@@ -19,6 +19,42 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - **`--analytics genres` is a pure renderer over cquarry >= 1.12's `analytics.genre_distribution()`.** That function owns the rollup semantics (genre = first dot-path segment; a book counts once per node even when its tags share an ancestor; shares are fractions of the whole library, so multi-root books push the sum over 1.0; `"untagged"` last). The renderer slices to `--genre-depth N` (default 1 = roots only; deeper levels indent under their parents with the last path segment as the label) and does formatting only: %, bars, the sums-over-100% caveat. Every rendered level stays a share of the whole library, not of its parent.
 - **Set mode (Phase 16, `src/cquarry_cli/setwrite.py`)**: one target source (`--ids`, `--from-search`, `--from-untagged`, `--from-manifest`; hand-supplied ids are validated read-only and unknown ids abort exit 2 before anything opens writable) feeds id-less `--batch-*` verbs. `dispatch_set_write` runs BEFORE `dispatch_write` in `cli.py` so a single-book/set combination is refused before anything executes. Dry-run by default; `--apply` demands a closed Calibre (`pgrep ^calibre` guard, the `fetch_library_codes.py` precedent) and a `--backup-dir` outside the library directory (the `stamp_pdf.py` precedent), then ONE `batch()` transaction; any per-(book, verb) failure rolls the whole pass back (exit 1, `committed: false`). `--batch-clear-rating` is manifest-only, mechanically enforced; column verbs refuse `#reading_status`/`status`/`date_read`; there is deliberately no `--batch-remove-book` and no set-mode rating SET. Verb actions reuse the writeops action builders quieted; new set verbs should do the same rather than opening connections inline.
 
+### Programmer-facing contract notes (3.33.0 onward)
+
+- **The single-verb path batches.** `run_write` wraps every action in
+  `wdb.batch()`, so an interrupt mid-verb cannot commit a torn edit (the
+  guarantee used to differ between single and batched paths).
+- **`--commit-per-book` is real.** Each book is its own outermost batch;
+  a failing book rolls back alone, its result entries read
+  `status: "rolled_back"` with `book_committed: false`, and the pass
+  continues. Exit 0 only when every book committed.
+- **Empty-string flag values are refused (exit 2)** by
+  `setwrite._reject_empty`; `_has_verbs` counts value-bearing flags by
+  presence (never truthiness), so the refusal message is what the user
+  sees. The store_true `--batch-clear-*` flags still count by truthiness.
+- **`writeops.FORBIDDEN_COLUMNS` is the one banned-columns tuple.** The
+  builders (`action_set_column`/`action_clear_column`/
+  `action_add_column_value`) refuse it at builder time; set mode imports
+  the same tuple; run.py's answer-file gate checks it too.
+- **The `--batch-clear-rating` manifest gate validates.** The
+  `--from-manifest` file must load through `cquarry_cli.manifest`
+  (structure + seal) and the targets are exactly its imported ids; a
+  plain id file is refused.
+- **Read-only means read-only for dry runs.** `--remove-book`'s dry run
+  (CLI and TUI) goes through a `mode=ro` connection, never
+  WritableCalibreDB. Set-write backups are timestamped, so a second run
+  never destroys the first restore point.
+- **Run-verb rails:** phase 1's quarantine moves only audit_drm's
+  `is_problem` set (DRM, ERROR) and only under `--quarantine`; the
+  PDF battery runs the recursive inventory and honors check_pdf's exit
+  codes; phase 2 saves the resume record before the download segment,
+  takes timestamped sqlite-API backups, defaults `#audience` to
+  `DEFAULT_AUDIENCE` when the flag is absent, and defers downloads if
+  Calibre opens after the commit (no calibredb anywhere: downloaded OPFs
+  apply via `run._apply_opf`); phase 3 enforces the closed-Calibre guard
+  and the banned answer-file fields, and mechanical-pass trouble
+  (bindery/reconcile rc 2) fails the verb and lands in the batch record.
+
 ### Programmer-facing contract notes (3.32.0 onward)
 
 - **The manifest signature is an HMAC seal, not a boolean.** `manifest.sign()`

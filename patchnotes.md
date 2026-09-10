@@ -1,3 +1,88 @@
+# 3.33.0 (2026-09-09)
+
+### Batch B: the run verbs and the write path (Phase 18)
+
+- **Phase 1 moves files only on true DRM and only with consent.**
+  Quarantine used to run for any DRM verdict that was not clean, sweeping
+  in audit_drm's BENIGN (font obfuscation) and N/A (DJVU): every DJVU in a
+  batch was moved and a manual_repair decision recorded for a file with no
+  DRM at all. The classification is now audit_drm's own problem set (DRM,
+  plus ERROR, a scan that could not verify), and the move is gated behind
+  a new `--quarantine` flag: without it the verdict and decision are
+  recorded and the file stays. Quarantine also no longer moves onto
+  basename collisions (numbered siblings instead), stamp backups live in
+  a dated temp directory outside the tree (which makes `--stamp` actually
+  work, since stamp_pdf refused the in-tree backup dir it was handed),
+  stamp failures print a WARNING instead of passing silently, and a
+  rerun can no longer sweep `_stamp_backups` or `_quarantine` as books.
+- **Phase 2 keeps its accounts.** The resume record saves the moment the
+  import batch commits, before the unguarded download segment, so a
+  crash there no longer costs the imported ids. `--audience` with no flag
+  stamps the documented default instead of the literal string 'None'.
+  Backups are timestamped and taken through sqlite's backup API, so a
+  second run keeps its own restore point and a hot journal cannot leave
+  an inconsistent snapshot. The rollback message tells the truth (the
+  batch rolled back; nothing was written). The dead `--yes` flag is gone,
+  and phase 1's `--apply-lossy` is now actually wired to the bindery
+  slice. add_book's orphaned directories on batch failure are closed
+  upstream (cquarry 1.15's batch-scoped compensation), as is the
+  byte-identity duplicate floor.
+- **Phase 3 has the same rails as every other write path.** A
+  closed-Calibre guard runs before the answer gates; the answer file may
+  not name `#reading_status`/`status`/`date_read` (checked against the
+  shared NON-NEGOTIABLES tuple before anything opens writable);
+  bindery/reconcile trouble (their exit 2) always prints, lands in the
+  batch record, and fails the verb instead of hiding behind a clean
+  validator; and the download segment re-checks the Calibre guard,
+  deferring to phase 3 rather than racing a library that opened after
+  the commit.
+- **Run-verb papercuts.** The PDF battery now covers the same recursive
+  inventory everything else uses (not just the top level) and honors
+  check_pdf's exit codes, with its report in a temp file; answer-file
+  loading produces readable errors and warns on ids the manifest never
+  imported instead of dropping them silently; a download timeout maps to
+  failed, not ambiguous; quarantined files appear in `files[]` (the
+  quarantined verdict is no longer writer-dead); the dead
+  `_existing_book_ids` helper is deleted; and phase 2's `calibredb
+  set_metadata` shell-out is replaced by `_apply_opf`, which applies a
+  downloaded OPF through cquarry's write module in one batch (the
+  no-calibredb constraint holds again).
+- **The single-verb write path batches.** `run_write` wraps every action
+  in `wdb.batch()`, so an interrupt mid-verb cannot commit a torn edit
+  invisible to Calibre's OPF sync (cquarry 1.15's `__exit__` rollback is
+  the upstream half of the same fix).
+- **`--commit-per-book` does what it claims.** Each book is its own
+  outermost transaction; a book whose verbs failed rolls back alone, its
+  entries read `rolled_back`/`book_committed: false`, and the pass
+  continues. Partial rollbacks are reported as such; exit 0 only when
+  every book committed.
+- **Empty-string flag values are refused arguments (exit 2).**
+  `--batch-set-title ""` used to vanish through the truthiness gates
+  while `--batch-set-column audience ""` was collected and cquarry treats
+  '' as a clear, wiping the column on every targeted book with rc 0.
+  Both are refused now, and `_has_verbs` counts value-bearing flags by
+  presence so the refusal message is what the user sees.
+- **The banned-columns refusal is a shared chokepoint.**
+  `#reading_status`/`status`/`date_read` were refused at set mode's door
+  and open at the other two (single-book `--set-column`/`--clear-column`,
+  the TUI). The refusal now lives in the writeops action builders
+  (`writeops.FORBIDDEN_COLUMNS`, one tuple for every door), raising the
+  argument-level exit 2; cquarry 1.17 deferred the policy upstream, so
+  the frontend owns it.
+- **Set/write papercuts.** `--batch-set-cover maybe` exits 2 instead of
+  tracebacking; the `--batch-clear-rating` manifest gate validates the
+  file with the repo's own manifest module (a plain id file no longer
+  unlocks a bulk rating clear); failure detail survives `--quiet` on
+  stderr; the `--remove-book` dry run is a read-only connection, never
+  WritableCalibreDB; set-write backups are timestamped;
+  `parse_book_id` rejects int()'s `'5_0'`; the dry-run JSON carries the
+  resolved ids; and the `--backup-dir` usage check precedes the pgrep
+  probe.
+- **Skill sync (same release):** the phase-3-import skill's
+  `--batch-clear-rating` line names the sealed-manifest gate; the
+  phase-1-import skill names `--quarantine` among the file-side
+  consents. Suite: 330 → 362 tests.
+
 # 3.32.0 (2026-09-09)
 
 ### The four P0s from the deep-dive backlog (Phase 18, batch A)
