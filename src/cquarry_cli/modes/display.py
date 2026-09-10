@@ -163,7 +163,12 @@ def show_reading_progress(db: CalibreDB, *, quiet: bool = False) -> None:
         else:
             pct, bar = "    ?", ""
         epoch = row.get("epoch")
-        when = f"[{datetime.fromtimestamp(epoch):%Y-%m-%d}] " if epoch else ""
+        # A corrupt epoch (a milliseconds value, say) must not kill the
+        # whole listing: show it raw instead of raising.
+        try:
+            when = f"[{datetime.fromtimestamp(epoch):%Y-%m-%d}] " if epoch else ""
+        except OverflowError, OSError, ValueError:
+            when = f"[{epoch}?] " if epoch else ""
         who = row.get("device") or row.get("user") or "?"
         fmt = row.get("format") or "?"
         name = f"{author} — {title}" if author else title

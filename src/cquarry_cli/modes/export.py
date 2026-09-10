@@ -44,7 +44,9 @@ def _custom_display(value):
     return value
 
 
-def _book_to_dict(b, custom_data, show_custom, author_details=False) -> dict:
+def _book_to_dict(
+    b, custom_data, show_custom, author_details=False, plugin_data=None, plugin_map=None
+) -> dict:
     d = {
         "id": b["id"],
         "title": b["title"],
@@ -64,18 +66,37 @@ def _book_to_dict(b, custom_data, show_custom, author_details=False) -> dict:
     if author_details:
         d["author_sorts"] = list(b.get("author_sorts") or [])
         d["author_links"] = list(b.get("author_links") or [])
+    if plugin_data and plugin_map is not None and b["id"] in plugin_map:
+        d[plugin_data] = plugin_map[b["id"]]
     if show_custom:
         d[show_custom] = custom_data.get(b["id"])
     return d
 
 
 def _serialize(
-    books, stream, fmt, custom_data, show_custom, author_details=False
+    books,
+    stream,
+    fmt,
+    custom_data,
+    show_custom,
+    author_details=False,
+    plugin_data=None,
+    plugin_map=None,
 ) -> bool:
     """Write books to a stream as json/csv/ai. Returns False for unknown fmt."""
     if fmt == "json":
         json.dump(
-            [_book_to_dict(b, custom_data, show_custom, author_details) for b in books],
+            [
+                _book_to_dict(
+                    b,
+                    custom_data,
+                    show_custom,
+                    author_details,
+                    plugin_data,
+                    plugin_map,
+                )
+                for b in books
+            ],
             stream,
             indent=2,
             ensure_ascii=False,
@@ -87,6 +108,8 @@ def _serialize(
             fieldnames += ["author_sorts", "author_links"]
         if show_custom:
             fieldnames.append(show_custom)
+        if plugin_data and plugin_map is not None:
+            fieldnames.append(plugin_data)
         w = csv.DictWriter(stream, fieldnames=fieldnames)
         w.writeheader()
         for b in books:
@@ -118,6 +141,8 @@ def _serialize(
                 )
             if show_custom:
                 row[show_custom] = _custom_display(custom_data.get(b["id"], ""))
+            if plugin_data and plugin_map is not None:
+                row[plugin_data] = plugin_map.get(b["id"], "")
             w.writerow(row)
     elif fmt == "ai":
         for b in books:
@@ -195,23 +220,27 @@ def run_search_export(
     ``plugin_data`` (a ``books_plugin_data`` name such as ``goodreads_id`` or
     ``wordcount``), each plain-text line gains a ``<name: value>`` segment.
     """
+    from cquarry.search import ParseException
+
     try:
         matching_ids = db.search(query)
-    except Exception as e:
-        print(f"Error parsing search query: {e}", file=sys.stderr)
-        return
+    except ParseException as e:
+        # The parse failure is the one failure this mode can have; it
+        # exits 1 like everywhere else, never a silent 0.
+        print(f"ERROR: could not parse the search query: {e}", file=sys.stderr)
+        return 1
 
     if not matching_ids:
         print(
             f"No books matched the query: '{query}'. Nothing written.",
             file=sys.stderr,
         )
-        return
+        return 0
 
     books = [b for b in db.get_all_books() if b["id"] in matching_ids]
     custom_data = _load_custom(db, show_custom)
     if custom_data is None:
-        return
+        return 1
     plugin_map: dict[int, str] = {}
     if plugin_data:
         plugin_map = {
@@ -222,11 +251,20 @@ def run_search_export(
 
     if fmt is not None and fmt not in ("json", "csv", "ai"):
         print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
-        return
+        return 2
 
     with open_output(output, db.db_path) as (stream, out_path):
         if fmt in ("json", "csv", "ai"):
-            _serialize(books, stream, fmt, custom_data, show_custom, author_details)
+            _serialize(
+                books,
+                stream,
+                fmt,
+                custom_data,
+                show_custom,
+                author_details,
+                plugin_data,
+                plugin_map,
+            )
         else:
             stream.write(f"Search Query: {query}\n")
             stream.write(f"Matches: {len(books)}\n")
@@ -249,6 +287,7 @@ def run_search_export(
             print(f"Exported {len(books)} matches to: {out_path}")
         else:
             print(f"\n{len(books)} matches.", file=sys.stderr)
+    return 0
 
 
 def run_annotations_export(

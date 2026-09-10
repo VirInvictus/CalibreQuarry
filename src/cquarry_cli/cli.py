@@ -132,6 +132,8 @@ def build_parser() -> argparse.ArgumentParser:
         "annotations, reading progress. With --untagged, give no ids to "
         "select every untagged book",
     )
+    # --untagged stays OUTSIDE the exclusive group on purpose: it is a
+    # modifier of --book (`--book --untagged`), not an independent mode.
     p.add_argument(
         "--untagged",
         dest="untagged",
@@ -168,13 +170,13 @@ def build_parser() -> argparse.ArgumentParser:
         "@Name user categories, grouped search terms, feeds, sync queues",
     )
 
-    p.add_argument(
+    group.add_argument(
         "--exportlt",
         action="store_true",
         help="Export to LibraryThing CSV format (can be used alone or with --search)",
     )
 
-    p.add_argument(
+    group.add_argument(
         "--export-annotations",
         dest="export_annotations",
         action="store_true",
@@ -464,7 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --remove-book: actually delete instead of dry-running",
     )
-    w.add_argument(
+    group.add_argument(
         "--format-stats",
         dest="format_stats",
         action="store_true",
@@ -824,14 +826,16 @@ def main(argv: list[str] | None = None) -> int:
                         )
                         return 0
 
-                run_librarything_export(
+                # The self-check verdict ("do not upload") is the
+                # contract: a failed check must fail the verb, not exit 0
+                # behind the operator's back.
+                return run_librarything_export(
                     db, outdir=outdir, matching_ids=matching_ids, quiet=args.quiet
                 )
-                return 0
 
             if args.catalog:
                 output = args.output or "catalog.txt"
-                write_catalog(
+                return write_catalog(
                     db,
                     output,
                     wing=args.wing,
@@ -843,7 +847,6 @@ def main(argv: list[str] | None = None) -> int:
                     author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
-                return 0
 
             if args.all_wings:
                 outdir = args.outdir or "catalogs"
@@ -888,6 +891,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
 
             if args.recent is not None:
+                if args.recent <= 0:
+                    print(
+                        f"ERROR: --recent needs a positive count, got {args.recent}.",
+                        file=sys.stderr,
+                    )
+                    return 2
                 show_recent(db, args.recent, quiet=args.quiet)
                 return 0
 
@@ -905,8 +914,9 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.search is not None:
                 # No --output: stream to stdout. --format selects a structured
-                # form (json/csv/ai); otherwise a plain-text listing.
-                run_search_export(
+                # form (json/csv/ai); otherwise a plain-text listing. A
+                # parse failure exits 1, matching --exportlt --search.
+                return run_search_export(
                     db,
                     args.search,
                     args.output,
@@ -916,7 +926,6 @@ def main(argv: list[str] | None = None) -> int:
                     author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
-                return 0
 
             if args.wings:
                 show_wings(db)
@@ -983,7 +992,7 @@ def main(argv: list[str] | None = None) -> int:
             # If --wing was given without a mode, default to catalog
             if args.wing:
                 output = args.output or "catalog.txt"
-                write_catalog(
+                return write_catalog(
                     db,
                     output,
                     wing=args.wing,
@@ -995,7 +1004,6 @@ def main(argv: list[str] | None = None) -> int:
                     author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
-                return 0
 
             parser.print_help()
             return 2

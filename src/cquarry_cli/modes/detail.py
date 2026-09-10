@@ -139,7 +139,10 @@ def _show_progress(d) -> None:
         if epoch:
             from datetime import datetime
 
-            when = f" at {datetime.fromtimestamp(epoch):%Y-%m-%d}"
+            try:
+                when = f" at {datetime.fromtimestamp(epoch):%Y-%m-%d}"
+            except OverflowError, OSError, ValueError:
+                when = f" at epoch {epoch}?"
         who = row.get("device") or row.get("user") or "?"
         print(f"  {who} ({row.get('format') or '?'}) — {pct}{when}")
 

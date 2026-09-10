@@ -13,6 +13,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 from cquarry.db import CalibreDB
 
@@ -308,6 +309,55 @@ class TestInfoAndColumns(_TempDBCase):
         with redirect_stdout(out), redirect_stderr(err):
             rc = main(["--columns", "--db", self.db_path])
         self.assertEqual(rc, 0)
+
+
+class TestReadSurfaceExitCodes(_TempDBCase):
+    """The :780 normalization: search parse failures and unknown wings
+    used to exit 0 (the search one leaving nothing, the catalog one
+    leaving a stale file); exportlt's self-check verdict was discarded."""
+
+    def test_bad_search_expression_exits_one(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--search", "(((", "--db", self.db_path])
+        self.assertEqual(rc, 1)
+
+    def test_unknown_wing_exits_two(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--catalog", "--wing", "NoSuchWing", "--db", self.db_path])
+        self.assertEqual(rc, 2)
+
+    def test_exportlt_self_check_fails_the_verb(self):
+        with mock.patch(
+            "cquarry_cli.cli.run_librarything_export", return_value=1
+        ) as lt:
+            rc, _, _ = self._capture(
+                main,
+                ["--exportlt", "--outdir", self.db_path + ".lt", "--db", self.db_path],
+            )
+        self.assertEqual(rc, 1)
+        lt.return_value = 1
+
+    def test_negative_recent_is_refused(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--recent", "-3", "--db", self.db_path])
+        self.assertEqual(rc, 2)
+
+    def test_corrupt_epoch_does_not_kill_reading_progress(self):
+        # A milliseconds-valued epoch used to traceback the whole listing.
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "UPDATE last_read_positions SET epoch = 1725888000000 WHERE book = 1"
+        )
+        con.commit()
+        con.close()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--reading-progress", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        self.assertIn("1725888000000?", out.getvalue())
 
 
 class TestOutputGuard(_TempDBCase):

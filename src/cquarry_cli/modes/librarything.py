@@ -234,7 +234,12 @@ def run_librarything_export(
         print("No books to export.", file=sys.stderr)
         return 0
 
-    read_paths = write_batches(read, outdir, "librarything_read", batch_size)
+    # A batch with no rows writes nothing: a header-only
+    # librarything_read.csv reads like an empty shelf and LT import would
+    # ingest nothing anyway.
+    read_paths = (
+        write_batches(read, outdir, "librarything_read", batch_size) if read else []
+    )
     main_paths = write_batches(main_rows, outdir, "librarything_main", batch_size)
 
     problems = self_check(read_paths + main_paths, len(read) + len(main_rows))

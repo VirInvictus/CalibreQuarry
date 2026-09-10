@@ -44,8 +44,10 @@ def write_catalog(
         try:
             valid_ids = db.resolve_vl(wing)
         except ValueError as e:
+            # An unknown wing must fail the verb: exit 0 here left a stale
+            # catalog file standing in for a fresh one.
             print(f"ERROR: {e}", file=sys.stderr)
-            return
+            return 2
         books = [b for b in books if b["id"] in valid_ids]
         if not quiet:
             print(f"Wing '{color(wing, C_TITLE)}': {len(books)} books")
@@ -68,7 +70,7 @@ def write_catalog(
             custom_data = db.load_custom_column(show_custom)
         except ValueError as e:
             print(f"ERROR: {e}", file=sys.stderr)
-            return
+            return 1
     plugin_map: dict[int, str] = {}
     if plugin_data:
         plugin_map = {
@@ -165,6 +167,7 @@ def write_catalog(
 
     if not quiet:
         print(f"Catalog written: {color(output, C_TITLE)} ({book_count} books)")
+    return 0
 
 
 def write_all_wings(

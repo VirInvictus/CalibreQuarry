@@ -71,6 +71,19 @@ class TestMenuDegrade(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
 
+    def test_saved_config_wins_over_cwd_strays(self):
+        # The sweep's P1: the TUI consulted a CWD-relative metadata.db
+        # before the saved config and silently rebound it. The saved path
+        # now wins and nothing is rewritten.
+        with (
+            mock.patch.object(tui, "get_db_path", return_value=self.good),
+            mock.patch.object(tui, "set_db_path") as set_path,
+            mock.patch.object(tui, "_resolve_db_input") as resolve_input,
+        ):
+            self.assertEqual(tui._resolve_db_for_tui(), self.good)
+        set_path.assert_not_called()  # no silent rebind
+        resolve_input.assert_not_called()  # no first-run prompt
+
     def test_malformed_start_db_degrades_to_a_notice_and_reprompt(self):
         # The sweep's P0 scenario: the resolved path is garbage. The menu
         # says so in prose and re-prompts; quitting there exits cleanly.

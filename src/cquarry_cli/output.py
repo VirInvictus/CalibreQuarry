@@ -85,5 +85,10 @@ def ensure_output_dir(outdir: str, db_path: str | None) -> str:
             raise OutputRefusedError(
                 f"refusing to write the export into the library directory: {outdir}"
             )
+    if os.path.exists(out) and not os.path.isdir(out):
+        raise OutputRefusedError(
+            f"refusing the export target: {outdir} exists and is not a "
+            "directory (did you mean a file flag?)"
+        )
     os.makedirs(out, exist_ok=True)
     return out

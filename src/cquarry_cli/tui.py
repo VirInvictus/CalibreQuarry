@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import sys
 
 from cquarry.config import get_db_path, set_db_path
 from cquarry.db import CalibreDB
@@ -52,6 +53,16 @@ from cquarry_cli.modes.tags import show_tag_dump
 def _notify(msg: str) -> None:
     print(msg)
     ask("Press Enter to continue...", "")
+
+
+def _safe_entities(db, kind: str) -> None:
+    """The Entity Browser's kinds come from the same menu as the CLI, but
+    a stored kind can still be unknown: say so instead of paging a
+    traceback."""
+    try:
+        show_entities(db, kind)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
 
 
 def _resolve_db_input(raw_path: str) -> str | None:
@@ -152,8 +163,15 @@ _SEL_QUIT = (5, 1)
 
 
 def _resolve_db_for_tui() -> str | None:
+    # The saved config wins, always: the sweep found the TUI consulting a
+    # hard-coded default list that STARTS with a CWD-relative metadata.db
+    # and never called get_db_path(), so launching from any directory
+    # with a stray metadata.db overwrote the shared config and the next
+    # CLI run read the wrong library.
+    saved = get_db_path()
+    if saved and os.path.exists(saved):
+        return saved
     DEFAULT_DB_PATHS = [
-        "metadata.db",
         "~/Calibre Library/metadata.db",
         "~/Documents/Calibre Library/metadata.db",
     ]
@@ -564,7 +582,7 @@ def _menu_session() -> int:
                         reset_terminal()
                         run_with_capture(
                             f"Entities: {kind}",
-                            lambda k=kind: show_entities(db, k),
+                            lambda k=kind: _safe_entities(db, k),
                         )
                 elif result == (3, 0):
                     fmt = ask("Format (json/csv/ai)", "json").strip().lower()
