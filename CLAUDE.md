@@ -58,8 +58,9 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 ### Programmer-facing contract notes (3.32.0 onward)
 
 - **The manifest signature is an HMAC seal, not a boolean.** `manifest.sign()`
-  seals the approved set, the per-file stamps and lossy flags, and the
-  decisions list (HMAC-SHA256 over canonical JSON; the key is a schema
+  seals the approved set, the per-file stamps, provenance, and lossy
+  flags, and the decisions list (HMAC-SHA256 over canonical JSON; the key
+  is a schema
   constant, so the seal is tamper-EVIDENCE, not secret authentication).
   `validate()` checks the seal by default; `check_seal=False` exists for
   exactly one caller, the `run sign` verb, so a deliberate post-sign edit

@@ -180,6 +180,20 @@ class TestManifestSeal(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "seal mismatch"):
             manifest.load(self.path)
 
+    def test_editing_provenance_after_signing_fails_load(self):
+        # Phase 2 stamps cc6 from provenance, so the seal covers it like
+        # the stamps (the 3.35.0 provenance wiring): a post-sign source
+        # swap must fail the load until re-signed.
+        manifest.sign(self.manifest)
+        manifest.save(self.manifest, self.path)
+        with open(self.path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["files"][0]["provenance"] = "Library Genesis"
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with self.assertRaisesRegex(ValueError, "seal mismatch"):
+            manifest.load(self.path)
+
     def test_listing_a_rejected_file_as_approved_fails_validate(self):
         # The sweep's proven attack, now caught twice: the verdict
         # cross-check fires even if the seal is recomputed, and the seal

@@ -27,6 +27,7 @@ from cquarry_cli.run import (
     _bindery_phase1,
     _drive_stamp,
     _inventory,
+    _provenance_from_filename,
     _screen_duplicates,
     _stamps_from_filename,
     run_phase1,
@@ -151,6 +152,45 @@ class TestFilenameStamps(unittest.TestCase):
         self.assertEqual(stamps["authors"], [])
 
 
+class TestProvenanceSeeds(unittest.TestCase):
+    """The observed download naming (2026-09-08 and 2026-09-10 runs),
+    mapped onto the library's #source vocabulary."""
+
+    def test_the_anna_s_archive_trailer_seeds_anna_s_archive(self):
+        # The real 09-10 name, typographic apostrophe and all.
+        self.assertEqual(
+            _provenance_from_filename(
+                "Mattimeo (Redwall #3) -- Brian Jacques - -- Firebird -- "
+                "Anna\u2019s Archive.epub"
+            ),
+            "Anna's Archive",
+        )
+
+    def test_z_library_site_naming_seeds_other(self):
+        # z-lib downloads have no #source enum value of their own yet; the
+        # seed is the recorded practice of both runs ("Other") pending
+        # Brandon's Z-Library enum decision.
+        self.assertEqual(
+            _provenance_from_filename(
+                "How to do things with videogames (Bogost, Ian) "
+                "(z-library.sk, 1lib.sk, z-lib.sk).pdf"
+            ),
+            "Other",
+        )
+
+    def test_libgen_names_seed_library_genesis(self):
+        self.assertEqual(
+            _provenance_from_filename(
+                "[Redwall Book 2] Brian Jacques - Mossflower "
+                "(2012, Random House UK) - libgen.li.epub"
+            ),
+            "Library Genesis",
+        )
+
+    def test_a_bare_name_seeds_nothing(self):
+        self.assertIsNone(_provenance_from_filename("Lord Brocktree.epub"))
+
+
 class TestRunPhase1(RunCase):
     def test_vets_creates_manifest_quarantines_and_flags(self):
         good = self._make_file("Ann Leckie - Fifth Head of Data.epub")
@@ -186,6 +226,31 @@ class TestRunPhase1(RunCase):
         self.assertEqual(man["approved_for_import"], [good])
         entry = manifest.file_by_path(man, good)
         self.assertEqual(entry["stamps"]["authors"], ["Ann Leckie"])
+
+    def test_provenance_seeds_land_in_the_manifest(self):
+        # The 09-10 box: the manifest's provenance field was writer-dead,
+        # so phase 2's cc6 stamp fell back to a blanket Anna's Archive and
+        # phase 3 re-derived provenance from filenames every batch.
+        named = self._make_file(
+            "Mattimeo (Redwall #3) -- Brian Jacques - -- Firebird -- "
+            "Anna\u2019s Archive.epub"
+        )
+        bare = self._make_file("Lord Brocktree.epub", payload=b"BARE")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertEqual(
+            manifest.file_by_path(man, named)["provenance"], "Anna's Archive"
+        )
+        self.assertIsNone(manifest.file_by_path(man, bare)["provenance"])
 
     def test_benign_and_na_verdicts_never_quarantine(self):
         # The sweep's finding: audit_drm's BENIGN (font obfuscation) and

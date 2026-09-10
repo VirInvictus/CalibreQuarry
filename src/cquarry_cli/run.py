@@ -155,6 +155,34 @@ def _stamps_from_filename(path: str) -> dict[str, Any]:
     return stamp
 
 
+#: Filename-evidence provenance seeds, mapped onto the library's #source
+#: vocabulary (the 2026-09-06 decision binds phase 2's cc6 stamp to the
+#: manifest's provenance). Observed download naming, 2026-09-08 and
+#: 2026-09-10 runs: "(z-library.sk, 1lib.sk, z-lib.sk)" site suffixes, the
+#: "-- Anna's Archive" trailer, and libgen.li. The trailer names its source
+#: outright; libgen.* is the enum's "Library Genesis"; z-lib naming is its
+#: own route and has no #source enum value yet, so it seeds "Other" (the
+#: recorded practice of both runs) pending Brandon's Z-Library enum
+#: decision. A name carrying no marker seeds None: absence of evidence is
+#: not a source.
+_PROVENANCE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"anna[’']s\s+archive", re.IGNORECASE), "Anna's Archive"),
+    (re.compile(r"\b(?:z[\s_-]?lib(?:rary)?|1lib)\b", re.IGNORECASE), "Other"),
+    (re.compile(r"\blibgen\b", re.IGNORECASE), "Library Genesis"),
+)
+
+
+def _provenance_from_filename(path: str) -> str | None:
+    """Filename-derived seed provenance (a #source value or None), surfaced
+    in the manifest for the review step to correct exactly like the stamps;
+    phase 2 stamps cc6 from the reviewed value."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    for pattern, source in _PROVENANCE_PATTERNS:
+        if pattern.search(stem):
+            return source
+    return None
+
+
 def _screen_duplicates(files: list[str], db_path: str) -> set[str]:
     """screen_duplicate.py --format json over the inventoried files: the
     paths with a library or within-batch duplicate hit.
@@ -379,6 +407,7 @@ def run_phase1(
         entry = manifest.new_file_entry(path)
         entry["size"] = os.path.getsize(path)
         entry["stamps"] = _stamps_from_filename(path)
+        entry["provenance"] = _provenance_from_filename(path)
         if path in stamped_files:
             entry["repairs"].append("stamped via stamp_pdf (--stamp)")
         drm_status = drm.get(path, "unscanned")
@@ -453,8 +482,8 @@ def run_phase1(
         print(f"  decisions_needed: {len(man['decisions_needed'])}")
         print(f"Manifest: {manifest_path}")
         print(
-            'Review, edit stamps, then SIGN the manifest ("signed": true) '
-            "to authorize phase 2."
+            "Review, edit stamps and provenance, then SIGN the manifest "
+            '("signed": true) to authorize phase 2.'
         )
     return 0
 

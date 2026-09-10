@@ -15,13 +15,15 @@ Shape (all writers must keep this honest; :func:`validate` is the gate):
   ``signed``/``signed_at`` (Brandon's sign-off of the phase-1 report;
   the signature IS standing consent for the lossy repairs the report
   listed, per the 2026-09-06 decision), ``signature`` (the seal:
-  an HMAC over the approved set, the per-file stamps and lossy flags,
-  and the decisions list, recomputed by every load of a signed
-  manifest so a post-sign edit fails loudly instead of importing),
+  an HMAC over the approved set, the per-file stamps, provenance, and
+  lossy flags, and the decisions list, recomputed by every load of a
+  signed manifest so a post-sign edit fails loudly instead of importing),
   ``files``, ``quarantines``, ``decisions_needed``,
   ``approved_for_import``.
 - per-file: path, format, size, ``provenance`` (the ``#source`` stamp's
-  origin, stamped mechanically at import per the 2026-09-06 decision),
+  origin: seeded from the filename's site markers at phase 1, corrected
+  at review, sealed at sign, stamped mechanically at import per the
+  2026-09-06 decision),
   ``verdict``, ``checks``, ``lossy`` (flagged repairs; applied only when
   the manifest is signed), ``repairs`` + ``backup_path``, ``stamps``
   (the seed metadata phase 2 hands ``add_book``), ``duplicate_of``,
@@ -212,11 +214,12 @@ def add_decision(manifest: dict[str, Any], kind: str, **detail: Any) -> dict[str
 
 def _seal_payload(data: dict[str, Any]) -> dict[str, Any]:
     """The manifest content the seal binds: the approved set, the per-file
-    stamps and lossy flags, and the decisions list. Stamps because phase 2
-    imports them as metadata; the decisions because removing a blocking
-    decision is as much an attack as adding an approval. Import outcomes
-    (imported ids, download records) are deliberately outside: they are the
-    phases' own product, written after the gate."""
+    stamps, provenance, and lossy flags, and the decisions list. Stamps and
+    provenance because phase 2 imports them as metadata; the decisions
+    because removing a blocking decision is as much an attack as adding an
+    approval. Import outcomes (imported ids, download records) are
+    deliberately outside: they are the phases' own product, written after
+    the gate."""
     files = [
         f for f in data.get("files") or [] if isinstance(f, dict) and f.get("path")
     ]
@@ -224,6 +227,7 @@ def _seal_payload(data: dict[str, Any]) -> dict[str, Any]:
         "schema": data.get("schema"),
         "approved_for_import": sorted(data.get("approved_for_import") or []),
         "stamps": {f["path"]: f.get("stamps") for f in files},
+        "provenance": {f["path"]: f.get("provenance") for f in files},
         "lossy": {f["path"]: f.get("lossy") for f in files},
         "decisions_needed": data.get("decisions_needed") or [],
     }
@@ -248,8 +252,8 @@ def sign(manifest: dict[str, Any]) -> None:
     """Brandon signs the phase-1 report (``cquarry run sign``): standing
     consent for the lossy repairs the report listed, and the gate phase 2
     refuses to run without. Signing also seals the approved set, the
-    stamps, the lossy flags, and the decisions list: any later edit to
-    those fails every load until the manifest is re-signed."""
+    stamps, the provenance, the lossy flags, and the decisions list: any
+    later edit to those fails every load until the manifest is re-signed."""
     manifest["signed"] = True
     manifest["signed_at"] = datetime.now(UTC).isoformat()
     manifest["signature"] = _compute_seal(manifest)
