@@ -163,6 +163,9 @@ def main() -> int:
     )
     ap.add_argument("files", nargs="+", help="PDF/DJVU files to check")
     ap.add_argument("--json", metavar="FILE", help="also write the machine report")
+    ap.add_argument(
+        "--quiet", action="store_true", help="suppress the per-file progress lines"
+    )
     args = ap.parse_args()
 
     reports = []

@@ -24,7 +24,7 @@ Read-only: opens metadata.db strictly mode=ro. It never writes; the fix is
 phase 3's curated rewrite (or `--set-comments`).
 
 Exit codes: 0 clean, 1 findings, 2 setup error. `--json FILE` emits the
-machine report for the phase-3 runner.
+machine report for scripting.
 """
 
 import argparse

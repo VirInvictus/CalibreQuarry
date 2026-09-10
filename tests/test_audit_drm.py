@@ -227,10 +227,6 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(drm.classify_file(p).status, drm.CLEAN)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class _FakeProc:
     def __init__(self, returncode):
         self.returncode = returncode
@@ -358,3 +354,7 @@ class ConnectRoTests(unittest.TestCase):
                 con.close()
                 if tmpdir:
                     shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

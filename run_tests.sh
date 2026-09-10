@@ -1,6 +1,12 @@
 #!/bin/bash
+# Two layers: the hermetic unittest suite first (fast, no library
+# needed), then the read-only real-library smoke below. The suite used
+# to live in neither doc's default path: following this script ran
+# smoke-only coverage (the sweep's highest-value fix).
 DB_PATH="/home/bdkl/docs/Calibre Library/metadata.db"
 export PYTHONPATH=src
+
+python -m unittest discover -s tests || { echo "UNITTEST SUITE FAILED"; exit 1; }
 
 # A real book id for the --book smoke test, resolved from the library itself.
 python -m cquarry_cli --search "" --format json --db "$DB_PATH" --output /tmp/test_ids.json

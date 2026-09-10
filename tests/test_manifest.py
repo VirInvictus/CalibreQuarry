@@ -114,9 +114,11 @@ class TestManifestSchema(unittest.TestCase):
         self.assertNotIn("audience", self.entry)
 
     def test_manifests_dir_is_library_local(self):
+        # Any library path joins the same way; the real library's path is
+        # none of a unit test's business.
+        lib = os.path.join(self.temp_dir, "Some Library")
         self.assertEqual(
-            manifest.manifests_dir("/home/bdkl/docs/Calibre Library"),
-            os.path.join("/home/bdkl/docs/Calibre Library", ".claude", "manifests"),
+            manifest.manifests_dir(lib), os.path.join(lib, ".claude", "manifests")
         )
 
 

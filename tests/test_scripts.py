@@ -210,9 +210,6 @@ class TestOutDirGuard(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 spot_check = _load("spot_check")
 
 
@@ -1240,3 +1237,7 @@ class TestCheckPdf(unittest.TestCase):
         self.assertEqual(report["unembedded_fonts"], 1)
         self.assertEqual(report["text_layer"], "present")
         self.assertEqual(report["image_count"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -269,10 +269,6 @@ class TestAuditPendingOPFSync(_TempDBCase):
             db.close()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestWriteVerbs(_TempDBCase):
     """The v3.19 write-verb surface: authors/rating/comments/column/remove,
     all through _run_write's clean error paths."""
@@ -488,3 +484,7 @@ class TestBatchedWriteVerbs(_TempDBCase):
             )
         self.assertEqual(rc, 2)
         self.assertIn("cannot be combined", err_cap.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
