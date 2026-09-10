@@ -18,6 +18,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from cquarry.db import CalibreDB
 
 from cquarry_cli.cli import main
+from cquarry_cli.writeops import run_write
 from cquarry_cli.modes.audit import run_audit
 
 _SCHEMA = """
@@ -131,6 +132,30 @@ class TestSetTitleWriteFlow(_TempDBCase):
         with redirect_stdout(out), redirect_stderr(err):
             rc = main(["--set-title", "abc", "Nope", "--db", self.db_path])
         self.assertEqual(rc, 2)
+
+
+class TestSingleVerbBatchWrap(_TempDBCase):
+    """The sweep's P1: run_write executed the action bare, so an interrupt
+    landing between a setter's write and its bookkeeping could commit a
+    torn edit. The single action now runs inside a batch() like every
+    batched path, on top of cquarry 1.15's BaseException rollback."""
+
+    def test_interrupt_mid_write_commits_nothing(self):
+        def sabotage(wdb):
+            wdb.add_tag(1, "ghost")
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            run_write(self.db_path, sabotage)
+        con = sqlite3.connect(self.db_path)
+        ghosts = con.execute(
+            "SELECT COUNT(*) FROM books_tags_link l JOIN tags t ON t.id = l.tag "
+            "WHERE t.name = 'ghost'"
+        ).fetchone()[0]
+        pending = con.execute("SELECT COUNT(*) FROM metadata_dirtied").fetchone()[0]
+        con.close()
+        self.assertEqual(ghosts, 0)
+        self.assertEqual(pending, 0)  # no tag without its OPF-regen row
 
 
 class TestAuditPendingOPFSync(_TempDBCase):

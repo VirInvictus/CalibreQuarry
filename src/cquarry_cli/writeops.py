@@ -53,7 +53,12 @@ def run_write(db_path: str, action) -> int:
 
     try:
         with WritableCalibreDB(db_path) as wdb:
-            rc, _status = action(wdb)
+            # The same batch semantics the batched paths have: an
+            # interrupt or failure mid-action can never commit a torn
+            # edit (the sweep's P1; cquarry 1.15's __exit__ is the other
+            # half of the same fix).
+            with wdb.batch():
+                rc, _status = action(wdb)
             return rc
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
