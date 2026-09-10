@@ -1,8 +1,8 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.33.0  
+**Version:** 3.34.0  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry`, `vir-tui`, `tqdm` (minimal-dependency (uses tqdm): sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry`, `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -43,7 +43,7 @@ The search engine provided by `cquarry` ports Calibre's grammar and matching sem
 - Field locations: `title`, `authors`/`author`, `author_sort`, `series`, `publisher`, `tags`/`tag` (hierarchical), `rating`, `formats`/`format`, `languages`/`language`, `pubdate`, `timestamp`/`date`, `last_modified`, `identifiers`/`identifier`/`isbn`, `comments`/`comment`, `cover`, `id`, `uuid`, `#custom` columns, `all`, and `vl:`.
 - Numeric relational (`= > < >= <= !=`, plus `true`/`false` for presence) and date relational (incl. `today`, `yesterday`, `thismonth`, `N daysago`).
 
-**Deliberate, dependency-bound deviations from Calibre** (it is minimal-dependency (uses tqdm)):
+**Deliberate, dependency-bound deviations from Calibre** (the engine is pure stdlib):
 
 - `~` regex uses the stdlib `re` engine, not Calibre's third-party `regex` module.
 - Accent/contains folding uses `unicodedata` (NFKD), not ICU collation, so punctuation-insensitivity is not reproduced.
@@ -91,6 +91,13 @@ The path is saved to config on first successful resolution.
 | Wings | `--wings` | List virtual libraries with book counts |
 | Tags | `--tags` | Flat dump of every tag in the library with its book count |
 | Interactive | (no args) | Launch the Curses TUI with scrollable output pager |
+| Book detail | `--book ID[,ID...]`, `--book --untagged` | Full dossier per book: identifiers, format files, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; `--format json` for the machine-readable shape; `--untagged` selects cquarry's `find_untagged()` |
+| Entities | `--entities KIND` | `authors`/`series`/`publishers`/`tags`/`languages`/`ratings` with book counts; sort and link columns where they exist |
+| Reading progress | `--reading-progress` | Every recorded position across devices, progress bars, newest first |
+| Custom columns | `--columns` | Custom-column schema: label, search location, datatype, editability, enum values |
+| Library info | `--info` | Library dossier: identity UUID, wings + expressions, saved searches, `@Name` categories, grouped search terms, feeds, sync queues, conversion overrides |
+| LibraryThing | `--exportlt` | LibraryThing import CSVs (fixed eleven-column template), batched, self-checked; failures exit 1 ("do not upload") |
+| Format stats | `--format-stats` | Per-format book counts and total catalogued bytes |
 | Run: phase1 | `run phase1 DIR` | Vet a downloads directory into an `acquisition-manifest/1` batch (duplicate screen, DRM audit, PDF/DJVU battery, bindery's EPUB slice); read-only against `metadata.db`; the emitted manifest is unsigned until `run sign` seals it |
 | Run: sign | `run sign --manifest FILE` | Seal the reviewed manifest for phase 2: structure checks (no seal check, so re-signing after a deliberate edit works), then an HMAC seal over the approved set, the per-file stamps and lossy flags, and the decisions list |
 | Run: phase2 | `run phase2 --manifest FILE` | Import the SIGNED, SEALED manifest as ONE `batch()` through `add_book` (the seal is recomputed at load; a post-sign edit refuses to load until re-signed); `#source`/`#audience` stamped, tags+rating cleared on the imported ids only, downloads after the commit (failures become decisions), resumable |
@@ -112,7 +119,8 @@ The path is saved to config on first successful resolution.
 ### 3.2 Writes (opt-in)
 
 Single-book verbs: `--set-title`, `--set-authors`, `--set-rating` (0 remaps
-to a true clear since 3.29.0), `--set-comments`/`--clear-comments`,
+to a true clear since 3.29.0), `--set-pubdate`/`--clear-pubdate`,
+`--set-comments`/`--clear-comments`,
 `--set-column`/`--clear-column`, `--add-tag`/`--remove-tag`,
 `--set-identifier`/`--clear-identifier`, `--set-series`
 (+`--series-index`)/`--clear-series`, `--set-publisher`/`--clear-publisher`,
@@ -178,7 +186,7 @@ These guarantees apply to the `cquarry_cli` package only. The companion scripts 
 
 ## 5. Companion Scripts
 
-The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry_cli` package and do **not** share its read-only or import guarantees. They are minimal-dependency (uses tqdm) Python but shell out to external tools, and three of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
+The `scripts/` directory holds standalone maintenance tools that are **not** part of the `cquarry_cli` package and do **not** share its read-only or import guarantees. They are stdlib-only Python but shell out to external tools, and several of them write. Each is run directly (`python3 scripts/<name>.py`), not via the `cquarry` command.
 
 | Script | What it does | Writes? | External tools |
 |--------|--------------|---------|----------------|
@@ -193,4 +201,4 @@ The `scripts/` directory holds standalone maintenance tools that are **not** par
 | `screen_duplicate.py` | Screens loose downloads against the library (and within the batch) for duplicates: exact ISBN first, then normalized title + first author via the search engine; reads embedded metadata with `ebook-meta`; report-only | No (`metadata.db` opened `mode=ro`) | `ebook-meta` |
 | `stamp_pdf.py` | Pre-stamps PDF metadata (title/author/publisher, ISBN via keywords) so imports land with real titles; verifies via `ebook-meta`; dry-run by default, `--apply` with a mandatory out-of-tree `--backup-dir` | **Yes** with `--apply` (rewrites the PDF; never `metadata.db`) | `exiftool`, `ebook-meta` |
 
-Write capability is the reason these live outside the package: `compress_pdf.py`, `reconcile_file_metadata.py --apply`, and `fetch_library_codes.py --apply` mutate things, which the `cquarry` core forbids. Keeping them adjacent but separate preserves the toolkit's read-only promise.
+Write capability is the reason these live outside the package: `compress_pdf.py`, `stamp_pdf.py --apply`, `reconcile_file_metadata.py --apply`, and `fetch_library_codes.py --apply` mutate things, which the `cquarry` core forbids. Keeping them adjacent but separate preserves the toolkit's read-only promise.

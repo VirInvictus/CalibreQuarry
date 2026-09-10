@@ -1,3 +1,74 @@
+# CalibreQuarry — Patch Notes
+
+# 3.34.0 (2026-09-10)
+
+### Batch C: the read surface, the tests, and the docs (Phase 18 closes)
+
+- **The TUI respects the saved library.** `_resolve_db_for_tui` consulted
+  a hard-coded default list that started with a CWD-relative
+  `metadata.db` and never read the saved config, so launching the TUI
+  from any directory with a stray `metadata.db` overwrote the shared
+  config and the next CLI run read the wrong library. The saved path
+  wins whenever it exists; discovery binds only when nothing is saved.
+- **Failures exit like failures.** A bad `--search` expression exits 1
+  (matching `--exportlt --search`, which always did); an unknown `--wing`
+  exits 2 instead of leaving a stale catalog file standing in for a
+  fresh one; and exportlt's self-check verdict ("do not upload") reaches
+  the exit code instead of dying behind an unconditional 0 (its raw-SQL
+  half was already retired by the cquarry 1.17 `export_rows` adoption).
+- **Read-mode papercuts.** `--export-annotations`/`--exportlt`/
+  `--format-stats` join the mutually exclusive read-modes group
+  (`--format-stats` had been declared in the write-verbs group;
+  `--untagged` stays a `--book` modifier on purpose); negative `--recent`
+  is refused with exit 2; a corrupt epoch renders raw instead of killing
+  `--reading-progress`/`--book`; the TUI Entity Browser prints a readable
+  refusal for an unknown kind instead of paging a traceback; plugin
+  values ride along in json/csv/ai serialization instead of vanishing;
+  and a directory export target that exists as a file is refused in
+  prose.
+- **The suite runs the tests, and the scripts run at all.**
+  `run_tests.sh` executes the hermetic unittest suite before the
+  real-library smoke (following the documented command used to deliver
+  smoke-only coverage). New `tests/test_instruments.py` drives the actual
+  companion scripts through the actual seam adapters, and immediately
+  caught a genuine bug: `check_pdf.py` referenced `args.quiet` without
+  declaring the flag, so the PDF/DJVU battery crashed on every
+  invocation, invisible for exactly as long as its callers ignored exit
+  codes and empty reports. The flag is declared. Suite hygiene: the
+  mid-file `unittest.main()` guards that silently truncated direct runs
+  moved to true EOF (`test_scripts.py` had 1028 lines after its guard),
+  and `test_manifest.py`'s real-library path literal is synthetic.
+- **Scripts housekeeping.** `fix_cq_lint.sh` (the sweep's only delete)
+  is gone; `taxonomy.example.yaml` moved to `docs/` with the README
+  pointer updated; `comments_census.py`'s `--json` help no longer claims
+  a runner that never consumed it. Two deferrals carry dated notes in
+  the roadmap: the six drifting `_SCHEMA` fixtures still want a shared
+  builder, and `db_util`'s consolidation waits because the private
+  `connect_ro` copies have genuinely drifted (reconcile needs `Row` rows
+  and its own temp layout); the `audit_conversion_overrides` ->
+  `--audit` promotion is now its own open box.
+- **Docs truth.** The README troubleshooting line claiming saved searches
+  "match nothing" is corrected (they evaluate, cquarry 1.1+); the search
+  engine is named where it lives (`cquarry.search`, not a nonexistent
+  local file) and the "zero dependencies" claim is replaced with the real
+  dependency set; the six botched "minimal-dependency (uses tqdm)"
+  artifacts are cleaned. The spec absorbs the seven shipped modes its
+  table never listed (`--book`, `--entities`, `--reading-progress`,
+  `--columns`, `--info`, `--exportlt`, `--format-stats`),
+  `--set-pubdate`/`--clear-pubdate` join the verb list, and §5's closing
+  sentence names all four writer scripts. The README grows a run-verbs
+  prose section (the file-side consents: `--stamp`, `--apply-lossy`,
+  `--quarantine`; `--bindery-report`; `--audience`) and companion script
+  sections for the five tools that had none, while the full help dump is
+  regenerated from the live parser (`--yes` gone, `--quarantine` in).
+  Housekeeping: Phase 17's seven malformed double checkboxes normalized,
+  the patchnotes H1 moved to the top of the file, the pre-3.14 `## vX.Y.Z`
+  entry headings normalized to the dominant `# X.Y.Z` style, and the
+  README test count made current.
+- Phase 18's 26 boxes are now 25 closed and 1 open (the
+  `audit_conversion_overrides` promotion, opened from the sweep's scripts
+  verdict). Suite: 362 → 373 tests.
+
 # 3.33.0 (2026-09-09)
 
 ### Batch B: the run verbs and the write path (Phase 18)
@@ -461,14 +532,12 @@
 - **Refactor**: Adapted to `vir-tui` v2.0.0 public API and decoupled menu fallbacks.
 - **Fix**: The non-curses fallback text menu now functions properly for CalibreQuarry by passing custom `letter_keys` and `aliases` during initialization.
 
-# CalibreQuarry — Patch Notes
-
-## v3.13.0 (2026-08-23)
+# 3.13.0 (2026-08-23)
 
 ### Changed
 - **TUI Extraction (`vir-tui`):** Extracted the generic CLI formatting (`core.py`) and curses menu primitives (`tui.py`) into the `vir-tui` shared repository. CalibreQuarry now depends on `vir-tui` for all UI logic, ensuring perfect parity and centralized updates for all interactive prompts across the workspace.
 
-## v3.12.0 (2026-08-23)
+# 3.12.0 (2026-08-23)
 
 ### Changed
 - **Shared Library Extraction (`cquarry`):** Extracted the core Calibre database reading layer and search expression grammar into a new, standalone Python library (`cquarry`). CalibreQuarry now depends on this shared library for all data access and search resolution, ensuring 100% parity across all tools in the workspace (like Hermitage and Wings).
@@ -477,18 +546,18 @@
 
 **UI Upgrade:** CLI scripts now feature rich output (ANSI formatting, `tqdm` progress bars, and a clear summary block). The project is no longer strictly stdlib-only and now depends on `tqdm`.
 
-## v3.10.1 (2026-08-14)
+# 3.10.1 (2026-08-14)
 
 ### Fixes
 
 **CI Configuration & Code Closures.** The GitHub Actions pipeline (`ruff check`) failed because of several B023 late-binding closures inside `tui.py` which were unnoticed by the global configuration. Fixed those closures and added a test (`test_version.py`) to prevent version drift between `pyproject.toml`, `config.py`, and `VERSION` files.
 
-## v3.10.0 (2026-08-11)
+# 3.10.0 (2026-08-11)
 
 ### Features
 
 **LibraryThing Export Integration.** Ported the standalone `export_librarything.py` script natively into `cquarry`. You can now use the `--exportlt` flag to generate LT-formatted CSVs directly. Crucially, this can be combined with `--search` to export only specific subsets of your library (e.g., `--search "date:>2026-08-05" --exportlt`), making targeted updates significantly easier. The export fully handles LibraryThing data quirks, such as folding ISBN-10 to ISBN-13, expanding translators into individual tags, clearing sentinel dates, and breaking output into manageable 500-book chunks split by "Read" vs "Unread" statuses.
-## v3.9.2 (2026-08-09)
+# 3.9.2 (2026-08-09)
 
 A bug, maintenance and improvement sweep across the package and all seven companion scripts. Eight fixes, three additions, four cleanups, every one pinned by a regression test. The suite grows from 243 to 273 tests.
 
@@ -522,7 +591,7 @@ A bug, maintenance and improvement sweep across the package and all seven compan
 
 `audit_epub.py` extracted each book's rendered text twice under `all`: `emptytext` built it per spine document and `ocr` rebuilt the same string, which is the expensive half of a pass whose entire purpose is touching each EPUB once. It is now computed once per book and shared. Two stale documentation references to `validate_library.py`, a script that is not in this repository, now point at `validate_metadata.py`; `audit_epub.py`'s usage line said "all three audits" when there have been four since v3.6.0. `audit_drm.py` imported `sqlite3` inside a function while importing everything else at module scope, and `stats.py` carried a conditional whose two branches computed the same value.
 
-## v3.9.1 (2026-08-08)
+# 3.9.1 (2026-08-08)
 
 `audit_isbns.py` counted any labelled ISBN as the book's own. Books quote other books' ISBNs constantly, and one citation is indistinguishable from a self-identification if you only count numbers, so a handful of famous false accusations followed: *The Atrocity Archives* names *The New Hacker's Dictionary*'s ISBN in a glossary entry, *Metamagical Themas* lists one among Hofstadter's self-referential joke titles, and *C++ Primer Plus* advertises six other Sams books in its back matter.
 
@@ -532,7 +601,7 @@ The fix is to require corroboration rather than to enumerate the ways a citation
 
 Both directions are now pinned by tests carrying the real passages. 243 tests.
 
-## v3.9.0 (2026-08-08)
+# 3.9.0 (2026-08-08)
 
 A new companion script, `audit_isbns.py`, and the first new capability since the v3.8 sweep. It answers a question nothing else in the Calibre ecosystem asks: does the ISBN stored against a book actually identify that book? Calibre downloads metadata but never re-examines what it stored, so a wrong ISBN stays invisible, and an ISBN is what other systems key on when you hand them a catalogue.
 
@@ -560,7 +629,7 @@ Also documented: **the printed ISBN can itself be wrong**, which is the limit of
 
 Runs: 121 books in 15s on one wing and 468 in 63s on another, both with zero severe findings; 6,783 in about 15 minutes across the library. The suite grows from 208 to 237 tests, with the real-world classifications pinned so a future refactor that silently reclassifies them fails loudly.
 
-## v3.8.1 (2026-08-07)
+# 3.8.1 (2026-08-07)
 
 A full-repository bug, maintenance, and documentation sweep: the package, all seven companion scripts, the tests, and every doc. The package core came out clean (one micro-refactor: `_num_predicate` in `search.py` returned a two-tuple whose second element nothing read; it now returns just the predicate). The scripts yielded nine real fixes, every one now pinned by a regression test. The suite grows from 195 to 208 tests, and `fetch_library_codes.py` and `validate_metadata.py` gain their first tests.
 
@@ -590,7 +659,7 @@ A full-repository bug, maintenance, and documentation sweep: the package, all se
 - All seven scripts are executable now (five carried a shebang without the bit; the documented `python3 scripts/...` invocation is unchanged).
 - Docs drift closed across the board: `spec.md` §5 gains the missing `fetch_library_codes.py` row and the `--review` half of `spot_check.py` (and now says three scripts write, not two); `roadmap.md` gains Phase 7 recording the v3.7.0–v3.8.0 companion work; the README's test-suite section describes all seven test files instead of the original two; `CLAUDE.md`'s architecture tree adds `audit_drm.py`, `spot_check.py`, `modes/tags.py`, and the five test files it didn't list, and renames the long-gone `audit_epub_content.py` to `audit_epub.py`.
 
-## v3.8.0 (2026-08-02)
+# 3.8.0 (2026-08-02)
 
 **New companion script `fetch_library_codes.py`: derive Library of Congress Classification codes from the LoC SRU catalogue and store them as identifiers.** Written after the existing Calibre plugin for this job, "Library Codes - SRU", was diagnosed as unable to do it at all.
 
@@ -616,7 +685,7 @@ This is a latent bug rather than a new one, and it went unfound because nothing 
 
 One deviation worth recording: the XML comes from a plain-HTTP endpoint and is parsed with `xml.etree.ElementTree`. `defusedxml` is the conventional hardening and is not an option in a stdlib-only project, so the response is instead capped at 8 MB before parsing, which bounds the entity-expansion exposure without a dependency. ElementTree does not resolve external entities, so there is no XXE path.
 
-## v3.7.1 (2026-07-31)
+# 3.7.1 (2026-07-31)
 
 **`spot_check.py` reported a complete book as `EPUB_EMPTY_SPINE` when the package used the legacy OEB 1.0 namespace.** `check_epub` resolved the manifest and spine with a hardcoded `{"o": "http://www.idpf.org/2007/opf"}`, so any package declaring `http://openebook.org/namespaces/oeb-package/1.0/` instead (OverDrive-era conversions) matched nothing at all: no manifest, no spine, and therefore a HARD failure and a nonzero exit code on a book that opens perfectly. Found by the first full-library pass, which flagged exactly one hard failure across 7,339 books, #8048 *Dying Inside*: 31 content documents, 446,083 characters of body text, a spine listing every one of them, and a checker that could not see any of it.
 
@@ -624,7 +693,7 @@ Manifest items and spine itemrefs are now matched by local element name through 
 
 Tests grow to 64 (an OEB 1.0 package resolves its manifest and spine).
 
-## v3.7.0 (2026-07-31)
+# 3.7.0 (2026-07-31)
 
 Three `spot_check.py` correctness fixes and one new advisory flag, all found by running the checker against the 7,339-book reference library and then auditing what it did not catch.
 
@@ -646,7 +715,7 @@ Measured honestly on the reference library: **22 flagged out of 7,339, of which 
 
 Tests grow to 63 in `tests/test_scripts.py` (mojibake lead-byte coverage with the Portuguese and French negatives, entity decoding and the stub-gate skew it caused, and truncation detection with its proper-noun, URL, and complete-prose negatives).
 
-## v3.6.0 (2026-07-03)
+# 3.6.0 (2026-07-03)
 
 ### New Features
 
@@ -658,7 +727,7 @@ Five false-positive idioms found during validation are guarded explicitly: parag
 
 Hand-validated against the full 4,605-EPUB reference library, every flagged book inspected: 105 flagged, 104 confirmed damage, one borderline residue (display quotes publisher-styled as plain paragraphs, indistinguishable without CSS). Documented out of scope: character-substitution errors ("sonic" for "some") need a wordlist the stdlib-only contract rules out, and damage whose signature is word truncation or whitespace corruption rather than paragraph splitting. Tests grow to 60 in `tests/test_scripts.py` (split detection, dialogue-fragment and scene-break non-splits, image-interrupted pairs, style-vs-damage discrimination, threshold boundaries, and an `all` run including the new analyzer).
 
-## v3.5.0 (2026-07-02)
+# 3.5.0 (2026-07-02)
 
 The persistent-curses-screen rework, closing the last item in the roadmap's "Port from the Lattice TUI audit" section (Lattice T7, shipped there as v4.10.0). Purely a lifecycle change; no menu, prompt, or mode behavior differs.
 
@@ -670,7 +739,7 @@ The persistent-curses-screen rework, closing the last item in the roadmap's "Por
 
 `tests/test_tui.py` grows to 29 cases; the session lifecycle was additionally verified end-to-end under a pty (alternate-screen count, degraded startup on an unknown `TERM`, and a full cancel-then-run flow against the live library).
 
-## v3.4.0 (2026-07-02)
+# 3.4.0 (2026-07-02)
 
 The rest of the Lattice TUI audit ports (roadmap section "Port from the Lattice TUI audit": T2, T4, T6, and the fallback-menu generation). Lattice shipped all of these in its v4.9.0; this release keeps the two shared curses skeletons aligned.
 
@@ -688,19 +757,19 @@ The rest of the Lattice TUI audit ports (roadmap section "Port from the Lattice 
 
 `tests/test_tui.py` grows from 7 to 24 cases, pinning all of the above.
 
-## v3.3.2 (2026-07-01)
+# 3.3.2 (2026-07-01)
 
 ### Fixes
 
 **TUI hardening ported from the Lattice TUI audit (2026-07-01).** `cquarry/tui.py` shares its curses skeleton with Lattice's; the two carry-overs from that audit's high-severity findings land here (roadmap section "Port from the Lattice TUI audit", items H7 and H6's exception-boundary half). First: a curses init failure no longer reads as Quit. On capability-poor terminals (`TERM=vt100`, dumb terminals) the color setup or `curs_set` raised `curses.error`, which the menu loop treated as the user quitting, so the TUI silently exited 0 even though the text fallback menu works. Cosmetic capabilities are now non-fatal (a monochrome TUI beats a dead one), and a real `curses.wrapper` failure flips the session to the text fallback menu instead of exiting. Second: `_run_with_capture` now has an exception boundary. A mode error used to escape as a raw traceback and lose the captured output; it is now paged under an `[Error]` heading with the traceback plus whatever was captured, and Ctrl-C pages a `[Cancelled]` notice the same way. New `tests/test_tui.py` (7 cases) pins both behaviors. The remaining Lattice carry-overs (Esc-cancels-prompt, `~` expansion in output prompts, generated fallback menu) stay on the roadmap until their Lattice counterparts land.
 
-## v3.3.1 (2026-06-30)
+# 3.3.1 (2026-06-30)
 
 ### Fixes
 
 **`audit_drm.py` no longer flags a freed EPUB on a leftover marker file.** v3.3.0 treated the mere presence of `META-INF/rights.xml` (Adobe ADEPT) or `sinf.xml` (Apple FairPlay) as DRM. But those are token/voucher files, not the lock itself: the actual lock is content encryption, which a DRM'd EPUB records in `encryption.xml` against its XHTML. When a book is freed, the content is decrypted but the marker can stay behind, so a bare marker with no content encryption is a residual artifact, not a locked book; it reads and embeds fine. The first whole-library sweep surfaced exactly one such case (Warhammer *Helsreach*: a `sinf.xml`, no `encryption.xml`, 37 plain-XHTML chapters), which is the same residual-artifact shape as the PDF that motivated the tool. EPUB classification now keys on actual content encryption (`encryption.xml` with non-font entries) and names the scheme from whichever marker is present; a standalone marker is reported BENIGN as a "residual DRM marker". PDFs are unchanged: a residual handler dictionary there still breaks metadata embedding, so it is still flagged. With this fix the library's real DRM count is 48 (all recoverable PDF ADEPT dictionaries), with the lone FairPlay EPUB correctly cleared. Tests extended to 21 cases (residual markers benign; markers plus encrypted content still DRM).
 
-## v3.3.0 (2026-06-30)
+# 3.3.0 (2026-06-30)
 
 ### New Features
 
@@ -710,31 +779,31 @@ The design priority was not detecting encryption; it was not crying wolf. Two be
 
 The first whole-library sweep (6,651 files) found 50 DRM-locked files (49 Adobe ADEPT, 1 Apple FairPlay), with 135 benign font-obfuscation/permission cases correctly cleared and one early false positive fixed before release: five EPUBs whose Adobe `#RC` font obfuscation targets `fonts/*.dat` were initially misread as encrypted content, which is what drove the algorithm-or-target rule above. Ships with a unittest suite (`tests/test_audit_drm.py`, 19 cases) building zip, PDF-byte, and PalmDB fixtures for each format and verdict.
 
-## v3.2.1 (2026-06-25)
+# 3.2.1 (2026-06-25)
 
 ### Fixes
 
 **`reconcile_file_metadata.py --repair-pdf` now deletes the `.~qpdf-orig` backup qpdf leaves behind.** `qpdf --replace-input`, used to rebuild a broken cross-reference table before re-embedding, writes the pre-repair original to `<name>.~qpdf-orig` beside the file and never removes it. Across many reconcile passes these full-size copies accumulated inside the library tree, which is the worst place for them: Calibre scans that tree, and each one is a complete duplicate PDF. A sweep of one library turned up 21 such files totalling 403 MB. `embed_pdf` now unlinks the backup as soon as qpdf reports success (return code 0 or 3), before retrying the embed; a missing backup is a no-op, so the change is safe whether or not qpdf wrote one. Regression tests mock the exiftool/qpdf boundary to assert the backup is removed after a successful repair and that an absent backup does not raise. Pre-existing strays from older runs are not cleaned by the tool; remove them once with `fd -H '\.~qpdf-orig$' "<library>" -X rm`.
 
-## v3.2.0 (2026-06-23)
+# 3.2.0 (2026-06-23)
 
 ### New Features
 
 **`audit_epub.py emptytext` now flags partial / placeholder exports (new PARTIAL verdict).** The whole-book character count missed a failure mode: a DRM-locked or sample export where most chapters are an identical "content unavailable" placeholder while one or two real chapters carry enough text to clear the THIN floor, so the book validates, repairs clean, and reads as full-length to the old total-char check. The canonical case was a BookShout export of *Johannes Cabal: The Fear Institute*, where 15 of 17 chapters were the same 138-char "something went wrong loading... bookshout.com" stub; even after structural repair to zero epubcheck fatals it stayed a 2-chapter sample. The analyzer now flags PARTIAL when a known DRM-placeholder signature appears anywhere in the spine, or when the same short stub (12 to 600 chars) repeats across at least 3 spine documents and at least 30% of the spine. PARTIAL is a real defect (counts as FOUND, exit 1, needs re-sourcing), distinct from the advisory THIN. The false-positive guard is the per-document distribution: a well-made book full of small but DISTINCT section dividers does not trip it (only repeated-identical stubs do), so the three full novels in the batch that surfaced this stayed OK. Library and directory modes both report it.
 
-## v3.1.1 (2026-06-23)
+# 3.1.1 (2026-06-23)
 
 ### Fixes
 
 **`audit_epub.py` now percent-decodes spine hrefs, fixing false EMPTY verdicts.** OPF manifest hrefs are IRIs, so a content document whose archive filename contains a reserved character (commonly `!`, written `%21`; Sigil and calibre emit these routinely) was matched against the raw zip namelist undecoded, failed to resolve, and dropped out of the spine. A text-full book whose every chapter file had such a name resolved to zero readable spine documents and was reported EMPTY: the exact false positive hit on Martha Wells's *The Serpent Sea* (every `split_NNN.html` was named `CR!RT...`). The resolver now decodes the percent-encoding (UTF-8, with multi-byte runs decoded together) and strips any `#fragment` before matching the namelist. Stdlib-only via a small `re`-based decoder (`_pct_decode`); no urllib dependency added. The fix lands in the shared spine resolver, so all three analyzers (`content`, `pagenumbers`, `emptytext`) benefit. Regression tests cover the decoder (reserved char, multi-byte UTF-8, invalid escape) and an end-to-end encoded-spine EPUB.
 
-## v3.1.0 (2026-06-20)
+# 3.1.0 (2026-06-20)
 
 ### Changes
 
 **The three EPUB-content audits are merged into one `scripts/audit_epub.py`.** `audit_epub_content.py`, `audit_epub_pagenumbers.py`, and `audit_epub_emptytext.py` shared the same spine resolution, library/directory dual-mode, read-only contract, and exit codes, and differed only in the per-book verdict; they are now three analyzers behind one tool, selected by subcommand: `audit_epub.py content|pagenumbers|emptytext|all [directory]`. The detection logic of each is unchanged (same thresholds, same results). Two wins beyond removing the duplicated scaffolding: `all` opens each EPUB once and runs all three analyzers in a single decompression pass (the expensive part is decompression, so this is much faster than three separate full-library runs), and there is now one spine resolver to maintain instead of three slightly-diverging copies. The old script names are removed; update any caller to `audit_epub.py <mode>`. The `--min-chars` / `--thin-chars` knobs (emptytext) carry over.
 
-## v3.0.3 (2026-06-20)
+# 3.0.3 (2026-06-20)
 
 ### New Features
 
@@ -744,13 +813,13 @@ The first whole-library sweep (6,651 files) found 50 DRM-locked files (49 Adobe 
 
 **`spot_check.py` no longer flags OCaml and NCurses as case garble.** The intercaps allowlist (`_CASE_OK`) now includes `OCaml` and `NCurses` alongside `SQLite`, `QBasic`, and the rest, so legitimate library titles stop tripping the advisory case-garble heuristic.
 
-## v3.0.2 (2026-06-14)
+# 3.0.2 (2026-06-14)
 
 ### New Features
 
 **`scripts/audit_epub_pagenumbers.py`: find print page numbers baked into EPUB body text.** Bad PDF/OCR-to-EPUB conversions capture the print page number (and often the running header) as a literal paragraph in the flow instead of real EPUB pagination, so it reflows into the middle of a sentence ("where the hay cart 16 was taking him"). The detector reads each book's blocks in spine order and flags a number only when it genuinely interrupts prose: a lowercase continuation after it, a word split across it (the previous block ends in a hyphen), or it abuts a repeated running header/footer. Section and chapter numbers (which open the next block with a capital) and endnote/footnote numbers and chronology years are left alone. Library mode (DB-driven, `mode=ro`) and directory mode (vet downloads before import), mirroring `audit_epub_content.py`. Validated by hand against the full reference library: 21 flagged, every one a true positive; the false-positive tail (an experimental footnote-poem, a scraped web-serial's vote counts, placeholder section labels) all fell under the hit-count or book-span floors. It also surfaces piracy watermarks and bad OCR scans that ride along with the page-number cruft.
 
-## v3.0.1 (2026-06-12)
+# 3.0.1 (2026-06-12)
 
 ### New Features
 
@@ -772,7 +841,7 @@ The first whole-library sweep (6,651 files) found 50 DRM-locked files (49 Adobe 
 
 Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; unused loop variable removed in wing-overlap analytics; `re.Scanner` access satisfied for type checkers; new test coverage for the backup guard, library-root resolution, and cache isolation (suite: 87 tests).
 
-## v3.0.0 (2026-05-26)
+# 3.0.0 (2026-05-26)
 
 ---
 
@@ -808,7 +877,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 **Portable test suite.** `tests/test_search.py` and `tests/test_helpers.py` cover the parser grammar (adapted from Calibre's own tests), the matcher against an in-memory provider, a full-stack integration test on a temporary SQLite fixture, and the rating/series/image helpers, all without needing a live Calibre library.
 
-## v2.6.0 (2026-05-03)
+# 2.6.0 (2026-05-03)
 
 ---
 
@@ -818,7 +887,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.5.0 (2026-04-21)
+# 2.5.0 (2026-04-21)
 
 ---
 
@@ -832,7 +901,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.4.1 (2026-04-16)
+# 2.4.1 (2026-04-16)
 
 ---
 
@@ -845,7 +914,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.4.0 (2026-04-16)
+# 2.4.0 (2026-04-16)
 
 ---
 
@@ -856,7 +925,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.3.0 (2026-04-16)
+# 2.3.0 (2026-04-16)
 
 ---
 
@@ -869,7 +938,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.2.0 (2026-04-16)
+# 2.2.0 (2026-04-16)
 
 ---
 
@@ -879,7 +948,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.1.0 (2026-04-16)
+# 2.1.0 (2026-04-16)
 
 ---
 
@@ -891,7 +960,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.0.1 (2026-04-12)
+# 2.0.1 (2026-04-12)
 
 ---
 
@@ -901,7 +970,7 @@ Exception chaining (`raise ... from`) throughout `search.py` and `helpers.py`; u
 
 ---
 
-## v2.0.0 (2026-04-12)
+# 2.0.0 (2026-04-12)
 
 ---
 
@@ -925,7 +994,7 @@ CalibreQuarry has been refactored from a single ~1450-line monolithic script (`c
 
 ---
 
-## v1.0.4 (2026-04-08)
+# 1.0.4 (2026-04-08)
 
 ---
 
@@ -949,7 +1018,7 @@ CalibreQuarry has been refactored from a single ~1450-line monolithic script (`c
 
 ---
 
-## v1.0.3 (2026-04-04)
+# 1.0.3 (2026-04-04)
 
 ---
 

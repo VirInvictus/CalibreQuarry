@@ -69,6 +69,22 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
 | **Version** | `--version` | Show version and exit |
 
+### The acquisition run verbs (Phase 17)
+
+`run phase1 DIR` vets a downloads directory and emits the batch manifest;
+`run sign --manifest F` seals it for phase 2; `run phase2 --manifest F
+--backup-dir D` imports the approved files as one transaction; `run
+phase3 --manifest F [--answer-file A]` curates and mechanically finishes
+the pass. The file-side consents phase 1 accepts are `--stamp` (drive
+stamp_pdf on PDFs whose filename parses), `--apply-lossy` (bindery's
+gated content repairs), and `--quarantine` (move true DRM hits into
+`_quarantine/`; without it the verdict is only recorded). `--bindery-report
+FILE` also captures bindery's raw phase-1 JSON. Phase 2 stamps `#audience`
+(`--audience`, default `Brandon`) and `#source` from the manifest's
+provenance, and every run of it takes a timestamped backup in
+`--backup-dir`. All of it needs the repository checkout (the verbs drive
+`scripts/`, which the wheel does not carry).
+
 Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search` (and emits the set writes' machine-readable report as JSON), `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout (and no file output can ever be the database itself: the read surface refuses `metadata.db` and its sqlite sidecars before anything opens, and stages every file through a temp copy so a failed report never truncates), `--quiet` suppresses decorative output.
 
 Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager (supporting `/` search and `n`/`N` match jumping) or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions, and a corrupt or foreign database at the configured path is reported in prose and re-prompted, never a traceback. Its menu covers every read mode above plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats, all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
@@ -309,7 +325,7 @@ Tag taxonomy (392 tags):
 
 ## Search Syntax & Virtual Library Resolution
 
-CalibreQuarry (cquarry-cli) ships a pure-Python search engine (`src/cquarry/search.py`) that ports Calibre's grammar and matching semantics as closely as the standard library allows. The same engine resolves Virtual Libraries (Wings) directly from the `preferences` table and powers the `--search` CLI mode, so your existing wing definitions work unchanged.
+CalibreQuarry's search engine lives in the `cquarry` library (`cquarry.search`) and ports Calibre's grammar and matching semantics as closely as the standard library allows. The same engine resolves Virtual Libraries (Wings) directly from the `preferences` table and powers the `--search` CLI mode, so your existing wing definitions work unchanged.
 
 ```
 # Virtual Library Definitions
@@ -333,9 +349,9 @@ cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'
 * **Virtual Library Referencing**: `vl:"Wing Name"` cross-references an existing Wing (recursion is detected and reported).
 * **Empty query**: an empty `--search ''` returns the whole library, matching Calibre.
 
-#### Parity scope (minimal-dependency (uses tqdm) deviations)
+#### Parity scope (deliberate deviations)
 
-Matching is near-complete but not bit-for-bit identical to Calibre, by design: CalibreQuarry (cquarry-cli) has zero dependencies, while a few of Calibre's behaviors are tied to third-party libraries.
+Matching is near-complete but not bit-for-bit identical to Calibre, by design: the engine is pure stdlib Python, while a few of Calibre's behaviors are tied to third-party libraries.
 
 * `~` regex uses Python's stdlib `re`, not Calibre's `regex` module (`\X`, `VERSION1` semantics differ).
 * Accent/contains folding uses `unicodedata` (NFKD), not ICU, so it is accent- and case-insensitive but not punctuation-insensitive.
@@ -375,7 +391,7 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 ### Automated Test Suite
 
-The whole suite runs without a Calibre library (stdlib `unittest`, 213 tests):
+The whole suite runs without a Calibre library (stdlib `unittest`, 373 tests):
 
 - **Modes** (`tests/test_modes.py`, `tests/test_read_modes.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, the audit's cover checks, and the read-mode renderers, all against a temporary database.
 - **Write flows** (`tests/test_write_flow.py`, `tests/test_write_expand.py`, `tests/test_write_reporting.py`, `tests/test_set_writes.py`): the write verbs against a temporary database, including batch all-or-nothing rollback, honest applied/already-so reporting, and the set-mode sources, dry-run/apply lifecycle, manifest-only rating carve-out, and banned-label refusals.
@@ -388,7 +404,7 @@ Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same co
 **A search or wing returns nothing.**
 - Tags are anchored-hierarchical: `tags:Fic` matches `Fic` and `Fic.*`, but not a tag that merely contains "fic" in the middle. Use the full dotted path, or `=` for an exact leaf (`tags:"=Fic.SciFi.Cyberpunk"`).
 - Check the wing name with `cquarry --wings`; names are case-sensitive and must match Calibre exactly. Quote names with spaces: `--wing "Sci-Fi Wing"`.
-- A field prefix that Calibre supports but cquarry does not (templates `@...:`, saved searches `search:`) matches nothing. See [Parity scope](#parity-scope-minimal-dependency (uses tqdm)-deviations).
+- Template fields (`@...:`) are tokenized but not evaluated. Saved searches (`search:"Name"`) DO work; see [Parity scope](#parity-scope-deliberate-deviations).
 
 **"Database not found" or it points at the wrong library.**
 - Pass `--db /path/to/metadata.db` (or a directory containing it). The resolved path is saved to `~/.config/cquarry/config.json`; delete that file or pass `--db` to reset it.
@@ -659,7 +675,7 @@ set writes (dry-run by default; --apply requires --backup-dir and Calibre closed
 
 ## Companion scripts
 
-The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are minimal-dependency (uses tqdm) Python; some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
+The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are stdlib-only Python (plus tqdm for progress bars); some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
 
 ### `compress_pdf.py` — shrink oversize PDFs (writes)
 
@@ -778,6 +794,48 @@ FAIL: 2 error(s), 2 warning(s).
 A `taxonomy.json` next to the library, the script, or the working directory is loaded automatically; `taxonomy.example.json` is a template and is never auto-loaded.
 
 Exit codes: `0` clean (warnings do not fail), `1` one or more errors, `2` setup error (no `metadata.db`, or a bad taxonomy file).
+
+### `stamp_pdf.py`: pre-stamp PDF metadata for clean imports (writes with `--apply`)
+
+Obscure PDFs (TTRPG modules, scans, indie releases) often carry no embedded
+metadata, so Calibre imports the FILENAME as the title. This tool stamps
+Title/Author/Publisher (and ISBN via keywords, so phase 2's metadata
+download can match) before import; it verifies with Calibre's own
+`ebook-meta` and prints `STAMP_FAILED` rather than fighting a stubborn XMP
+store. Dry-run by default; `--apply` requires `--backup-dir` OUTSIDE the
+library tree and backs up every original first. The phase-1 skill owns the
+research rules: never stamp from the filename or from memory, and prefer
+no ISBN over a wrong one.
+
+### `screen_duplicate.py`: screen downloads for duplicates (read-only)
+
+The one-pass duplicate screen the acquisition pathway uses: each file's
+embedded metadata is read with Calibre's `ebook-meta`, matched against the
+library (exact ISBN first, then normalized title + first author) and
+within the batch, and printed as comparison columns. `--format json` emits
+the bare list of per-file records the `run phase1` seam consumes (only
+records with `library_hits`/`batch_duplicates` are duplicates). Exit codes:
+0 clean, 1 candidates found, 2 setup error. Report-only, always.
+
+### `check_pdf.py`: the PDF/DJVU battery (read-only)
+
+The per-file battery behind `run phase1`: header, page count, `qpdf --check`
+with real-vs-benign classification, fonts, text layer, images. Per-file
+report plus `--json FILE` for the machine shape. Exit codes: 0 clean, 1
+structural findings (the normal trouble outcome, report still written), 2
+a file it could not read at all.
+
+### `comments_census.py`: description-field defect census (read-only)
+
+A standing census over the comments fields: length outliers, HTML junk,
+stub descriptions, and the like, per book with a summary. `--id` restricts
+to specific books; `--json FILE` writes the machine report for scripting.
+
+### `audit_conversion_overrides.py`: list per-book conversion overrides (read-only)
+
+Manual per-book conversion overrides (`conversion_options`) make pipeline
+behavior drift book-by-book; this lists which books carry them so the
+overrides are a decision, not a surprise. `--quiet` prints only the ids.
 
 ### `reconcile_file_metadata.py` — sync DB metadata into book files (writes with `--apply`)
 

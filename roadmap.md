@@ -507,7 +507,7 @@ DB-side pass, verify counts, docs updated). The "bulk edits of ratings" ban is
 interpreted as a ban on library-wide predicates: phase 2's clear is scoped to
 the ids THAT RUN imported, from its own manifest, never a search expression.
 
-- [x] - [ ] **The manifest** (`acquisition-manifest/1`): JSON, one per batch, in the
+- [x] **The manifest** (`acquisition-manifest/1`): JSON, one per batch, in the
       library-local `.claude/manifests/`. Carries per-file verdicts, checks,
       repairs + backup paths, stamps, duplicates + recommendations,
       quarantines, `decisions_needed`, and `approved_for_import`; phase 2
@@ -515,7 +515,7 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       phase 3 consumes it and emits the batch record. Machine-readable
       hand-off between the phases and the calling agent; the prose
       `.claude/project_preimport_*.md` record stays as the human summary.
-- [x] - [ ] **`cquarry run phase1 DIR`**: orchestrates the inventory, `audit_drm.py`,
+- [x] **`cquarry run phase1 DIR`**: orchestrates the inventory, `audit_drm.py`,
       `screen_duplicate.py --format json`, `stamp_pdf.py` driving, quarantine
       moves, and the final report, plus a NEW `scripts/check_pdf.py` standing
       wrapper for the per-file PDF/DJVU battery (header, page count,
@@ -525,15 +525,15 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       as a subprocess for the EPUB slice and also accepts
       `--bindery-report FILE` so the slices can be run peer-style by hand.
       Read-only against `metadata.db`.
-- [x] - [ ] **`--book --format json`**: machine-readable dossier output (cquarry's
+- [x] **`--book --format json`**: machine-readable dossier output (cquarry's
       `get_book_dossier` already composes the dict; `show_book` renders text
       only today). Phase 3's structured input.
-- [x] - [ ] **`scripts/comments_census.py`**: the description mechanical sweep as a
+- [x] **`scripts/comments_census.py`**: the description mechanical sweep as a
       standing tool (`--`, spaced-hyphen dashes, `**`, `<br>`/`<div>` tags,
       non-`<p>` body shape, soft hyphens, zero-width characters, mojibake,
       ligature `?`, exact-duplicate bodies), retiring the inline three-liner
       the skill re-derives every run.
-- [x] - [ ] **`cquarry run phase2 --manifest FILE [--audience ...] [--yes]`**: guard
+- [x] **`cquarry run phase2 --manifest FILE [--audience ...] [--yes]`**: guard
       Calibre closed + `.bak`; import each approved file through cquarry's
       `add_book` (seed title/authors/identifiers/language/pubdate/publisher
       from the manifest stamps; `calibredb add` as the documented fallback if
@@ -549,7 +549,7 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       real curation stays phase 3; and a clobber watch comparing phase-1 stamp
       authors against post-download authors, recorded in the manifest for
       phase 3 to restore from.
-- [x] - [ ] **`cquarry run phase3 --manifest FILE [--answer-file FILE]`**: validate →
+- [x] **`cquarry run phase3 --manifest FILE [--answer-file FILE]`**: validate →
       batch set = manifest ids cross-checked against `find_untagged` → dossier
       fetch (`--book --format json`) → decision gates (tag-by-precedent,
       description curation, field fixes) rendered as prompts on a TTY or
@@ -558,7 +558,7 @@ the ids THAT RUN imported, from its own manifest, never a search expression.
       `bindery run phase3` + `reconcile_file_metadata.py --apply --repair-pdf
       --id` → re-validate to 0 errors → emit the `.claude/project_import_*.md`
       batch record from the manifest.
-- [x] - [ ] **Skill sync (same release, both skills + the library `CLAUDE.md`)**: the
+- [x] **Skill sync (same release, both skills + the library `CLAUDE.md`)**: the
       pathway amendment above; the phase-1 skill names `run phase1` as the
       orchestrated form with its manual command list kept as the appendix; the
       phase-3 skill names `run phase3`; the phase-2 section records the cc6
@@ -667,7 +667,7 @@ that crashes on real input.*
       moved and a manual_repair decision recorded (`run.py:304-311`).
       Quarantine only true DRM hits, gate the move behind a flag. *
       *(Shipped in 3.33.0, 2026-09-09, b96efa1: audit_drm's own is_problem set only (DRM, ERROR); the move gated behind the new --quarantine consent flag; moved_to honest.)*
-- [ ] **Make quarantine and stamping non-destructive (P1).** `_quarantine`
+- [x] **Make quarantine and stamping non-destructive (P1).** `_quarantine`
       moves onto `basename` collisions, destroying the earlier file, and
       records the wrong `moved_to` directory (`run.py:218-223`, `309-311`).
       `--stamp` is a silent no-op: run.py points stamp_pdf's backup dir
@@ -676,6 +676,7 @@ that crashes on real input.*
       excluded from the inventory, so a second run sweeps the backups
       (`run.py:276`, `106`). Collision-checked destinations, backups
       outside the tree, warn on nonzero exits. *
+      *(Shipped in 3.33.0, 2026-09-09, afd9c34: numbered quarantine siblings on basename collision, stamp backups in a dated temp dir outside the tree (which is what makes --stamp actually work), WARNING on stamp failures, both instrument dirs excluded from the inventory.)* *
       *(Shipped in 3.33.0, 2026-09-09, afd9c34: numbered quarantine siblings, temp-dir stamp backups, WARNING on stamp failures, both instrument dirs excluded from the inventory.)*
 - [x] **Close phase 2's accounting holes (P1).** The "never imported twice"
       docstring invariant is unimplemented (only the manifest's own
@@ -780,24 +781,27 @@ that crashes on real input.*
       "Change Database" (which validates only the filename suffix,
       `tui.py:56-66`). *
       *(Shipped in 3.32.0, 2026-09-09, f7729e3: the menu loop probe-opens the db every iteration, Change Database demands a real open before rebinding, and a mid-session sqlite3.Error degrades to the re-prompt; tests/test_tui_degrades.py gives tui.py its first coverage.)*
-- [ ] **The TUI ignores the saved config, then silently rebinds it (P1).**
+- [x] **The TUI ignores the saved config, then silently rebinds it (P1).**
       `_resolve_db_for_tui` consults a hard-coded default list that starts
       with CWD-relative `metadata.db` and never calls `get_db_path()`, so
       launching the TUI from any directory containing a stray metadata.db
       overwrites the shared config and the next CLI run reads the wrong
-      library (`tui.py:139-150`).
-- [ ] **`--exportlt` breaks two contracts (P1).** It is the one frontend-only
+      library (`tui.py:139-150`). *
+      *(Shipped in 3.34.0, 2026-09-10, 0d96450: the saved config wins whenever it exists; discovery binds only when nothing is saved; a test pins no-rebind.)*
+- [x] **`--exportlt` breaks two contracts (P1).** It is the one frontend-only
       violation in the read surface (raw hand-built SQL over link tables,
       no schema degradation: crashes on a pre-`books_pages_link` schema,
       `librarything.py:112-139`), and its self-check verdict is discarded
-      by the CLI: "do not upload" exits 0 (`cli.py:819-822`).
-- [ ] **Search/catalog failures exit 0 (P1).** `--search '((('` prints the
+      by the CLI: "do not upload" exits 0 (`cli.py:819-822`). *
+      *(Shipped in 3.34.0, 2026-09-10, 0d96450 for the verdict half: run_librarything_export's exit code reaches the CLI; the raw-SQL half was already retired by the cquarry 1.17 export_rows adoption (3.31.0).)*
+- [x] **Search/catalog failures exit 0 (P1).** `--search '((('` prints the
       parse error and exits 0 while the same failure under `--exportlt
       --search` exits 1; `--catalog --wing NoSuchWing` exits 0 leaving a
       stale catalog file (`export.py:205-209`, `cli.py:911`,
       `catalog.py:45-46`). Normalize: modes return exit codes; catch
-      `ParseException` specifically.
-- [ ] **Read-mode papercuts:** one corrupt epoch in `last_read_positions`
+      `ParseException` specifically. *
+      *(Shipped in 3.34.0, 2026-09-10, 0d96450: --search parse failures exit 1; unknown wings exit 2 and never leave a stale catalog; write_catalog/run_search_export return codes wired through cli.)*
+- [x] **Read-mode papercuts:** one corrupt epoch in `last_read_positions`
       tracebacks `--reading-progress` and `--book` (milliseconds-epoch
       pattern; `display.py:166`, `detail.py:142`); `--exportlt`,
       `--export-annotations`, `--untagged`, `--format-stats` sit outside
@@ -809,18 +813,20 @@ that crashes on real input.*
       when nothing is Read; the TUI footer claims "Report written to ..."
       when nothing was written; `--plugin-data` is silently dropped by
       `--format json`; `--exportlt` silently deletes matching csv files in
-      the output dir.
+      the output dir. *
+      *(Shipped in 3.34.0, 2026-09-10, 0d96450: --export-annotations/--exportlt/--format-stats joined the exclusive read-modes group (--format-stats out of the write group; --untagged stays a --book modifier by design); negative --recent refused; corrupt epochs render raw; the Entity Browser notifies instead of paging a traceback; plugin values ride in json/csv/ai; a directory target that exists as a file is refused. Remaining by design: the stale-csv sweep is the exporter's documented contract, now fenced behind the output guard's library-root refusal.)*
 
 ### Tests and scripts
 
-- [ ] **Make run_tests.sh actually run the tests (highest-value fix in this
+- [x] **Make run_tests.sh actually run the tests (highest-value fix in this
       audit).** `CLAUDE.md:39` says "Run tests with ./run_tests.sh", but the
       script runs only the 27-command live-library smoke (read-only, exit
       codes only, outputs to /tmp) and zero of the 298 unittest tests;
       anyone following the doc gets smoke-only coverage. Prepend the
       unittest discover line (and merge test_queries.sh's overlapping
-      queries in), or rename it smoke_library.sh and fix the doc.
-- [ ] **Contract-test the run-verb instruments for real.** The whole P0
+      queries in), or rename it smoke_library.sh and fix the doc. *
+      *(Shipped in 3.34.0, 2026-09-10, d29414c: the script runs the unittest suite first, then the smoke; test_queries.sh left standing as the search-query deep-dive it is.)*
+- [x] **Contract-test the run-verb instruments for real.** The whole P0
       class exists because screen_duplicate, bindery, and check_pdf seams
       are mocked in tests; `dispatch_run` (the CLI wiring for every run
       flag) has zero test references. Thin adapters plus tests that invoke
@@ -830,8 +836,9 @@ that crashes on real input.*
       setwrite Calibre-running refusal branch, writeops lock-contention
       mapping, `--commit-per-book` failure semantics, validate_metadata
       (one test gates phase 3's exit code), and all of tui.py (zero
-      coverage; it calls run_write directly, bypassing the pinned path).
-- [ ] **Suite hygiene:** mid-file `unittest.main()` guards silently
+      coverage; it calls run_write directly, bypassing the pinned path). *
+      *(Shipped in 3.34.0, 2026-09-10, d29414c: test_instruments.py drives the real scripts through the real seams (and caught check_pdf's undeclared --quiet); dispatch_run wiring, the phase-2 rollback deferral, stamp failures, fetch-verdict mapping, the setwrite Calibre refusal, the :722 per-book semantics, and the :690 rails all have named tests; tui.py's degrade paths covered in test_tui_degrades. The full-list ambitions (lock-contention mapping, every tui menu path) remain open depth.)*
+- [x] **Suite hygiene:** mid-file `unittest.main()` guards silently
       truncate direct runs in three files (`test_write_flow.py:167`,
       `test_scripts.py:213`, `test_audit_drm.py:230`); six near-identical
       drifting `_SCHEMA` fixture strings want a shared builder;
@@ -839,8 +846,9 @@ that crashes on real input.*
       literal; `fix_cq_lint.sh` is committed junk whose re-run would
       comment out every `try:` in export.py (delete); the two CI skips
       (`/usr/share/dict/words`, ghostscript) mean CI runs fewer assertions
-      than this machine.
-- [ ] **Scripts verdict: everything is alive; nothing to delete except
+      than this machine. *
+      *(Shipped in 3.34.0, 2026-09-10, d29414c: the guards moved to true EOF (test_scripts had 1028 lines after its guard); the real-library literal de-realized; fix_cq_lint.sh deleted. Deferred with a dated note: the shared _SCHEMA builder (six fixtures, each tuned to its suite) and the CI-skip gap (host tools, not code).)*
+- [x] **Scripts verdict: everything is alive; nothing to delete except
       fix_cq_lint.sh.** run.py drives six of them (screen_duplicate,
       audit_drm, check_pdf, stamp_pdf, reconcile_file_metadata,
       validate_metadata); fetch_library_codes, audit_isbns, spot_check,
@@ -851,35 +859,45 @@ that crashes on real input.*
       connect_ro/calibre_running); comments_census claims `--json` is "for
       the phase-3 runner" but run.py never calls it (wire it or reword);
       taxonomy.example.yaml is reference material for another repo
-      (docs/ would be tidier).
+      (docs/ would be tidier). *
+      *(Shipped in 3.34.0, 2026-09-10, d29414c: moved to docs/ with the README pointer updated; comments_census's --json help no longer claims a runner that never consumed it. Deferred with dated notes: the db_util consolidation (the private connect_ro copies have genuinely drifted: reconcile needs Row rows and its own tmp layout) and the audit_conversion_overrides --audit promotion, now its own open box below.)*
 
 ### Documentation
 
-- [ ] **Fix the two user-facing falsehoods in README:** the troubleshooting
+- [x] **Fix the two user-facing falsehoods in README:** the troubleshooting
       line claiming saved searches "match nothing" (they work; the same
       README says so 50 lines earlier, `README.md:391`), and the search
       engine living at the nonexistent `src/cquarry/search.py` plus "zero
       dependencies" (it is the cquarry dependency; three runtime deps,
       `README.md:312`, `:338`). Also clean the six botched
-      "minimal-dependency (uses tqdm)" find-replace artifacts.
-- [ ] **Absorb phases 15-17 into spec.md:** seven shipped modes are absent
+      "minimal-dependency (uses tqdm)" find-replace artifacts. *
+      *(Shipped in 3.34.0, 2026-09-10: the saved-searches line corrected (they evaluate, cquarry 1.1+); the engine path named honestly (cquarry.search) and the zero-dependencies claim replaced with the real set; all six artifacts cleaned.)*
+- [x] **Absorb phases 15-17 into spec.md:** seven shipped modes are absent
       from the Modes table (`--book` incl. `--format json`, `--entities`,
       `--reading-progress`, `--columns`, `--info`, `--exportlt`,
       `--format-stats`); `--set-pubdate`/`--clear-pubdate` are missing from
       the single-book verb list; spec §5 says "three of them write" while
-      its own table lists four.
-- [ ] **Document the run verbs' flag surface in README** (`--stamp`,
+      its own table lists four. *
+      *(Shipped in 3.34.0, 2026-09-10: the seven mode rows added, --set-pubdate/--clear-pubdate in the verb list, §5's closing sentence names all four writers.)*
+- [x] **Document the run verbs' flag surface in README** (`--stamp`,
       `--apply-lossy`, `--bindery-report`, `--audience`, `--yes` are
       file-side consents living only in patchnotes/help) and add companion
       script sections for stamp_pdf, screen_duplicate,
-      audit_conversion_overrides, check_pdf, comments_census.
-- [ ] **Housekeeping:** all seven Phase 17 roadmap boxes carry a malformed
+      audit_conversion_overrides, check_pdf, comments_census. *
+      *(Shipped in 3.34.0, 2026-09-10: a run-verbs prose section names the consents (--quarantine added, --yes deleted since the sweep); the help dump regenerated mechanically; the five missing script sections written.)*
+- [x] **Housekeeping:** all seven Phase 17 roadmap boxes carry a malformed
       `- [x] - [ ]` double checkbox; the patchnotes H1 title sits mid-file
       (entries are prepended above it) and the heading style shifted from
-      `## v` to `# ` around 3.14.0; README's "213 tests" is stale (298).
+      `## v` to `# ` around 3.14.0; README's "213 tests" is stale (298). *
+      *(Shipped in 3.34.0, 2026-09-10: the seven double checkboxes normalized; the H1 moved to the top and the `## vX.Y.Z` headings normalized to `# X.Y.Z`; the README count made current.)*
       *(Note on the checkboxes: leave Phase 17's boxes ticked, the features
       exist; the P0s above are correctness debt on top of shipped
       surface.)*
+
+- [ ] **Promote `audit_conversion_overrides` to a real `--audit` mode** (opened
+      2026-09-10 from the sweep's scripts verdict, deferred from :829):
+      the promote-to-cquarry doctrine applies once the predicate is worth
+      a library home; until then the standalone script stands.
 
 ### Upstream findings (belong to cquarry's own sweep, noted here where found)
 
