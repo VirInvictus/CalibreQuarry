@@ -1166,13 +1166,69 @@ class TestCheckPdf(unittest.TestCase):
         cls.check_pdf = _load("check_pdf")
 
     def test_qpdf_classes(self):
+        # qpdf's documented exit contract (qpdf --help=exit-status): 0
+        # clean, 3 warnings (benign), 2 errors. The class reads the exit
+        # code alone; the 2026-09-10 Redwall run caught the old marker
+        # gate (exit 3 downgraded to errors whenever the marker was not
+        # in stdout) misfiling warning-only files as structural damage.
         classify = self.check_pdf.classify_qpdf
-        self.assertEqual(classify("", 0), "clean")
-        self.assertEqual(classify("operation succeeded with warnings", 3), "warnings")
-        self.assertEqual(classify("invalid xref", 2), "errors")
-        self.assertEqual(classify("", None), "unavailable")
-        # exit 3 WITHOUT the benign line is not downgraded
-        self.assertEqual(classify("boom", 3), "errors")
+        self.assertEqual(classify(0), "clean")
+        self.assertEqual(classify(3), "warnings")
+        self.assertEqual(classify(2), "errors")
+        self.assertEqual(classify(None), "unavailable")
+        self.assertEqual(classify(9), "errors")
+
+    def test_warning_only_file_is_not_structural_damage(self):
+        # The Redwall regression: qpdf writes its warnings (and the
+        # "operation succeeded with warnings" summary) to stderr, so the
+        # old stdout-only marker check never matched. A warning-only scan
+        # must classify as warnings, carry the warning line as the
+        # finding's detail, and never land in the structural count.
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.write(fd, b"%PDF-1.4 fake")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+
+        def fake_run(cmd, timeout=120, **kwargs):
+            if cmd[:2] == ["qpdf", "--check"]:
+                return mock.Mock(
+                    returncode=3,
+                    stdout="",
+                    stderr="WARNING: unknown token while reading object; "
+                    "treating as string\noperation succeeded with warnings",
+                )
+            return mock.Mock(returncode=0, stdout="")
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            report = self.check_pdf.check_file(path)
+        self.assertEqual(report["qpdf_check"], "warnings")
+        kinds = [f["kind"] for f in report["findings"]]
+        self.assertIn("qpdf_warnings", kinds)
+        self.assertNotIn("qpdf_errors", kinds)
+        warning = next(f for f in report["findings"] if f["kind"] == "qpdf_warnings")
+        self.assertIn("unknown token", warning["detail"])
+
+    def test_warning_exit_3_with_silent_stderr_records_benign(self):
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.write(fd, b"%PDF-1.4 fake")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+
+        def fake_run(cmd, timeout=120, **kwargs):
+            if cmd[:2] == ["qpdf", "--check"]:
+                return mock.Mock(returncode=3, stdout="", stderr="")
+            return mock.Mock(returncode=0, stdout="")
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            report = self.check_pdf.check_file(path)
+        self.assertEqual(report["qpdf_check"], "warnings")
+        warning = report["findings"][0]
+        self.assertEqual(warning["kind"], "qpdf_warnings")
+        self.assertEqual(warning["detail"], "benign")
 
     def test_unknown_header_reported_without_subprocess(self):
         import tempfile

@@ -28,8 +28,6 @@ import sys
 _PDF_MAGIC = b"%PDF-"
 _DJVU_MAGIC = b"AT&TFORM"
 
-_BENIGN_QPDF = "operation succeeded with warnings"
-
 
 def _run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess | None:
     try:
@@ -48,14 +46,18 @@ def sniff_header(path: str) -> str:
     return "unknown"
 
 
-def classify_qpdf(output: str, returncode: int | None) -> str:
-    """qpdf --check's three real classes: warnings are benign (qpdf exits
-    3 for warning-only files constantly), errors are not."""
+def classify_qpdf(returncode: int | None) -> str:
+    """qpdf --check's documented exit contract (qpdf --help=exit-status):
+    0 clean, 3 warnings (benign; qpdf exits 3 on warning-only files all
+    the time), 2 errors, anything else errors too. The class reads the
+    exit code alone: qpdf writes its warnings and the "operation succeeded
+    with warnings" summary to STDERR, so gating exit 3 on a marker in
+    stdout (the old behavior) misfiled every warning-only file as errors."""
     if returncode is None:
         return "unavailable"
     if returncode == 0:
         return "clean"
-    if returncode == 3 and _BENIGN_QPDF in output:
+    if returncode == 3:
         return "warnings"
     return "errors"
 
@@ -123,9 +125,7 @@ def check_file(path: str) -> dict:
         return report
 
     proc = _run(["qpdf", "--check", path])
-    verdict = classify_qpdf(
-        proc.stdout if proc else "", proc.returncode if proc else None
-    )
+    verdict = classify_qpdf(proc.returncode if proc else None)
     report["qpdf_check"] = verdict
     if verdict == "errors":
         detail = (proc.stderr or proc.stdout).strip().splitlines()
@@ -133,7 +133,13 @@ def check_file(path: str) -> dict:
             {"kind": "qpdf_errors", "detail": detail[0][:120] if detail else ""}
         )
     elif verdict == "warnings":
-        report["findings"].append({"kind": "qpdf_warnings", "detail": "benign"})
+        # Benign by class, but the warning text itself is the triage
+        # evidence (unknown-token tolerance, linearization drift), so the
+        # report carries the first line instead of a bare "benign".
+        detail = (proc.stderr or proc.stdout).strip().splitlines()
+        report["findings"].append(
+            {"kind": "qpdf_warnings", "detail": detail[0][:120] if detail else "benign"}
+        )
 
     pages = _page_count_pdf(path)
     report["pages"] = pages
