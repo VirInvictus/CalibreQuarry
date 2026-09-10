@@ -486,6 +486,13 @@ def _report_text(
         print(
             f"{head}: {applied} applied, {already} already-so, {len(failures)} failed."
         )
+    elif args.commit_per_book:
+        rb = sorted({r["id"] for r in results if not r.get("book_committed", True)})
+        kept = book_count - len(rb)
+        print(
+            f"Rolled back {len(rb)} of {book_count} book(s); "
+            f"{kept} committed per book ({len(failures)} failure(s))."
+        )
     else:
         print(
             f"Nothing was written: the whole pass rolled back "
@@ -590,21 +597,43 @@ def dispatch_set_write(args, db_path: str) -> int | None:
 
     results: list[dict] = []
     committed = False
+    rolled_back_books: list[int] = []
     try:
         with WritableCalibreDB(db_path) as wdb:
-            with wdb.batch():
-                if args.commit_per_book:
-                    for book_id in ids:
+            if args.commit_per_book:
+                # The escape hatch, for real: each book is its own
+                # outermost batch, so a huge pass bounds the blast radius
+                # of any one failure -- a book whose verbs failed rolls
+                # back alone and the pass continues.
+                for book_id in ids:
+                    start = len(results)
+                    try:
                         with wdb.batch():
                             for _name, label, make in specs:
                                 _run_one(results, wdb, book_id, label, make)
-                else:
+                            if any(r["status"] == "failed" for r in results[start:]):
+                                raise _RollbackNeeded()
+                    except _RollbackNeeded:
+                        rolled_back_books.append(book_id)
+                        for r in results[start:]:
+                            r["book_committed"] = False
+                            if r["status"] in ("applied", "already-so"):
+                                # The book's batch rolled back: those
+                                # verbs wrote nothing and must not read
+                                # as applied in any report.
+                                r["status"] = "rolled_back"
+                    else:
+                        for r in results[start:]:
+                            r["book_committed"] = True
+                committed = not rolled_back_books
+            else:
+                with wdb.batch():
                     for book_id in ids:
                         for _name, label, make in specs:
                             _run_one(results, wdb, book_id, label, make)
-                if any(r["status"] == "failed" for r in results):
-                    raise _RollbackNeeded()
-            committed = True
+                    if any(r["status"] == "failed" for r in results):
+                        raise _RollbackNeeded()
+                committed = True
     except _RollbackNeeded:
         committed = False
     except _sqlite3.OperationalError as e:

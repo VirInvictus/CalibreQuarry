@@ -18,6 +18,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
+from cquarry_cli import writeops
 from cquarry_cli.cli import main
 
 _SCHEMA = """
@@ -530,6 +531,93 @@ class TestApply(_TempDBCase):
                 ]
             )
         self.assertEqual(rc, 2)
+
+
+class TestCommitPerBook(_TempDBCase):
+    """The sweep found --commit-per-book mechanically inert: nested
+    batches joined the outer transaction while the report claimed per-book
+    commits. Each book is now its own outermost batch, a book whose verbs
+    fail rolls back alone, and the report says exactly that."""
+
+    def _flaky_tag(self):
+        real = writeops.action_add_tag
+
+        def flaky(bid, tags, quiet=False):
+            if bid == 2:
+
+                def broken(wdb):
+                    raise ValueError("boom on book 2")
+
+                return broken
+            return real(bid, tags, quiet=quiet)
+
+        return mock.patch.object(writeops, "action_add_tag", side_effect=flaky)
+
+    def test_failing_book_rolls_back_alone_and_the_rest_commit(self):
+        backup_dir = tempfile.mkdtemp(prefix="cquarry_bak_")
+        self.addCleanup(shutil.rmtree, backup_dir, True)
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            self._flaky_tag(),
+            redirect_stdout(out),
+            redirect_stderr(err),
+        ):
+            rc = main(
+                [
+                    "--ids",
+                    "1,2",
+                    "--batch-add-tag",
+                    "Batch",
+                    "--apply",
+                    "--commit-per-book",
+                    "--backup-dir",
+                    backup_dir,
+                    "--format",
+                    "json",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 1)
+        tags = self._tag_map()
+        self.assertEqual(tags[1], ["Batch", "Curated"])  # book 1 committed
+        self.assertEqual(tags[2], [])  # book 2 rolled back alone
+        payload = json.loads(out.getvalue())
+        self.assertFalse(payload["committed"])
+        by_book = {r["id"]: r["status"] for r in payload["results"]}
+        self.assertEqual(by_book[1], "applied")
+        self.assertEqual(by_book[2], "failed")  # the verb itself failed
+        committed_by_book = {r["id"]: r["book_committed"] for r in payload["results"]}
+        self.assertEqual(committed_by_book, {1: True, 2: False})
+
+    def test_all_books_commit_per_book(self):
+        backup_dir = tempfile.mkdtemp(prefix="cquarry_bak_")
+        self.addCleanup(shutil.rmtree, backup_dir, True)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--ids",
+                    "1,2",
+                    "--batch-add-tag",
+                    "Batch",
+                    "--apply",
+                    "--commit-per-book",
+                    "--backup-dir",
+                    backup_dir,
+                    "--format",
+                    "json",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        self.assertTrue(payload["committed"])
+        self.assertEqual(
+            [r["book_committed"] for r in payload["results"]], [True, True]
+        )
+        self.assertEqual(self._tag_map()[2], ["Batch"])
 
 
 class TestRatingCarveOut(_TempDBCase):
