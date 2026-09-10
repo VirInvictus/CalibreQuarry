@@ -14,6 +14,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 from cquarry.db import CalibreDB
 
@@ -156,6 +157,47 @@ class TestSingleVerbBatchWrap(_TempDBCase):
         con.close()
         self.assertEqual(ghosts, 0)
         self.assertEqual(pending, 0)  # no tag without its OPF-regen row
+
+
+class TestParseBookId(_TempDBCase):
+    """int() tolerates underscores; book ids do not ('5_0' is not a book)."""
+
+    def test_underscore_form_is_rejected(self):
+        from cquarry_cli.writeops import parse_book_id
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertIsNone(parse_book_id("5_0"))
+        self.assertIn("BOOK_ID must be an integer", err.getvalue())
+
+    def test_plain_digits_still_parse(self):
+        from cquarry_cli.writeops import parse_book_id
+
+        self.assertEqual(parse_book_id("42"), 42)
+
+
+class TestRemoveBookDryRunReadOnly(_TempDBCase):
+    """The dry run described the removal while holding the read-WRITE
+    handle; it now goes through a read-only connection and never opens
+    WritableCalibreDB at all."""
+
+    def test_dry_run_never_opens_the_write_handle(self):
+        from cquarry.write import WritableCalibreDB
+
+        with mock.patch.object(
+            WritableCalibreDB,
+            "__enter__",
+            side_effect=AssertionError("dry run opened the write handle"),
+        ):
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = main(["--remove-book", "1", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        self.assertIn("DRY RUN", out.getvalue())
+        con = sqlite3.connect(self.db_path)
+        still = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(still, 2)  # nothing removed
 
 
 class TestForbiddenColumnChokepoint(_TempDBCase):

@@ -27,6 +27,9 @@ from collections.abc import Callable
 def parse_book_id(raw) -> int | None:
     """Coerce a CLI/TUI book id to int, or print an error and return None."""
     try:
+        # int() tolerates underscores ("5_0"); book ids do not.
+        if not str(raw).strip().isdigit():
+            raise ValueError(raw)
         return int(raw)
     except TypeError, ValueError:
         print(f"ERROR: BOOK_ID must be an integer, got {raw!r}", file=sys.stderr)
@@ -451,29 +454,31 @@ def action_set_cover(book_id, has_cover, *, quiet=False):
     return _do
 
 
+def _remove_book_dry_run(db_path: str, book_id: int) -> int:
+    """The dry run is a READ: it describes the removal through a
+    read-only connection and never opens the read-write handle (the
+    sweep caught the dry run holding the write lock to print)."""
+    import sqlite3 as _sqlite3
+
+    con = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        row = con.execute("SELECT title FROM books WHERE id = ?", (book_id,)).fetchone()
+        title = row[0] if row else "<unknown>"
+        fmts = [
+            r[0]
+            for r in con.execute("SELECT format FROM data WHERE book = ?", (book_id,))
+        ]
+    finally:
+        con.close()
+    print(
+        f"DRY RUN — would permanently remove book {book_id} "
+        f"({title!r}, formats: {', '.join(fmts) or 'none'})."
+    )
+    print("Re-run with --confirm-remove to delete.")
+    return 0
+
+
 def action_remove_book(book_id, *, confirm=False, quiet=False):
-    if not confirm:
-        # Dry run: describe what would go inside the write transaction.
-        def _describe(wdb):
-            row = wdb.conn.execute(
-                "SELECT title FROM books WHERE id = ?", (book_id,)
-            ).fetchone()
-            title = row["title"] if row else "<unknown>"
-            fmts = [
-                r[0]
-                for r in wdb.conn.execute(
-                    "SELECT format FROM data WHERE book = ?", (book_id,)
-                )
-            ]
-            print(
-                f"DRY RUN — would permanently remove book {book_id} "
-                f"({title!r}, formats: {', '.join(fmts) or 'none'})."
-            )
-            print("Re-run with --confirm-remove to delete.")
-            return 0, "applied"
-
-        return _describe
-
     def _do_remove(wdb):
         # remove_book reports no changed flag; honest status unavailable.
         wdb.remove_book(book_id)
@@ -596,7 +601,9 @@ def op_set_cover(db_path, book_id, has_cover, *, quiet=False) -> int:
 
 
 def op_remove_book(db_path, book_id, *, confirm=False, quiet=False) -> int:
-    return run_write(db_path, action_remove_book(book_id, confirm=confirm, quiet=quiet))
+    if not confirm:
+        return _remove_book_dry_run(db_path, book_id)
+    return run_write(db_path, action_remove_book(book_id, confirm=True, quiet=quiet))
 
 
 # ---------------------------------------------------------------------------
@@ -928,10 +935,14 @@ def _collect_remove_book(args, quiet):
         return []
     book_id = _require_id(args.remove_book)
     confirm = bool(getattr(args, "confirm_remove", False))
+    if not confirm:
+        # None action: the dispatcher runs the read-only dry run instead
+        # of opening the write handle.
+        return [("remove book (dry run)", None)]
     return [
         (
             f"remove book {book_id}",
-            action_remove_book(book_id, confirm=confirm, quiet=quiet),
+            action_remove_book(book_id, confirm=True, quiet=quiet),
         )
     ]
 
@@ -1014,6 +1025,8 @@ def dispatch_write(args, db_path: str) -> int | None:
         return None
     if len(collected) == 1:
         _label, action = collected[0]
+        if action is None and _label == "remove book (dry run)":
+            return _remove_book_dry_run(db_path, parse_book_id(args.remove_book))
         return run_write(db_path, action)
     if any(label.startswith("remove book") for label, _ in collected):
         print(

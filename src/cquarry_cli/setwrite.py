@@ -36,6 +36,7 @@ read modes never import it.
 
 import json
 import shutil
+from datetime import datetime
 import subprocess
 import sys
 from pathlib import Path
@@ -482,7 +483,14 @@ def _make_backup(db_path: str, backup_dir_raw: str) -> Path:
         )
     try:
         backup_dir.mkdir(parents=True, exist_ok=True)
-        dest = backup_dir / "metadata.db"
+        # Timestamped, like run.py's phase-2 backup: a fixed name let a
+        # second run destroy the only restore point.
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dest = backup_dir / f"metadata-{stamp}.db"
+        n = 2
+        while dest.exists():
+            dest = backup_dir / f"metadata-{stamp}-{n}.db"
+            n += 1
         shutil.copy2(db_path, dest)
     except OSError as e:
         raise _UsageError(f"could not write the backup: {e}") from None
@@ -520,6 +528,13 @@ def _counts(results, label: str) -> dict[str, int]:
 def _report_text(
     args, target: str, specs, results, committed, backup: Path | None, book_count: int
 ) -> None:
+    failures = [r for r in results if r["status"] == "failed"]
+    if failures:
+        # The module docstring's promise: quiet suppresses decoration,
+        # never failure detail.
+        print("Failures:", file=sys.stderr)
+        for r in failures:
+            print(f"  book {r['id']}, {r['verb']}: {r['detail']}", file=sys.stderr)
     if args.quiet:
         return
     print(f"Target: {target}")
@@ -531,11 +546,6 @@ def _report_text(
             f"{label}: {c['applied']} applied, {c['already']} already-so, "
             f"{c['failed']} failed"
         )
-    failures = [r for r in results if r["status"] == "failed"]
-    if failures:
-        print("Failures:", file=sys.stderr)
-        for r in failures:
-            print(f"  book {r['id']}, {r['verb']}: {r['detail']}", file=sys.stderr)
     applied = sum(1 for r in results if r["status"] == "applied")
     already = sum(1 for r in results if r["status"] == "already-so")
     if committed:
@@ -561,12 +571,18 @@ def _report_text(
 
 
 def _report_json(
-    target: str, verbs: list[str], results, committed: bool, dry_run: bool
+    target: str,
+    verbs: list[str],
+    results,
+    committed: bool,
+    dry_run: bool,
+    ids: list[int],
 ) -> None:
     print(
         json.dumps(
             {
                 "target": target,
+                "ids": ids,
                 "verbs": verbs,
                 "results": results,
                 "committed": committed,
@@ -600,16 +616,47 @@ def dispatch_set_write(args, db_path: str) -> int | None:
     try:
         _validate(args)
         specs = _collect_verbs(args)
-    except _UsageError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+    except (_UsageError, writeops._ArgError) as e:
+        # parse_cover_state raises _ArgError: the same argument-level
+        # refusal, not a traceback with exit 1.
+        if str(e):
+            print(f"ERROR: {e}", file=sys.stderr)
         return 2
 
     from cquarry.db import CalibreDB
 
+    # The bulk-ratings carve-out, mechanically real: the --from-manifest
+    # file must BE a valid (sealed) batch manifest, and the targets are
+    # exactly the ids it records as imported. An arbitrary id file no
+    # longer unlocks a bulk rating clear. Checked before the generic
+    # id-list resolution, which would only reject the JSON's first byte.
+    rating_manifest = None
+    if args.batch_clear_rating and args.from_manifest is not None:
+        from cquarry_cli import manifest as _manifest
+
+        try:
+            rating_manifest = _manifest.load(args.from_manifest)
+        except (OSError, ValueError) as e:
+            print(
+                "ERROR: --batch-clear-rating requires a valid batch "
+                f"manifest (the NON-NEGOTIABLES bulk-ratings ban); this "
+                f"file does not validate as one: {e}",
+                file=sys.stderr,
+            )
+            return 2
+
     # Read-only resolution first: nothing writable is open yet.
     with CalibreDB(db_path) as db:
         try:
-            ids, target = _resolve_targets(args, db)
+            if rating_manifest is not None:
+                ids = sorted(
+                    f["import"]["imported_id"]
+                    for f in rating_manifest["files"]
+                    if f["import"]["imported_id"]
+                )
+                target = f"--from-manifest {args.from_manifest}"
+            else:
+                ids, target = _resolve_targets(args, db)
         except _UsageError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2
@@ -621,7 +668,9 @@ def dispatch_set_write(args, db_path: str) -> int | None:
 
     if not apply_mode:
         if getattr(args, "format", None) == "json":
-            _report_json(target, verbs, [], False, True)
+            # The resolved ids are part of the contract: a dry run that
+            # hid them made the caller guess what --apply would touch.
+            _report_json(target, verbs, [], False, True, ids)
         elif not args.quiet:
             print(
                 "SET WRITE DRY RUN (nothing written; commit with "
@@ -635,9 +684,8 @@ def dispatch_set_write(args, db_path: str) -> int | None:
                 print(f"  - {label}")
         return 0
 
-    if _calibre_running():
-        print("ERROR: Calibre is running; close it before --apply.", file=sys.stderr)
-        return 1
+    # Argument validation first: a usage error should not depend on
+    # whether Calibre happens to be running.
     if not args.backup_dir:
         print(
             "ERROR: --apply requires --backup-dir (back up metadata.db "
@@ -645,6 +693,9 @@ def dispatch_set_write(args, db_path: str) -> int | None:
             file=sys.stderr,
         )
         return 2
+    if _calibre_running():
+        print("ERROR: Calibre is running; close it before --apply.", file=sys.stderr)
+        return 1
     try:
         backup = _make_backup(db_path, args.backup_dir)
     except _UsageError as e:
@@ -705,7 +756,7 @@ def dispatch_set_write(args, db_path: str) -> int | None:
         return 1
 
     if getattr(args, "format", None) == "json":
-        _report_json(target, verbs, results, committed, False)
+        _report_json(target, verbs, results, committed, False, ids)
     else:
         _report_text(args, target, specs, results, committed, backup, len(ids))
     return 0 if committed else 1

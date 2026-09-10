@@ -387,7 +387,9 @@ class TestApply(_TempDBCase):
             text,
         )
         self.assertEqual(self._tag_map(), {1: ["Batch", "Curated"], 2: ["Batch"]})
-        self.assertTrue(os.path.exists(os.path.join(backup_dir, "metadata.db")))
+        backups = os.listdir(backup_dir)
+        self.assertEqual(len(backups), 1)  # timestamped restore point
+        self.assertTrue(backups[0].startswith("metadata-"))
 
     def test_apply_reports_already_so(self):
         backup_dir = tempfile.mkdtemp(prefix="cquarry_bak_")
@@ -531,6 +533,70 @@ class TestApply(_TempDBCase):
                 ]
             )
         self.assertEqual(rc, 2)
+
+
+class TestPapercuts(_TempDBCase):
+    """The :740 papercuts: a cover-state typo used to traceback with
+    exit 1; the backup used to overwrite by fixed name; the dry-run JSON
+    hid the resolved ids."""
+
+    def test_cover_typo_is_a_usage_error_not_a_traceback(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                [
+                    "--ids",
+                    "1",
+                    "--batch-set-cover",
+                    "maybe",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("cover state", err_cap.getvalue())
+
+    def test_second_backup_keeps_the_first(self):
+        backup_dir = tempfile.mkdtemp(prefix="cquarry_bak_")
+        self.addCleanup(shutil.rmtree, backup_dir, True)
+        for _ in range(2):
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = main(
+                    [
+                        "--ids",
+                        "1",
+                        "--batch-add-tag",
+                        "Batch",
+                        "--apply",
+                        "--backup-dir",
+                        backup_dir,
+                        "--db",
+                        self.db_path,
+                    ]
+                )
+            self.assertEqual(rc, 0)
+        backups = os.listdir(backup_dir)
+        self.assertEqual(len(backups), 2)  # both restore points survive
+
+    def test_dry_run_json_names_the_resolved_ids(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--ids",
+                    "1,2",
+                    "--batch-add-tag",
+                    "Batch",
+                    "--format",
+                    "json",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["ids"], [1, 2])
 
 
 class TestEmptyValues(_TempDBCase):
@@ -701,10 +767,42 @@ class TestRatingCarveOut(_TempDBCase):
                 rc = main(source + ["--batch-clear-rating", "--db", self.db_path])
             self.assertEqual(rc, 2)
 
-    def test_rating_clear_legal_with_manifest(self):
+    def test_rating_clear_refused_without_a_real_manifest(self):
+        # The honor-system gate: any id file used to unlock a bulk rating
+        # clear. The repo's own manifest validator is now consulted.
         fd, path = tempfile.mkstemp(suffix=".ids", text=True)
         os.write(fd, b"1\n")
         os.close(fd)
+        self.addCleanup(os.remove, path)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err) as err_cap:
+            rc = main(
+                [
+                    "--from-manifest",
+                    path,
+                    "--batch-clear-rating",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("does not validate as one", err_cap.getvalue())
+
+    def test_rating_clear_legal_with_manifest(self):
+        # The gate is mechanically real: the id file must be a valid,
+        # sealed batch manifest, and the targets must be ids it imported.
+        from cquarry_cli import manifest as _manifest
+
+        man = _manifest.new_manifest(self._tmp)
+        entry = _manifest.new_file_entry("book.epub")
+        entry["verdict"] = "approved_for_import"
+        entry["import"]["imported_id"] = 1
+        _manifest.add_file(man, entry)
+        _manifest.approve(man, ["book.epub"])
+        _manifest.sign(man)
+        fd, path = tempfile.mkstemp(suffix=".json", text=True)
+        os.close(fd)
+        _manifest.save(man, path)
         self.addCleanup(os.remove, path)
         backup_dir = tempfile.mkdtemp(prefix="cquarry_bak_")
         out, err = io.StringIO(), io.StringIO()
@@ -722,7 +820,7 @@ class TestRatingCarveOut(_TempDBCase):
                     self.db_path,
                 ]
             )
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 0, err.getvalue())
         con = sqlite3.connect(self.db_path)
         try:
             linked = con.execute(
