@@ -859,7 +859,7 @@ that crashes on real input.*
       the phase-3 runner" but run.py never calls it (wire it or reword);
       taxonomy.example.yaml is reference material for another repo
       (docs/ would be tidier). *
-      *(Shipped in 3.34.0, 2026-09-10, d29414c: moved to docs/ with the README pointer updated; comments_census's --json help no longer claims a runner that never consumed it. Deferred with dated notes: the db_util consolidation (the private connect_ro copies have genuinely drifted: reconcile needs Row rows and its own tmp layout) and the audit_conversion_overrides --audit promotion, now its own open box below.)*
+      *(Shipped in 3.34.0, 2026-09-10, d29414c: moved to docs/ with the README pointer updated; comments_census's --json help no longer claims a runner that never consumed it. Deferred with dated notes: the db_util consolidation (the private connect_ro copies have genuinely drifted: reconcile needs Row rows and its own tmp layout) and the audit_conversion_overrides --audit promotion, its own box below (shipped 3.36.0, same day).)*
 
 ### Documentation
 
