@@ -676,8 +676,7 @@ that crashes on real input.*
       excluded from the inventory, so a second run sweeps the backups
       (`run.py:276`, `106`). Collision-checked destinations, backups
       outside the tree, warn on nonzero exits. *
-      *(Shipped in 3.33.0, 2026-09-09, afd9c34: numbered quarantine siblings on basename collision, stamp backups in a dated temp dir outside the tree (which is what makes --stamp actually work), WARNING on stamp failures, both instrument dirs excluded from the inventory.)* *
-      *(Shipped in 3.33.0, 2026-09-09, afd9c34: numbered quarantine siblings, temp-dir stamp backups, WARNING on stamp failures, both instrument dirs excluded from the inventory.)*
+      *(Shipped in 3.33.0, 2026-09-09, afd9c34: numbered quarantine siblings on basename collision, stamp backups in a dated temp dir outside the tree (which is what makes --stamp actually work), WARNING on stamp failures, both instrument dirs excluded from the inventory.)*
 - [x] **Close phase 2's accounting holes (P1).** The "never imported twice"
       docstring invariant is unimplemented (only the manifest's own
       `imported_id` is checked; add_book copies unconditionally), and the
@@ -908,7 +907,41 @@ that crashes on real input.*
       consistency question, not a data-destroyer; decide one convention
       and note it in both tools.
 
+- [ ] **check_pdf.py classifies qpdf exit 3 (warnings-only) as `errors`**
+      (observed 2026-09-10 in the Redwall/Tech phase-1 run, the first
+      real-file exercise since the 3.34 args.quiet fix): two PDFs whose
+      only qpdf output was warning-class (unknown-token tolerance in one
+      object; linearization `/E` and hint-table drift on the other, both
+      files reporting "operation succeeded with warnings") were recorded
+      as `qpdf_check: "errors"` with `qpdf_errors` findings, in the CLI
+      summary and in the phase-1 manifest. The docstring already calls
+      exit 3 benign ("warnings (benign; qpdf exits 3 on warning-only
+      files all the time)"); the exit-to-class mapping does not honor
+      it, so the benign class has no label and every warning-only scan
+      reads as structural damage. Fix the mapping and re-triage the two
+      warning kinds this run surfaced.
+
+- [ ] **`provenance` is never populated, so phase 2's cc6 stamp is always
+      the default** (observed 2026-09-10 after the Redwall/Tech batch):
+      the manifest schema carries a per-file `provenance` field (the
+      2026-09-06 decision binds phase 2's cc6 stamp to "the manifest's
+      recorded provenance"), but `run phase1` leaves it None on every
+      file even though the filename usually carries the evidence
+      (`z-library.sk` / `1lib.sk` naming, the `-- Anna's Archive`
+      suffix, `libgen.li`). Consequence observed twice (2026-09-08,
+      2026-09-10): cc6 arrives as a blanket "Anna's Archive" regardless
+      of true provenance, and phase 3 has to re-derive it from filenames
+      every batch. Fix: derive `provenance` in the phase-1 runner from
+      the same filename patterns `_FILENAME_STAMP` already works with,
+      surface it in the manifest the review step corrects (same flow as
+      stamps), and let phase 2 stamp cc6 from the corrected value.
+
 ### Upstream findings (belong to cquarry's own sweep, noted here where found)
+
+*(CLOSED UPSTREAM 2026-09-09: all three fixes shipped in cquarry 1.15.0
+(commits 7c798a3, edf841e, 9a109b4) and the promotion candidates in
+cquarry 1.17.0 (cee35c3). Recorded at this phase's ship notes and the
+audit sheet's adoption block; nothing left to chase here.)*
 
 - `WritableCalibreDB.__exit__` commits unconditionally, so BaseException
   (Ctrl-C) mid-write commits a torn edit; setters self-heal only on
