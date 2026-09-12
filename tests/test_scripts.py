@@ -1284,7 +1284,15 @@ class TestCheckPdf(unittest.TestCase):
             if name == "pdftotext":
                 return mock.Mock(returncode=0, stdout="some text\n")
             if name == "pdfimages":
-                return mock.Mock(returncode=0, stdout="page num\n---\n  1  1\n")
+                return mock.Mock(
+                    returncode=0,
+                    stdout="page num  type   width height color comp bpc "
+                    "enc interp object ID x-ppi y-ppi size ratio\n"
+                    "-----------------------------------------------"
+                    "--------------------------\n"
+                    "   1   0 image   600   800  rgb     3   8  image  no"
+                    "     187   0    72    72  2457600 jpeg\n",
+                )
             return mock.Mock(returncode=0, stdout="")
 
         with mock.patch("subprocess.run", side_effect=fake_run):
@@ -1294,8 +1302,16 @@ class TestCheckPdf(unittest.TestCase):
         self.assertIn("unembedded_fonts", kinds)
         self.assertEqual(report["pages"], 7)
         self.assertEqual(report["unembedded_fonts"], 1)
-        self.assertEqual(report["text_layer"], "present")
+        # B.7: text_layer is now per sampled page (first/middle/last);
+        # the run.py seam reads only paths and the exit contract, so the
+        # shape change stops here by design.
+        self.assertEqual(
+            report["text_layer"],
+            {"first": "present", "middle": "present", "last": "present"},
+        )
         self.assertEqual(report["image_count"], 1)
+        self.assertEqual(report["avg_dpi"], 72.0)
+        self.assertIn("low_dpi", kinds)
 
 
 if __name__ == "__main__":

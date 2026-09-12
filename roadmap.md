@@ -1081,30 +1081,85 @@ analyzers, recorded there as well. Nothing here re-opens Phases 16-18.
 
 ### B. The audit-depth batch (routing marked)
 
-- [ ] **Content-duplicate fingerprinting** (`audit_duplicates_content.py`):
+- [x] **Content-duplicate fingerprinting** (`audit_duplicates_content.py`):
   64-bit simhash over 3-word shingles of spine text; clusters with
   containment classification (re-download vs omnibus overlap). M.
-- [ ] **Truncation cross-checks**: PDF real page count vs Count Pages
+  (SHIPPED 3.38.0, d2c56eb: simhash near-duplicate candidates by
+  Hamming distance plus a bottom-32 sketch candidate pass for
+  containment (an omnibus's simhash is NOT close to the standalone's,
+  so the Hamming gate alone never sees it); exact shingle-set
+  classification into near_duplicate vs omnibus_overlap. FP note: PD
+  reissues are findings by charter; front-matter-only files are
+  excluded (under 200 shingles a simhash is noise); formats without
+  an extractor are skipped, not guessed. ~1.2s/book; scope with
+  --search/--ids. 4 tests on real mini-EPUBs.)
+- [x] **Truncation cross-checks**: PDF real page count vs Count Pages
   data disagreeing >20% (the battery already reads the count), stale
   plugin data reported as its own class. M (EPUB-tail half routed to
   bindery).
-- [ ] **Author-sort sanity**: cquarry predicate `find_bad_author_sorts`
+  (SHIPPED 3.38.0, c0a95b4: scripts/audit_truncation.py reads
+  books_pages_link through cquarry's get_page_metadata and pdfinfo on
+  the real files; page_count_mismatch over --tolerance and
+  stale_plugin_data (size drift, needs_scan, post-scan mtime) as its
+  own class. FP note: only PDF rows are checked; the plugin's EPUB
+  pages are estimates by design. 3 tests on hand-written minimal
+  PDFs; first real probe found genuine drift on the very first row.)
+- [x] **Author-sort sanity**: cquarry predicate `find_bad_author_sorts`
   + --audit `bad_author_sort` render (advisory class; deliberate
   non-inverted sorts documented). S/M (predicate half routed to
   cquarry).
-- [ ] **DB-level ISBN checksum/shape** in validate_metadata
+  (SHIPPED 3.38.0, 5dd9328 + fix 762e41a: validate_metadata grows
+  AUTHOR_SORT_NOT_INVERTED and AUTHOR_SORT_ORPHAN, hosted LOCALLY by
+  decision -- cquarry never boxed the predicate, promotion remains a
+  future option. The first cut compared author_sort against display
+  names only and flagged 7718 of 7842 real books; fixed to accept
+  every legitimate Calibre shape (display name, authors.sort column,
+  mechanical inversion, and the ' & ' multi-author join). Real probe
+  after the fix: 0 orphans, 16 NOT_INVERTED advisories. 5 tests.)
+- [x] **DB-level ISBN checksum/shape** in validate_metadata
   (INVALID_ISBN via cquarry's existing checksum helper). S (helper
   routed to cquarry).
-- [ ] **Cover aspect distortion**: cquarry predicate
+  (SHIPPED 3.38.0, 95c02cd: INVALID_ISBN warning via
+  cquarry.helpers.isbn_check_digit_is_valid; blank-ish values are 'no
+  ISBN', not invalid ones; DB-level only, audit_isbns keeps the
+  file-side job. 3 tests.)
+- [x] **Cover aspect distortion**: cquarry predicate
   `find_distorted_covers` + --audit render (ratio bands, advisory). S
   (predicate routed to cquarry).
-- [ ] **FTS coverage audit**: books absent from `full-text-search.db`
+  (SHIPPED 3.38.0, 03c2987: scripts/audit_cover_aspect.py sizes
+  catalogued covers through cquarry's header-only readers; advisory
+  bands cover_aspect_narrow < 0.55 and cover_aspect_wide > 0.80; FP
+  note: legitimate landscape/square art exists, operator judges.
+  Missing/unreadable cover files stay find_missing_cover_files's
+  class. 3 tests on hand-crafted PNG headers; real probe: 283
+  advisories, mostly publisher art, a few true landscape anomalies.)
+- [x] **FTS coverage audit**: books absent from `full-text-search.db`
   or indexed near-empty; "never indexed" vs "indexed empty" separate.
   S (predicate routed to cquarry).
-- [ ] **PDF battery depth**: text layer sampled at pages 1/middle/last;
+  (SHIPPED 3.38.0, 6866d61: --audit renders fts_coverage CSV rows
+  (fts_never_indexed / fts_indexed_empty / fts_extraction_error /
+  fts_stale_queued) reusing the A.1 staleness helper. With no sidecar
+  the CSV stays silent (the rows would BE the library) and the prose
+  summary carries the absent note with the unindexed count. 3
+  tests.)
+- [x] **PDF battery depth**: text layer sampled at pages 1/middle/last;
   image DPI parsed from the existing `pdfimages -list` output. S.
-- [ ] **Copyright-year vs pubdate** as an audit_isbns extension
+  (SHIPPED 3.38.0, bdbb142: check_pdf samples text at first/middle/
+  last and reports text_layer_partial where the old page-1-only
+  sample passed OCR-once scans clean; area-weighted mean of
+  min(x-ppi, y-ppi) from pdfimages -list lands as avg_dpi with a
+  low_dpi advisory below 150, so a small sharp logo cannot hide a
+  full-page scan. Advisory classes only: the structural total and the
+  run.py seam contract are unchanged. 4 tests.)
+- [x] **Copyright-year vs pubdate** as an audit_isbns extension
   (VARIANT-class advisory; (c)-year patterns only). M.
+  (SHIPPED 3.38.0, 1bc48ee: the front-matter pass captures (c)-years
+  -- each copyright marker opens a window over its line so multi-year
+  pages capture fully; the earliest year vs the pubdate year beyond a
+  two-year tolerance is a year_mismatch advisory with its own report
+  section, riding the exit-1 findings contract. FP note: reprints
+  legitimately print the ORIGINAL year. 3 pure tests; real probe
+  found plausible reprint gaps immediately.)
 
 ### C. The integration batch (all subprocess-driven; no new deps)
 

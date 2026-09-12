@@ -105,6 +105,8 @@ def sample_pages(pages: int | None) -> list[int]:
 def _text_layer_samples(path: str, pages: int | None) -> dict[str, str]:
     """present/absent per sampled page (first/middle/last keys)."""
     out: dict[str, str] = {}
+    if not pages:
+        pages = 1
     labels = {1: "first", (pages + 1) // 2: "middle", pages: "last"}
     for page in sample_pages(pages):
         proc = _run(["pdftotext", "-f", str(page), "-l", str(page), path, "-"])

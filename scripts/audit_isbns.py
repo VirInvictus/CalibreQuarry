@@ -445,14 +445,26 @@ def load_targets(
 ) -> list[dict]:
     con, tmp = connect_ro(db_path)
     try:
-        rows = con.execute(
-            """
-            SELECT b.id, b.title, b.path, i.val, b.pubdate
-              FROM books b
-              JOIN identifiers i ON i.book = b.id AND i.type = 'isbn'
-             ORDER BY b.id
-            """
-        ).fetchall()
+        try:
+            rows = con.execute(
+                """
+                SELECT b.id, b.title, b.path, i.val, b.pubdate
+                  FROM books b
+                  JOIN identifiers i ON i.book = b.id AND i.type = 'isbn'
+                 ORDER BY b.id
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Schema predates pubdate (or a synthetic fixture): the
+            # copyright-year advisory simply has no pubdate half.
+            rows = con.execute(
+                """
+                SELECT b.id, b.title, b.path, i.val, NULL
+                  FROM books b
+                  JOIN identifiers i ON i.book = b.id AND i.type = 'isbn'
+                 ORDER BY b.id
+                """
+            ).fetchall()
         booktags: dict[int, list[str]] = {}
         for bid, tname in con.execute(
             "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"

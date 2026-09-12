@@ -792,6 +792,40 @@ Scoping uses the same anchored-hierarchical `--tag` rule as `fetch_library_codes
 
 Exit codes: `0` no disagreement, `1` at least one `MISMATCH`/`VARIANT`/`AMBIGUOUS` finding or an unreadable file, `2` setup error.
 
+### `audit_duplicates_content.py` — find books whose text duplicates another book's (read-only)
+
+Metadata grouping only sees rows; this audit fingerprints what is inside the files. A 64-bit simhash over 3-word shingles of each book's spine text finds re-downloads filed under different metadata; a bottom-32 sketch pass catches omnibus containment (a superset document shares its whole sketch, which Hamming distance can never see), and candidates are classified exactly: `near_duplicate` (re-download, or a public-domain reissue: that IS the finding here) vs `omnibus_overlap` (anthology vs standalone). Front-matter-only files and formats without a text extractor are skipped, not guessed. Roughly a second per book, so scope with `--search`/`--ids` for interactive runs.
+
+```bash
+python3 scripts/audit_duplicates_content.py .                    # whole library (a long pass)
+python3 scripts/audit_duplicates_content.py . --search 'tags:Fic.SciFi'
+python3 scripts/audit_duplicates_content.py . --ids 42,7 --format json
+```
+
+Exit codes: `0` no clusters, `1` clusters found, `2` setup error.
+
+### `audit_truncation.py` — cross-check Count Pages against the real PDFs (read-only)
+
+The Count Pages plugin records a page count per book and nothing re-checks it. This audit runs `pdfinfo` over every PDF the plugin measured: more than 20% disagreement is `page_count_mismatch` (a truncated download, or a replaced edition nobody re-scanned), and `stale_plugin_data` is its own class (catalogued size drifted from the file, the plugin's own needs_scan flag, or a post-scan mtime). Only PDF rows are checked: the plugin's EPUB pages are word-count estimates by design.
+
+```bash
+python3 scripts/audit_truncation.py .                          # every PDF page row
+python3 scripts/audit_truncation.py . --search 'tags:RPG' --tolerance 0.1
+```
+
+Exit codes: `0` clean, `1` findings, `2` setup error.
+
+### `audit_cover_aspect.py` — flag unusual cover shapes (read-only)
+
+Sizes every catalogued cover through cquarry's header-only image readers (no image library, no full decode) and reports two advisory bands: `cover_aspect_narrow` (w/h below 0.55: spine scans, bad crops, rotated images) and `cover_aspect_wide` (above 0.80: landscape or square art). Legitimate landscape art exists; the audit surfaces the distribution, you judge. Missing and unreadable cover files belong to the missing-covers audit, not this one.
+
+```bash
+python3 scripts/audit_cover_aspect.py .                     # default bands
+python3 scripts/audit_cover_aspect.py . --low 0.45 --high 0.95 --quiet
+```
+
+Exit codes: `0` all inside the bands, `1` findings (advisory), `2` setup error.
+
 ### `validate_metadata.py` — lint database integrity (read-only)
 
 A linter for `metadata.db` with two layers. It is the database-side companion to `audit_drm.py`, and it is strictly `mode=ro`.

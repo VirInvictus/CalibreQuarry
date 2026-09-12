@@ -1,5 +1,19 @@
 # CalibreQuarry — Patch Notes
 
+# 3.38.0 (2026-09-12)
+
+### Phase 19 B: the audit-depth batch (one class per commit, each with its fixture and false-positive note)
+
+- **Content-duplicate fingerprinting** (`scripts/audit_duplicates_content.py`): 64-bit simhash over 3-word shingles of each book's spine text finds re-downloads filed under different metadata; a bottom-32 shingle-sketch candidate pass catches omnibus containment (an omnibus's simhash is not close to the standalone's, so Hamming distance alone never sees it), and candidates are classified exactly: `near_duplicate` vs `omnibus_overlap`. Front-matter-only files are excluded (under 200 shingles a simhash is noise) and formats without an extractor are skipped, not guessed; legitimate public-domain reissues are findings by charter. ~1s per book: scope with `--search`/`--ids`.
+- **Truncation cross-checks** (`scripts/audit_truncation.py`): the Count Pages plugin's page counts meet poppler's `pdfinfo`; more than 20% disagreement is `page_count_mismatch`, and `stale_plugin_data` (catalogued size drifted, the plugin's own needs_scan flag, post-scan mtime) is its own class. Only PDF rows are checked: the plugin's EPUB pages are word-count estimates by design.
+- **Author-sort sanity** in `validate_metadata.py`: `AUTHOR_SORT_NOT_INVERTED` (sort identical to a multi-word display name) and `AUTHOR_SORT_ORPHAN` (matching no legitimate shape of the book's authors). Hosted locally by decision: cquarry never boxed the predicate, and the promotion remains a future option. The first cut compared against display names only and flagged 7718 of 7842 real books; the real-library probe caught it within minutes and the fix accepts every legitimate Calibre shape (display name, the authors.sort column, mechanical inversion, the `&`-joined multi-author sort). Real probe after the fix: 0 orphans.
+- **DB-level ISBN checksum** in `validate_metadata.py`: `INVALID_ISBN` warns on any isbn identifier failing its check digit (cquarry's existing helper; no file open). Blank-ish values are "no ISBN", not invalid ones.
+- **Cover aspect-ratio bands** (`scripts/audit_cover_aspect.py`): covers outside w/h 0.55-0.80 report as advisory `cover_aspect_narrow`/`cover_aspect_wide` through cquarry's header-only image readers (no image library). Legitimate landscape art exists; the audit surfaces the distribution, the operator judges.
+- **FTS coverage audit** in `--audit`: the A.1 staleness classes render as `fts_coverage` CSV rows. With no sidecar the CSV stays silent (the rows would be the whole library) and the prose summary carries the absent-sidecar note instead.
+- **PDF battery depth** in `check_pdf.py`: text sampled at pages 1, middle, and last (the page-1-only sample passed OCR-once scans clean; a partial pass is now `text_layer_partial`), and image DPI parsed from the existing `pdfimages -list` output as an area-weighted mean (a small sharp logo cannot hide a full-page 72-dpi scan; below 150 dpi is a `low_dpi` advisory). Advisory classes only: the structural total and the run-verb seam contract are unchanged.
+- **Copyright year vs pubdate** in `audit_isbns.py`: the front-matter pass captures (c)-years (each copyright marker claims the years on its line), and an earliest-year-vs-pubdate gap over two years is a `year_mismatch` advisory with its own report section, riding the exit-1 findings contract. A reprint legitimately prints the original year; the report asks whether the pubdate describes this edition.
+- Skills sync: swept both import skills for the new audit surface; nothing teaches the old shapes, no staleness found. Suite: 433 → 461 tests.
+
 # 3.37.0 (2026-09-12)
 
 ### Phase 19 A: --restrict scopes everything; FTS content search; the tree audit; reading analytics

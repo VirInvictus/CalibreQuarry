@@ -193,3 +193,24 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 ## Conventions
 - Single source of truth for version is `src/cquarry_cli/__init__.py`; `tests/test_version.py` pins it equal to the root `VERSION` file, `pyproject.toml`, and the newest `patchnotes.md` heading.
 - Run tests with `./run_tests.sh`. Test the CLI, not just the functions.
+
+## Programmer-facing contract notes (3.38.0 onward, Phase 19 B)
+
+- **The audit-depth classes host their logic deliberately.** B.3
+  (author-sort sanity), B.5 (cover aspect bands), and B.6 (FTS
+  coverage rows) were routed "to cquarry" by the deep dive, but
+  cquarry never boxed them; per the lane decision they are implemented
+  locally (validate_metadata check, scripts/audit_cover_aspect.py,
+  modes/fts.py staleness helper reused by modes/audit.py) and the
+  cquarry-predicate promotion remains a recorded future option. Do not
+  assume a `find_bad_author_sorts`/`find_distorted_covers` predicate
+  exists.
+- **audit_isbns' year_mismatch is advisory and additive:** it rides
+  the per-result records and the exit-1 findings contract but never
+  alters the ISBN verdicts. The acceptable multi-author author_sort
+  shape is the `" & "` join of per-author sorts in book order
+  (Calibre's own form).
+- **check_pdf's new findings (text_layer_partial, low_dpi) are
+  advisory:** the structural total (header, qpdf_errors) and the
+  exit contract run.py's seam honors are unchanged, so phase-1
+  manifests keep their shape.
