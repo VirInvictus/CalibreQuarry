@@ -66,8 +66,12 @@
   enum column (`#reading_status:Read`, quoted or not) currently
   matches the whole library; the exact form (`#reading_status:=Read`)
   is correct. Fixing it belongs upstream in the cquarry search engine.
-- The README's full help dump was regenerated from the live parser.
-  Suite: 385 → 433 tests.
+- Skills sync: phase-3-import's audit step names the new tree classes,
+  runs the audit with `--output` outside the library root (a stray
+  audit.csv there is now itself a tree finding), and uses `--restrict`
+  to scope post-import verification to the batch's tag; phase-1-import
+  swept, nothing stale. The README's full help dump was regenerated
+  from the live parser. Suite: 385 → 433 tests.
 
 # 3.36.0 (2026-09-10)
 
