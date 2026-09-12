@@ -22,6 +22,8 @@ def write_catalog(
     output: str,
     *,
     wing: str | None = None,
+    matching_ids: set[int] | None = None,
+    scope_note: str | None = None,
     primary_only: bool = False,
     show_tags: bool = False,
     show_id: bool = False,
@@ -35,6 +37,8 @@ def write_catalog(
     With ``plugin_data`` (a ``books_plugin_data`` name such as
     ``goodreads_id`` or ``wordcount``), each book line gains a
     ``<name: value>`` segment for books that carry that data.
+    ``matching_ids`` (the saved-search sweep's filter) and ``scope_note``
+    (a header provenance line) are the --all-saved-searches plumbing.
     """
     # Copy: get_all_books() hands out the shared cache, and the sort below
     # must not reorder it for every later consumer in the session.
@@ -51,6 +55,9 @@ def write_catalog(
         books = [b for b in books if b["id"] in valid_ids]
         if not quiet:
             print(f"Wing '{color(wing, C_TITLE)}': {len(books)} books")
+
+    if matching_ids is not None:
+        books = [b for b in books if b["id"] in matching_ids]
 
     if not books:
         if not quiet:
@@ -87,6 +94,8 @@ def write_catalog(
         )
         if wing:
             header += f" [{wing}]"
+        if scope_note:
+            header += f" {scope_note}"
         # Library provenance: the identity UUID survives moves/restores, so a
         # catalog can always be traced back to its source library (cquarry 1.3).
         lib_uuid = db.get_library_uuid()
@@ -223,3 +232,81 @@ def write_all_wings(
 
     if not quiet:
         print(f"\nAll wings written to: {color(outdir, C_TITLE)}")
+
+
+def run_all_saved_searches(
+    db: CalibreDB,
+    outdir: str,
+    *,
+    primary_only: bool = False,
+    show_tags: bool = False,
+    show_id: bool = False,
+    show_custom: str | None = None,
+    plugin_data: str | None = None,
+    author_details: bool = False,
+    quiet: bool = False,
+) -> None:
+    """Generate a catalog file per saved search (the --all-wings analog).
+
+    Saved searches live in the preferences table and resolve through the
+    same engine as --search, so each catalog is the search's own answer,
+    under the active --restrict view when one is in play. A saved search
+    whose expression no longer parses is skipped with a warning, not a
+    dead sweep.
+    """
+    searches = db.get_saved_searches()
+    if not searches:
+        print("No saved searches defined.", file=sys.stderr)
+        return
+
+    ensure_output_dir(outdir, db.db_path)
+
+    used: set[str] = set()
+    written = 0
+    for i, name in enumerate(sorted(searches)):
+        expr = searches[name]
+        try:
+            ids = set(db.search(expr))
+        except Exception as e:
+            print(
+                f"WARNING: saved search '{name}' does not resolve ({e}); skipped.",
+                file=sys.stderr,
+            )
+            continue
+        safe_name = re.sub(r"[^\w\s-]", "", name).strip().replace(" ", "_")
+        if not safe_name:
+            safe_name = f"saved_search_{i + 1}"
+        base = safe_name
+        n = 1
+        while safe_name.lower() in used:
+            n += 1
+            safe_name = f"{base}_{n}"
+        used.add(safe_name.lower())
+        if not quiet:
+            print(f"\u2192 {color(name, C_HEADER)}: {len(ids)} book(s)")
+        if not ids:
+            # write_catalog writes nothing for an empty set; say so instead
+            # of counting a file that was never produced.
+            if not quiet:
+                print("    (no matches, no catalog written)")
+            continue
+        output = os.path.join(outdir, f"{safe_name}_SavedSearch.txt")
+        write_catalog(
+            db,
+            output,
+            matching_ids=ids,
+            scope_note=f'[saved search "{name}": {expr}]',
+            primary_only=primary_only,
+            show_tags=show_tags,
+            show_id=show_id,
+            show_custom=show_custom,
+            plugin_data=plugin_data,
+            author_details=author_details,
+            quiet=True,
+        )
+        written += 1
+
+    if not quiet:
+        print(
+            f"\n{written} saved-search catalog(s) written to: {color(outdir, C_TITLE)}"
+        )

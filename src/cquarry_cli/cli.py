@@ -18,7 +18,11 @@ from cquarry_cli.modes.analytics import (
     show_wing_overlap,
 )
 from cquarry_cli.modes.audit import run_audit
-from cquarry_cli.modes.catalog import write_all_wings, write_catalog
+from cquarry_cli.modes.catalog import (
+    run_all_saved_searches,
+    write_all_wings,
+    write_catalog,
+)
 from cquarry_cli.modes.detail import show_book, show_book_json
 from cquarry_cli.modes.display import (
     show_entities,
@@ -76,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="all_wings",
         action="store_true",
         help="Generate catalogs for all virtual libraries",
+    )
+    group.add_argument(
+        "--all-saved-searches",
+        dest="all_saved_searches",
+        action="store_true",
+        help="Generate a catalog per saved search (the --all-wings "
+        "analog; files land in --outdir, one per search, scoped by "
+        "--restrict when given)",
     )
     group.add_argument("--stats", action="store_true", help="Show library statistics")
     group.add_argument(
@@ -913,6 +925,21 @@ def main(argv: list[str] | None = None) -> int:
                     show_tags=args.show_tags,
                     show_id=args.show_id,
                     show_custom=args.show_custom,
+                    author_details=args.show_author_details,
+                    quiet=args.quiet,
+                )
+                return 0
+
+            if args.all_saved_searches:
+                outdir = args.outdir or "saved_search_catalogs"
+                run_all_saved_searches(
+                    db,
+                    outdir,
+                    primary_only=args.primary_only,
+                    show_tags=args.show_tags,
+                    show_id=args.show_id,
+                    show_custom=args.show_custom,
+                    plugin_data=args.plugin_data,
                     author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
