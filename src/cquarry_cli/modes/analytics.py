@@ -1,5 +1,7 @@
 import sys
 from collections import Counter, defaultdict
+from datetime import date
+from statistics import mean, median
 
 from cquarry.analytics import (
     addition_timeline,
@@ -8,7 +10,13 @@ from cquarry.analytics import (
     vl_overlap,
 )
 from cquarry.db import CalibreDB
-from cquarry.helpers import normalize_author_display, tags_to_tree
+from cquarry.helpers import (
+    C_DIM,
+    C_HEADER,
+    color,
+    normalize_author_display,
+    tags_to_tree,
+)
 
 
 def show_author_stats(db: CalibreDB, *, quiet: bool = False) -> None:
@@ -147,3 +155,134 @@ def show_wing_overlap(db: CalibreDB, *, quiet: bool = False) -> None:
     for wings, count in overlap_counts.most_common():
         wings_str = " + ".join(wings)
         print(f"  {count:4d} books in: {wings_str}")
+
+
+def _find_column(db: CalibreDB, label: str):
+    for meta in db.get_custom_columns().values():
+        if meta.get("label") == label:
+            return meta
+    return None
+
+
+def _parse_date(value) -> date | None:
+    if value is None:
+        return None
+    text = str(value).strip()[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def show_reading_stats(db: CalibreDB, *, quiet: bool = False) -> None:
+    """Reading analytics over #reading_status and #date_read.
+
+    READ-ONLY by charter: the library NON-NEGOTIABLES ban writing these
+    columns, and nothing here writes anything. The status funnel follows
+    the column's configured enum order (so it renders the funnel the
+    way Calibre's editor defines it); days-to-read measures each
+    finished book's added-to-finished span (books.timestamp is the
+    date the book entered the library, the honest denominator this
+    report has). Under --restrict every section scopes to the view.
+    """
+    books = db.get_all_books()
+    total = len(books)
+    if not quiet:
+        print(f"=== Reading Analytics ({total} books) ===\n")
+
+    status_meta = _find_column(db, "reading_status")
+    date_meta = _find_column(db, "date_read")
+    if status_meta is None and date_meta is None:
+        print(
+            "No #reading_status or #date_read column in this library; "
+            "nothing to report."
+        )
+        return
+
+    # --- the status funnel ---
+    if status_meta is not None:
+        try:
+            values = db.load_custom_column("#" + status_meta["label"])
+        except ValueError:
+            values = {}
+        enum_order = [
+            str(v) for v in (status_meta.get("display") or {}).get("enum_values") or []
+        ]
+        counts: Counter = Counter()
+        for b in books:
+            raw = values.get(b["id"])
+            text = str(raw).strip() if raw is not None else ""
+            counts[text or "(no status)"] += 1
+        known = [v for v in enum_order if counts.get(v)]
+        unknown = [v for v in counts if v not in enum_order and v != "(no status)"]
+        order = (
+            known
+            + sorted(unknown)
+            + (["(no status)"] if counts.get("(no status)") else [])
+        )
+        if not quiet:
+            print(color("Reading status funnel:", C_HEADER))
+        for label in order:
+            count = counts[label]
+            pct = f"{count * 100 / total:5.1f}%" if total else "  N/A"
+            bar = "\u2588" * (count * 40 // total) if total else ""
+            print(f"  {label:<20} {count:5d}  {pct}  {bar}")
+        if not quiet:
+            print()
+
+    # --- the finish dates ---
+    if date_meta is not None:
+        try:
+            finished_raw = db.load_custom_column("#" + date_meta["label"])
+        except ValueError:
+            finished_raw = {}
+        finished = []
+        for b in books:
+            parsed = _parse_date(finished_raw.get(b["id"]))
+            if parsed is not None:
+                finished.append((parsed, b))
+        finished.sort(key=lambda pair: pair[0], reverse=True)
+        if not quiet:
+            print(
+                color(
+                    f"Recently finished ({len(finished)} with #date_read):",
+                    C_HEADER,
+                )
+            )
+        for parsed, b in finished[:15]:
+            author = normalize_author_display(b["authors"], primary_only=True)
+            print(f"  {parsed.isoformat()}  {b['title']} \u2014 {author}")
+        if len(finished) > 15 and not quiet:
+            print(f"  ... and {len(finished) - 15} more")
+        if not finished and not quiet:
+            print("  (no books carry a #date_read value)")
+        if not quiet:
+            print()
+
+        spans = []
+        for parsed, b in finished:
+            added = _parse_date(b["timestamp"])
+            if added is not None:
+                spans.append((parsed - added).days)
+        if spans and not quiet:
+            print(color("Days from added to finished:", C_HEADER))
+            print(
+                f"  median {median(spans):.0f}   mean {mean(spans):.1f}   "
+                f"min {min(spans)}   max {max(spans)}   ({len(spans)} books)"
+            )
+            negative = sum(1 for s in spans if s < 0)
+            if negative:
+                print(
+                    color(
+                        f"  {negative} book(s) finished before their added "
+                        "date (pre-library reads or a stale timestamp).",
+                        C_DIM,
+                    )
+                )
+            print(
+                color(
+                    "  The span uses the date each book entered the "
+                    "library, not the date reading started.",
+                    C_DIM,
+                )
+            )

@@ -13,6 +13,7 @@ from cquarry_cli.modes.analytics import (
     show_author_stats,
     show_genre_breakdown,
     show_pace_stats,
+    show_reading_stats,
     show_tag_tree,
     show_wing_overlap,
 )
@@ -79,9 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--stats", action="store_true", help="Show library statistics")
     group.add_argument(
         "--analytics",
-        choices=["author", "pace", "tags", "genres", "overlap"],
+        choices=["author", "pace", "tags", "genres", "overlap", "reading"],
         default=None,
-        help="Extended analytics and visualizations",
+        help="Extended analytics and visualizations (reading: status "
+        "funnel and finish dates from #reading_status/#date_read; "
+        "read-only)",
     )
     group.add_argument(
         "--audit",
@@ -936,6 +939,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             elif args.analytics == "overlap":
                 show_wing_overlap(db, quiet=args.quiet)
+                return 0
+            elif args.analytics == "reading":
+                show_reading_stats(db, quiet=args.quiet)
                 return 0
 
             if args.audit:

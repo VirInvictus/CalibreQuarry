@@ -192,6 +192,13 @@ class RestrictedView(CalibreDB):
             if row["book"] in self._ids
         ]
 
+    def load_custom_column(self, col_name: str) -> dict[int, object]:
+        return {
+            book: value
+            for book, value in CalibreDB.load_custom_column(self, col_name).items()
+            if book in self._ids
+        }
+
     def search_book_text(
         self, query: str, *, fmt: str | None = None, ids: set[int] | None = None
     ) -> dict[int, set[str]]:
