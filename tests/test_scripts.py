@@ -1372,3 +1372,33 @@ class TestAuthorSortSanity(unittest.TestCase):
     def test_empty_sort_stays_silent(self):
         report = self._run([(1, "Untitled", "", [])])
         self.assertEqual(report.warnings, [])
+
+
+class TestIsbnChecksum(unittest.TestCase):
+    """Phase 19 B.4: DB-level ISBN check-digit validation via cquarry's
+    helper (the integer-constant case needs no file open)."""
+
+    def _run(self, isbns):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.executescript("CREATE TABLE identifiers (book INT, type TEXT, val TEXT)")
+        for i, val in enumerate(isbns, start=1):
+            cur.execute("INSERT INTO identifiers VALUES (?, 'isbn', ?)", (i, val))
+        report = validate_metadata.Reporter()
+        validate_metadata.check_isbn_checksum(cur, report)
+        return report
+
+    def test_bad_check_digit_is_flagged(self):
+        report = self._run(["9780441172718"])  # one digit off the Dune ISBN
+        codes = [c for c, _ in report.warnings]
+        self.assertEqual(codes, ["INVALID_ISBN"])
+        self.assertIn("9780441172718", report.warnings[0][1])
+
+    def test_valid_isbn_stays_silent(self):
+        report = self._run(["978-0441172719", "0441172717"])
+        self.assertEqual(report.warnings, [])
+
+    def test_empty_and_missing_values_ignored(self):
+        report = self._run(["", "   "])
+        self.assertEqual(report.warnings, [])

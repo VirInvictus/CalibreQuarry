@@ -387,6 +387,25 @@ def check_author_sort_sanity(cur, report: Reporter) -> None:
             )
 
 
+def check_isbn_checksum(cur, report: Reporter) -> None:
+    """DB-level ISBN shape/checksum (Phase 19 B.4) via cquarry's
+    existing helper: a typed-in ISBN with a bad check digit points at
+    no book at all, and catching it needs no file open. Warning class:
+    a mistyped ISBN is metadata damage, not library structure."""
+    from cquarry.helpers import isbn_check_digit_is_valid
+
+    cur.execute("SELECT book, val FROM identifiers WHERE type = 'isbn' AND val <> ''")
+    for r in cur.fetchall():
+        val = (r["val"] or "").strip()
+        if not val:
+            continue  # blank-ish is 'no ISBN', not an invalid one
+        if not isbn_check_digit_is_valid(val):
+            report.warning(
+                "INVALID_ISBN",
+                f"#{r['book']} has isbn '{val}' failing its check digit",
+            )
+
+
 def check_orphan_cc_links(cur, report: Reporter) -> None:
     cur.execute("SELECT id, label FROM custom_columns")
     for col in cur.fetchall():
@@ -586,6 +605,7 @@ def main() -> int:
         check_identifier_types(cur, report, forbidden, canonical, strict_ids)
         check_amazon_is_isbn10(cur, report)
         check_author_sort_sanity(cur, report)
+        check_isbn_checksum(cur, report)
         check_orphan_cc_links(cur, report)
         # Opinionated layer
         if spec is not None:
