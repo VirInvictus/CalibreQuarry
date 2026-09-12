@@ -416,6 +416,9 @@ class TestCalibredbSeams(unittest.TestCase):
 
         with (
             mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
             mock.patch("subprocess.run", side_effect=fake_run),
         ):
             code, out, _ = self.run_cli(
@@ -441,6 +444,9 @@ class TestCalibredbSeams(unittest.TestCase):
 
         with (
             mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
             mock.patch("subprocess.run", side_effect=fake_run) as mp,
         ):
             code, out, _ = self.run_cli(
