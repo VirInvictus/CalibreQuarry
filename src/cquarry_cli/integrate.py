@@ -339,16 +339,17 @@ def run_export(db, args, *, apply: bool) -> int:
         print("ERROR: calibredb is not on PATH.", file=sys.stderr)
         return 2
     ids = ",".join(str(p["book"]) for p in plans)
+    library = str(Path(db.db_path).resolve().parent)
     cmd = [
         "calibredb",
         "export",
         "--library",
-        db.db_path,
+        library,
         "--to-dir",
         args.dest,
         "--template",
         plans[0]["template"],
-        "--dont-save-opf",
+        "--dont-write-opf",
         ids,
     ]
     if not apply:
@@ -465,17 +466,20 @@ def run_flush(db, args, *, apply: bool) -> int:
         )
         return 0
     done = 0
+    # embed_metadata takes space-separated ids and hyphen ranges
+    # (calibredb embed_metadata 1 2 10-15); --library is a DIRECTORY.
+    library = str(Path(db.db_path).resolve().parent)
     for c in chunks:
-        span = f"{c[0]}-{c[-1]}" if len(c) > 1 else str(c[0])
+        targets = [str(c[0])] if len(c) == 1 else [f"{c[0]}-{c[-1]}"]
         proc = subprocess.run(
-            ["calibredb", "embed_metadata", "--library", db.db_path, span],
+            ["calibredb", "embed_metadata", "--library", library, *targets],
             capture_output=True,
             text=True,
             timeout=1800,
         )
         if proc.returncode != 0:
             print(
-                f"ERROR: embed_metadata {span} failed: {proc.stderr[:200]}",
+                f"ERROR: embed_metadata {targets} failed: {proc.stderr[:200]}",
                 file=sys.stderr,
             )
             return 1

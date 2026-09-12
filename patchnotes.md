@@ -1,5 +1,13 @@
 # CalibreQuarry — Patch Notes
 
+# 3.39.1 (2026-09-12)
+
+### The live drills caught two calibredb seams
+
+- **`run flush` passed metadata.db to `--library`**, which wants the library DIRECTORY: calibredb died with `apsw.CantOpenError` on every call. The verb now passes the directory and its id spans match calibredb's documented grammar (space-separated ids, hyphen ranges).
+- **`run export` passed `--dont-save-opf`**, which does not exist (the real flag is `--dont-write-opf`): every export refused with a usage error. Fixed, and both verbs now regression-test the exact command line they build. Found by the live mutating drills on a scratch library, which is what they are for.
+- Skills sync: swept both import skills for the C verbs; they are library-maintenance surfaces with no import-flow teaching and nothing went stale. Suite: 474 → 476 tests.
+
 # 3.39.0 (2026-09-12)
 
 ### Phase 19 C: the integration verbs (subprocess-driven; no new dependencies; every verb dry-run first)

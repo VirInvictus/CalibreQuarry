@@ -377,3 +377,85 @@ class TestPolishCoverFlush(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCalibredbSeams(unittest.TestCase):
+    """3.39.1 regression: --library takes the library DIRECTORY (not the
+    .db path) and export's skip-OPF flag is --dont-write-opf. Both were
+    caught by the live facility drills, not by mocked tests."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="cquarry_int3_"))
+        self.addCleanup(_rm, self.tmpdir)
+        self.db_path = _build(self.tmpdir)
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with contextlib.redirect_stdout(out):
+                code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_flush_passes_directory_and_id_list(self):
+        import sqlite3 as s3
+
+        con = s3.connect(self.db_path)
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS metadata_dirtied (book INT, "
+            "seq INTEGER PRIMARY KEY AUTOINCREMENT, format TEXT, "
+            "timestamp TIMESTAMP)"
+        )
+        con.execute("INSERT INTO metadata_dirtied (book) VALUES (1)")
+        con.commit()
+        con.close()
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--backup-dir",
+                str(self.tmpdir / ".." / "bak"),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        self.assertIn("--library", calls[-1])
+        self.assertEqual(
+            Path(calls[-1][calls[-1].index("--library") + 1]),
+            self.tmpdir,
+        )
+        self.assertIn("1", calls[-1])
+
+    def test_export_flag_is_dont_write_opf(self):
+        def fake_run(cmd, **kw):
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch("subprocess.run", side_effect=fake_run) as mp,
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "export",
+                "--dest",
+                str(self.tmpdir / "out"),
+                "--ids",
+                "1",
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        cmd = mp.call_args[0][0]
+        self.assertIn("--dont-write-opf", cmd)
+        self.assertNotIn("--dont-save-opf", cmd)
+        self.assertEqual(Path(cmd[cmd.index("--library") + 1]), self.tmpdir)
