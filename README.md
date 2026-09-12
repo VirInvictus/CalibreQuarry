@@ -45,11 +45,13 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 |------|------|-------------|
 | **Catalog** | `--catalog` | Formatted text catalog grouped by author, with ratings and series info |
 | **All wings** | `--all-wings` | Generate a separate catalog file for every virtual library |
+| **All saved searches** | `--all-saved-searches` | Generate a catalog per saved search into `--outdir` (the `--all-wings` analog); each file is headed with the search's expression, zero-hit searches write nothing and say so |
+| **Full-text search** | `--fts QUERY` | Content search over Calibre's `full-text-search.db` sidecar: what the books actually say, not their metadata. Case- and accent-folded; every match names its formats; each run ends with an index-staleness summary (unless `--quiet`), and `--fts-status` reports those classes on their own |
 | **Statistics** | `--stats` | Format breakdown, rating distribution, tag taxonomy, publisher counts |
-| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with manual conversion overrides and pending OPF sync |
+| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with manual conversion overrides and pending OPF sync; and audit the filesystem against the database (missing book dirs and format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths, root strays) |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
-| **Analytics** | `--analytics {author,pace,tags,genres,overlap}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, genre share breakdown (`--genre-depth N` descends the tag hierarchy), Wing-overlap analysis |
+| **Analytics** | `--analytics {author,pace,tags,genres,overlap,reading}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, genre share breakdown (`--genre-depth N` descends the tag hierarchy), Wing-overlap analysis, and reading analytics (status funnel in the column's enum order, recent finishes, days-from-added-to-finished; strictly read-only) |
 | **Export** | `--export` | Full library export to JSON, CSV, or an AI-readable flat format (includes native page counts) |
 | **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
 | **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
@@ -90,7 +92,7 @@ provenance, and every run of it takes a timestamped backup in
 `--backup-dir`. All of it needs the repository checkout (the verbs drive
 `scripts/`, which the wheel does not carry).
 
-Modifiers: `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search` (and emits the set writes' machine-readable report as JSON), `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout (and no file output can ever be the database itself: the read surface refuses `metadata.db` and its sqlite sidecars before anything opens, and stages every file through a temp copy so a failed report never truncates), `--quiet` suppresses decorative output.
+Modifiers: `--restrict SEARCH` scopes every read mode to the books matching a search expression (or `vl:Name` for a wing): stats, audits, analytics, exports, catalogs, and full-text search all compute over the restricted set only; write verbs and `--book`/`--id` refuse the combination, since explicit targets are not a set to narrow. `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search` (and emits the set writes' machine-readable report as JSON), `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout (and no file output can ever be the database itself: the read surface refuses `metadata.db` and its sqlite sidecars before anything opens, and stages every file through a temp copy so a failed report never truncates), `--quiet` suppresses decorative output.
 
 Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager (supporting `/` search and `n`/`N` match jumping) or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions, and a corrupt or foreign database at the configured path is reported in prose and re-prompted, never a traceback. Its menu covers every read mode above plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats, all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
 
@@ -170,6 +172,24 @@ cquarry --analytics author --db ~/Calibre/metadata.db
 cquarry --analytics pace --db ~/Calibre/metadata.db
 cquarry --analytics genres --db ~/Calibre/metadata.db
 cquarry --analytics genres --genre-depth 2 --db ~/Calibre/metadata.db
+
+# Reading analytics: the status funnel, recent finishes, days-to-read
+# (strictly read-only; the #reading_status write ban is untouched)
+cquarry --analytics reading --db ~/Calibre/metadata.db
+
+# Full-text content search: which books actually discuss something
+# (needs Calibre's FTS index; every run ends with an index-staleness
+# summary, and --fts-status prints just that)
+cquarry --fts "the spice must flow" --db ~/Calibre/metadata.db
+cquarry --fts-status --db ~/Calibre/metadata.db
+
+# Scope any read mode to a wing or expression with --restrict
+cquarry --stats --restrict "vl:The Tabletop" --db ~/Calibre/metadata.db
+cquarry --audit --restrict "tags:Fic.SciFi" --output scifi_audit.csv \
+    --db ~/Calibre/metadata.db
+
+# One catalog per saved search
+cquarry --all-saved-searches --outdir ~/docs/catalogs --db ~/Calibre/metadata.db
 
 # Export full library to JSON (or CSV, or an AI-readable flat format)
 cquarry --export --db ~/Calibre/metadata.db --format json --output library.json
@@ -441,21 +461,23 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 ## Full help output
 
 ```
-usage: cquarry [-h] [--version] [--catalog | --all-wings | --stats |
-               --analytics {author,pace,tags,genres,overlap} | --audit |
-               --recent [RECENT] | --series | --export | --search QUERY |
-               --wings | --tags | --book [BOOK_ID[,BOOK_ID...]] |
-               --entities KIND | --reading-progress | --columns | --info |
-               --exportlt | --export-annotations | --format-stats]
-               [--untagged] [--id BOOK_ID] [--plugin-data NAME] [--db DB]
-               [--wing WING] [--output OUTPUT] [--outdir OUTDIR]
-               [--format {json,csv,ai}] [--primary-only] [--show-tags]
-               [--show-id] [--genre-depth N] [--show-custom COL_NAME]
-               [--show-author-details] [--quiet] [--set-title BOOK_ID TITLE]
-               [--set-authors BOOK_ID NAMES] [--set-rating BOOK_ID STARS]
-               [--set-pubdate BOOK_ID DATE] [--clear-pubdate BOOK_ID]
-               [--set-comments BOOK_ID HTML] [--clear-comments BOOK_ID]
-               [--set-column BOOK_ID LABEL VALUE]
+usage: cquarry [-h] [--version] [--catalog | --all-wings |
+               --all-saved-searches | --stats |
+               --analytics {author,pace,tags,genres,overlap,reading} |
+               --audit | --recent [RECENT] | --series | --export |
+               --search QUERY | --fts QUERY | --fts-status | --wings |
+               --tags | --book [BOOK_ID[,BOOK_ID...]] | --entities KIND |
+               --reading-progress | --columns | --info | --exportlt |
+               --export-annotations | --format-stats] [--untagged]
+               [--id BOOK_ID] [--plugin-data NAME] [--db DB]
+               [--restrict SEARCH] [--wing WING] [--output OUTPUT]
+               [--outdir OUTDIR] [--format {json,csv,ai}] [--primary-only]
+               [--show-tags] [--show-id] [--genre-depth N]
+               [--show-custom COL_NAME] [--show-author-details] [--quiet]
+               [--set-title BOOK_ID TITLE] [--set-authors BOOK_ID NAMES]
+               [--set-rating BOOK_ID STARS] [--set-pubdate BOOK_ID DATE]
+               [--clear-pubdate BOOK_ID] [--set-comments BOOK_ID HTML]
+               [--clear-comments BOOK_ID] [--set-column BOOK_ID LABEL VALUE]
                [--clear-column BOOK_ID LABEL] [--add-tag BOOK_ID TAG]
                [--remove-tag BOOK_ID TAG]
                [--set-identifier BOOK_ID TYPE VALUE]
@@ -494,9 +516,14 @@ options:
   --version             show program's version number and exit
   --catalog             Build a text catalog
   --all-wings           Generate catalogs for all virtual libraries
+  --all-saved-searches  Generate a catalog per saved search (the --all-wings
+                        analog; files land in --outdir, one per search, scoped
+                        by --restrict when given)
   --stats               Show library statistics
-  --analytics {author,pace,tags,genres,overlap}
-                        Extended analytics and visualizations
+  --analytics {author,pace,tags,genres,overlap,reading}
+                        Extended analytics and visualizations (reading: status
+                        funnel and finish dates from
+                        #reading_status/#date_read; read-only)
   --audit               Report issues (untagged, unrated, series gaps,
                         conversion overrides)
   --recent [RECENT]     Show N most recently added books (default: 20)
@@ -507,6 +534,14 @@ options:
                         query = whole library). Supports custom grouped-search
                         terms (GroupName:query) and annotations: full-text
                         over e-reader highlights
+  --fts QUERY           Full-text content search over Calibre's full-text-
+                        search.db sidecar (what the books' text actually says,
+                        not metadata). Case- and accent-folded; composes with
+                        --restrict. Prints an index-staleness summary after
+                        the matches unless --quiet
+  --fts-status          Report FTS index staleness only: never-indexed
+                        formats, indexed-empty documents, stale entries queued
+                        for re-index, and extraction errors
   --wings               List all virtual library wings
   --tags                Dump every tag with its book count
   --book [BOOK_ID[,BOOK_ID...]]
@@ -534,6 +569,11 @@ options:
   --plugin-data NAME    With --catalog or --search: append a books_plugin_data
                         value (e.g. goodreads_id, wordcount) to each book line
   --db DB               Path to Calibre metadata.db (auto-detected if omitted)
+  --restrict SEARCH     Scope every read mode to books matching this search
+                        expression (or `vl:Name` for a virtual library):
+                        stats, audit, analytics, exports, catalogs, and the
+                        rest compute over the restricted set only. Refused
+                        with write verbs and --book/--id
   --wing WING           Filter to a specific virtual library wing
   --output OUTPUT       Output file path
   --outdir OUTDIR       Output directory for --all-wings (default: current

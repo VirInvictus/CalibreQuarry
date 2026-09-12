@@ -1,16 +1,73 @@
 # CalibreQuarry — Patch Notes
 
-# Unreleased
+# 3.37.0 (2026-09-12)
 
-- Adopts cquarry 1.18.0 (floor bump only; no behavior change required here
-  yet): the FTS sidecar reads, the search-parity honesty pass, and the write
-  completions land in the shared layer this CLI consumes; Phase 19 consumes
-  them for real.
-- Adopts cquarry 1.19.0 (floor bump only): the four approved write verbs land
-  in the shared layer -- rename_entity/remove_entity_everywhere (the
-  misspelled-author fix), set_cover/remove_cover (closes the low-res-cover
-  audit loop), the verbatim sort setters, and save/restore_original_format.
-  Phase 19's curation and cover verbs build directly on these.
+### Phase 19 A: --restrict scopes everything; FTS content search; the tree audit; reading analytics
+
+- **`--restrict SEARCH` scopes every read mode.** Stats, audits,
+  analytics, exports, catalogs, full-text search, and the rest compute
+  over the books matching a search expression (a wing composes as
+  `vl:Name`). The implementation is a scoping view over cquarry's
+  connection: every predicate and stat is still derived by cquarry,
+  only the inputs are scoped, and the two SQL-level aggregations
+  (entity counts, format stats) are recounted so they stay honest.
+  Book-level audit findings follow the restriction; library-shape ones
+  (orphan dirs, root strays) always report globally. Write verbs and
+  `--book`/`--id` refuse the combination (exit 2); a bad expression
+  exits 1 like `--search`. Upstream precedent: `--restrict-to` on
+  calibredb fts_search and restricted-id category counts.
+- **`--fts QUERY` searches what the books say.** Content search over
+  Calibre's `full-text-search.db` sidecar (the plain `books_text`
+  table; no FTS5 machinery), case- and accent-folded, every match
+  naming its formats, `--format json` export through the output guard.
+  Every run ends with an index-staleness summary in separate classes
+  (never indexed; indexed empty; extraction errors; stale entries
+  queued in `dirtied_formats`), and `--fts-status` reports just that.
+  A missing sidecar (the common case until Calibre builds its index)
+  degrades with a note, never an error.
+- **`--audit` now walks the filesystem.** Tree rows against the
+  database: missing book dirs and format files, extra format files and
+  unknown files inside book dirs, covers on disk the DB does not
+  claim, orphan book dirs and author dirs, malformed book-dir names,
+  stray root files, and unreadable directories. CQ-native by decision
+  (no calibredb dependency; the walk composes with `--restrict` and
+  the shared CSV shape); upstream check_library's class list is the
+  completeness checklist. `metadata.opf`, any `*.opf`, cover files,
+  and `data/` are never extras; name comparison is case-insensitive.
+- **`--analytics reading` (read-only).** The `#reading_status` funnel
+  in the column's configured enum order with `(no status)` last;
+  recent finishes from `#date_read`, newest first; days from added to
+  finished with median/mean/min/max and a stale-timestamp note. The
+  NON-NEGOTIABLES write ban is untouched: an mtime-pinned test proves
+  nothing writes. Missing columns degrade to a clear message.
+- **`--all-saved-searches`.** One catalog per saved search into
+  `--outdir` (the `--all-wings` analog), each headed with the search's
+  own expression; zero-hit searches write nothing and say so; an
+  unresolvable search is skipped with a warning, never a dead sweep.
+- **`@Name` user-category resolution: skipped by its own gate.** The
+  library's preferences carry zero user categories (read-only peek),
+  so the box records not-in-use instead of building a resolver. If
+  categories ever appear, the right home is the cquarry search engine.
+- Adopts cquarry 1.20.0 (floor bump ahead of Phase 19 C's integration
+  batch; the trash lifecycle and create/delete_custom_column land in
+  the shared layer this CLI's next release consumes).
+- Adopts cquarry 1.18.0 (floor bump only; no behavior change required
+  here yet): the FTS sidecar reads, the search-parity honesty pass, and
+  the write completions land in the shared layer this CLI consumes;
+  Phase 19 consumes them for real.
+- Adopts cquarry 1.19.0 (floor bump only): the four approved write verbs
+  land in the shared layer (rename_entity/remove_entity_everywhere, the
+  misspelled-author fix; set_cover/remove_cover, which closes the
+  low-res-cover audit loop; the verbatim sort setters; and
+  save/restore_original_format). Phase 19's curation and cover verbs
+  build directly on these.
+- Found while composing `--restrict` with the status column and
+  recorded for the cquarry lane: the contains form over a normalized
+  enum column (`#reading_status:Read`, quoted or not) currently
+  matches the whole library; the exact form (`#reading_status:=Read`)
+  is correct. Fixing it belongs upstream in the cquarry search engine.
+- The README's full help dump was regenerated from the live parser.
+  Suite: 385 → 433 tests.
 
 # 3.36.0 (2026-09-10)
 

@@ -1014,27 +1014,70 @@ analyzers, recorded there as well. Nothing here re-opens Phases 16-18.
 
 ### A. The read-surface batch
 
-- [ ] **`--fts` content search over `full-text-search.db`** (read-only;
-  the plain `books_text` table needs no FTS5 machinery — the read half
+- [x] **`--fts` content search over `full-text-search.db`** (read-only;
+  the plain `books_text` table needs no FTS5 machinery; the read half
   is cquarry Phase 13 A.1) with `--restrict-to`; plus index-staleness
   audit rows from `dirtied_formats`. M.
-- [ ] **`--restrict SEARCH` scoping every read mode** (stats, audit,
+  (SHIPPED 3.37.0, 6d9143d: `--fts QUERY` searches through cquarry's
+  `search_book_text` and `--fts-status` reports the staleness classes
+  separately (never indexed / indexed empty / extraction errors /
+  stale-queued from `dirtied_formats`); `--restrict` composes with
+  both. Route recorded: search and coverage via cquarry
+  (`get_text_extractions`); the `dirtied_formats` queue is the one
+  table cquarry 1.20 does not expose and is read directly with a
+  mode=ro connection, confined to the module. The extractor format set
+  is deliberately conservative so formats outside it are never
+  false-positived as never indexed.)
+- [x] **`--restrict SEARCH` scoping every read mode** (stats, audit,
   analytics, exports, catalog) by search or virtual library; upstream
   precedent `--restrict-to` (cmd_fts_search.py) and restricted-id
   category counts (db/categories.py:212). S/M.
-- [ ] **Filesystem-vs-database tree audit** as --audit rows: orphan
+  (SHIPPED 3.37.0 FIRST, d63ae32: a `RestrictedView`; a CalibreDB
+  subclass sharing the open connection; scopes every collection and
+  set-returning method, so analytics, integrity predicates, and the
+  series rollup run unchanged over the restricted universe; the two
+  SQL-level aggregations (entity counts, format stats) are recounted
+  from the scoped rows and merged with the real rows' secondary
+  columns. Write verbs and `--book`/`--id` refuse the combination
+  (exit 2); a bad expression exits 1 like `--search`. 24 tests pin
+  the per-mode semantics.)
+- [x] **Filesystem-vs-database tree audit** as --audit rows: orphan
   book dirs, extra/unknown files, missing/extra formats on disk,
   extra covers, malformed paths (upstream check_library parity,
   calibre/library/check_library.py:34-47; the CQ-native narrow form).
   M.
-- [ ] **Reading analytics (read-only)**: status funnel from
+  (SHIPPED 3.37.0, 39abea1: `--audit` grows issue_type `tree` rows
+  across the upstream CHECKS class list. ROUTE DECIDED: CQ-native,
+  not the calibredb subprocess; this package carries no calibredb
+  dependency, and the native walk composes with `--restrict` and the
+  shared CSV shape. Book-level classes follow the restriction;
+  library-shape classes (orphans, malformed dirs, strays) always
+  report globally against the view's origin. False-positive
+  tolerances: `metadata.opf`, any `*.opf`, cover files, and `data/`
+  are never extras; name comparison is case-insensitive.)
+- [x] **Reading analytics (read-only)**: status funnel from
   `#reading_status`; days-to-read and recent-finishes from `#date_read`.
   The NON-NEGOTIABLES write ban is untouched. S/M.
-- [ ] **`--all-saved-searches` catalog sweep** (the --all-wings analog;
+  (SHIPPED 3.37.0, fb0e085: `--analytics reading`; funnel in the
+  column's enum order with (no status) last, recent finishes newest
+  first, days-from-added-to-finished with a stale-timestamp note.
+  Read-only proven by an mtime-pinned test; missing columns degrade
+  to a clear message.)
+- [x] **`--all-saved-searches` catalog sweep** (the --all-wings analog;
   saved searches live in the preferences table). S.
-- [ ] **`@Name` user-category resolution** in search and analytics
+  (SHIPPED 3.37.0, e93c001: one catalog per saved search in `--outdir`,
+  headed with the search's provenance; zero-hit searches write nothing
+  and say so; unresolvable expressions skip with a warning. The real
+  library's single saved search matches 0 books and reports exactly
+  that.)
+- [x] **`@Name` user-category resolution** in search and analytics
   (upstream db/categories.py:114); only if the library's user
   categories are in active use. M.
+  (SKIPPED by the box's own gate, 2026-09-12: a read-only peek at the
+  real library's preferences shows ZERO user categories
+  (`get_user_categories()` is empty) and one saved search. Not in
+  use; recorded rather than built. If categories appear later, the
+  right home is the cquarry search engine, not this frontend.)
 
 ### B. The audit-depth batch (routing marked)
 

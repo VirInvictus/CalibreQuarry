@@ -5,6 +5,58 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.37.0 onward, Phase 19 A)
+
+- **`--restrict` is a scoping view, not per-mode filters.**
+  `src/cquarry_cli/restrict.py` holds `RestrictedView`, a `CalibreDB`
+  subclass built over an already-open connection (`__dict__` copy) whose
+  collection methods filter to the resolved id set. Analytics,
+  integrity predicates, and the series rollup run unchanged over the
+  view, so cquarry still derives everything; the frontend only scopes
+  inputs. The two SQL-level aggregations (`get_entities`,
+  `get_format_stats`) are recounted from the scoped rows and merged
+  with the real rows' secondary columns; `get_all_tags` derives from
+  scoped rows (distinct on-book tags, a different semantic than the
+  global tags table). `view.origin` is the unrestricted database: the
+  tree audit's orphan classes need it because orphans are library
+  shape, not restriction shape. The refusal gate (`restrict_refusal`)
+  checks an explicit write-flag dest tuple that must keep step with
+  `build_parser()`'s write/set groups; new write verbs must be added
+  there. Resolution happens once in `cli.main` (parse failure exits 1,
+  matching `--search`); write verbs and `--book`/`--id` refuse the
+  combination (exit 2).
+- **`--fts` route decision (recorded).** Content search goes through
+  cquarry's `search_book_text`; coverage flows through cquarry's
+  `get_text_extractions`; the sidecar's `dirtied_formats` queue is the
+  one table cquarry 1.20 does not expose, so `modes/fts.py` reads it
+  directly with a `db_uri_ro` connection, confined to that module.
+  Promoting a staleness predicate to cquarry remains a future option.
+  `TEXT_INDEX_FORMATS` is deliberately conservative (a format outside
+  it is never "never indexed"); the real library has never built the
+  sidecar, so the degrade path is the common case here.
+- **The tree audit is CQ-native by decision.** `modes/treeaudit.py`
+  walks the library tree read-only (upstream check_library's CHECKS is
+  the class checklist, not a subprocess to run; this package carries no
+  calibredb). Whitelists: `metadata.opf`, any `*.opf` (legacy
+  per-book metadata), `cover.jpg/jpeg/png` (extra only when
+  `has_cover` is false), `data/`; name comparison is case-insensitive;
+  the known-extension set mirrors upstream `BOOK_EXTENSIONS`. Tolerate
+  `failed_folder` rows in unreadable dirs instead of letting the walk
+  die.
+- **`--analytics reading` is read-only by charter** (the
+  NON-NEGOTIABLES `#reading_status` ban is untouched; an mtime-pinned
+  test proves it). The funnel renders in the column's configured enum
+  order. NOTE for searching enum columns: the exact form
+  `#reading_status:=Read` is correct; the contains form
+  (`#reading_status:Read`, quoted or not) currently matches the whole
+  library over normalized enum columns. That is a cquarry search
+  engine issue (found 2026-09-12, recorded here and in the audit
+  sheet); fixing it belongs upstream, not in this frontend.
+- **`@Name` user-category resolution was skipped by its own gate:**
+  the real library's preferences carry zero user categories (read-only
+  peek, 2026-09-12). If categories ever appear, the right home is the
+  cquarry search engine, not this frontend.
+
 ## Programmer-facing contract notes (cquarry >= 1.7)
 - `db.get_all_books()` rows expose `authors`, `tags`, `languages`, and `formats` as native `list[str]`. Never `.split(",")` them; comma-containing author/tag names are preserved by the link-table hydration. `normalize_author_display()` accepts both the legacy joined string and the list form.
 - Every book row also carries `size` (total `data.uncompressed_size` bytes, may be None) and, since cquarry >= 1.3/1.4, `pages` (native `books_pages_link`), `author_sorts`, and `author_links`.

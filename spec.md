@@ -1,8 +1,8 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.36.0  
+**Version:** 3.37.0  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry`, `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.20.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -80,11 +80,13 @@ The path is saved to config on first successful resolution.
 |------|------|-------------|
 | Catalog | `--catalog` | Formatted text grouped by author with ratings and series |
 | All wings | `--all-wings` | Separate catalog per virtual library |
+| All saved searches | `--all-saved-searches` | Separate catalog per saved search (`--outdir`), each headed with the search's expression |
 | Statistics | `--stats` | Format breakdown, ratings, tags, publishers |
-| Audit | `--audit` | Untagged, unrated, coverless/low-res books, and covers the DB claims but the disk lacks; deprecated formats; duplicates; series gaps; manual conversion overrides (per-book `conversion_options`, surfaced by size and format, never unpickled) |
+| Audit | `--audit` | Untagged, unrated, coverless/low-res books, and covers the DB claims but the disk lacks; deprecated formats; duplicates; series gaps; manual conversion overrides (per-book `conversion_options`, surfaced by size and format, never unpickled); filesystem-vs-database tree rows (missing book dirs/format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths, root strays) |
+| Full-text search | `--fts QUERY` | Content search over the `full-text-search.db` sidecar's plain `books_text` table (read-only; no FTS5 machinery), with an index-staleness summary after the matches; `--fts-status` reports the staleness classes on their own; `--format json` exports the matches |
 | Recent | `--recent N` | N most recently added books |
 | Series | `--series` | All series with completeness and gap detection |
-| Analytics | `--analytics {author,pace,tags,genres,overlap}` | Per-author stats, reading-pace trend, tag tree, genre share breakdown (`--genre-depth N` for deeper hierarchy levels), Wing overlap |
+| Analytics | `--analytics {author,pace,tags,genres,overlap,reading}` | Per-author stats, reading-pace trend, tag tree, genre share breakdown (`--genre-depth N` for deeper hierarchy levels), Wing overlap, reading analytics (`#reading_status` funnel in enum order, `#date_read` recent finishes, days-from-added-to-finished; read-only) |
 | Export | `--export` | Full library to JSON, CSV, or AI-readable format |
 | Search | `--search QUERY` | Books matching a search expression; prints to stdout, or a file with `--output` |
 | Annotations | `--export-annotations` | E-reader highlights/bookmarks/notes as JSON; `--id N` scopes to one book |
@@ -115,6 +117,7 @@ The path is saved to config on first successful resolution.
 | `--plugin-data NAME` | Append a `books_plugin_data` value (e.g. `goodreads_id`, `wordcount`) to catalog/search book lines |
 | `--output PATH` | Write to a file instead of stdout |
 | `--quiet` | Suppress decorative output |
+| `--restrict SEARCH` | Scope every read mode to the books matching a search expression (see §3.4) |
 
 ### 3.2 Writes (opt-in)
 
@@ -170,6 +173,41 @@ closes clean, so a failed report never leaves a truncated file. This is
 the last mile of the §4 read-only guarantee: the SQL layer opens
 `mode=ro`, and the output layer can no longer clobber the database from
 the write side of a report.
+
+### 3.4 The restrict view (Phase 19)
+
+`--restrict SEARCH` resolves once, read-only, through the search engine
+(virtual libraries compose as `vl:Name`), and every read mode then
+computes over that id set only. Mechanically it is a `RestrictedView`
+(a read-only `CalibreDB` subclass sharing the open connection) whose
+collection methods filter: analytics functions, integrity predicates,
+and the series rollup run unchanged over the restricted universe, so
+cquarry still derives every stat and the frontend only scopes inputs.
+The two SQL-level aggregations (entity counts, format stats) are
+recounted from the scoped rows and merged with the real rows'
+secondary columns. Book-level audit classes and the FTS staleness
+report follow the restriction; library-shape classes (orphan dirs,
+malformed paths, root strays) always report globally against the
+origin database, since they belong to no restriction. `--restrict`
+with write verbs, `--book`, or `--id` is refused (exit 2): write
+targets are chosen by `--ids`/`--from-search`, and explicit ids are
+not a set to narrow. An unparseable expression exits 1, matching
+`--search`; an empty result is a valid (empty) universe, not an error.
+
+### 3.5 Full-text content search (Phase 19)
+
+`--fts QUERY` searches the extracted plain text Calibre keeps in the
+`full-text-search.db` sidecar (the plain `books_text` table; the FTS5
+index tables are unqueryable outside Calibre). The match goes through
+cquarry's `search_book_text` (case- and accent-folded substring
+semantics, one hit per book naming its matching formats). `--fts-status`
+and the tail of every `--fts` run report index staleness in separate
+classes: never indexed (a text-capable format with no `books_text`
+row), indexed empty (zero extracted text, no error), extraction errors
+(`err_msg`), and stale-queued (the sidecar's `dirtied_formats` queue).
+The extractor format set is deliberately conservative: formats outside
+it are never reported as never indexed. A missing sidecar is the
+"never indexed everything" case with a prose note, never an error.
 
 ---
 
