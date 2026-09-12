@@ -222,3 +222,49 @@ class TestFtsStaleness(_FtsCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFtsCoverageInAudit(_FtsCase):
+    """Phase 19 B.6: the staleness classes render as --audit rows
+    (fts_coverage) when the sidecar exists, and stay out of the CSV
+    when it does not (the whole library would be one class)."""
+
+    def run_audit_csv(self, *extra):
+        import csv as csv_mod
+        import tempfile as tf
+
+        fd, path = tf.mkstemp(suffix=".csv", prefix="cquarry_fts_audit_")
+        os.close(fd)
+        self.addCleanup(os.unlink, path)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = main(["--audit", "--db", self.db_path, "--output", path, *extra])
+        self.assertEqual(code, 0, err.getvalue())
+        with open(path) as f:
+            rows = [
+                r for r in csv_mod.DictReader(f) if r["issue_type"] == "fts_coverage"
+            ]
+        return rows, out.getvalue()
+
+    def test_coverage_rows_render_with_sidecar(self):
+        rows, out = self.run_audit_csv()
+        found = {(r["id"], r["issues"]) for r in rows}
+        self.assertIn(("3", "fts_never_indexed [EPUB]"), found)
+        self.assertIn(("2", "fts_indexed_empty [EPUB]"), found)
+        self.assertIn(("2", "fts_extraction_error [PDF]"), found)
+        self.assertIn(("1", "fts_stale_queued [EPUB]"), found)
+        self.assertIn("FTS coverage: 4 finding(s)", out)
+
+    def test_no_sidecar_keeps_csv_silent(self):
+        os.unlink(os.path.join(self.tmpdir, "full-text-search.db"))
+        rows, out = self.run_audit_csv()
+        self.assertEqual(rows, [])
+        self.assertIn("FTS sidecar absent", out)
+        self.assertIn("4 text-capable format(s) never indexed", out)
+
+    def test_restrict_scopes_coverage_rows(self):
+        rows, _ = self.run_audit_csv("--restrict", "id:2")
+        found = {(r["id"], r["issues"]) for r in rows}
+        self.assertIn(("2", "fts_indexed_empty [EPUB]"), found)
+        self.assertNotIn(("3", "fts_never_indexed [EPUB]"), found)
+        self.assertNotIn(("1", "fts_stale_queued [EPUB]"), found)

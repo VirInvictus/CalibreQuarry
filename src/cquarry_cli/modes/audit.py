@@ -22,6 +22,7 @@ from cquarry.integrity import (
     find_unrated,
 )
 
+from cquarry_cli.modes.fts import fts_staleness
 from cquarry_cli.modes.treeaudit import print_tree_summary, tree_audit
 from cquarry_cli.output import open_output
 
@@ -137,6 +138,58 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
     # classes (orphans, malformed dirs, root strays) are global.
     issues.extend(tree_audit(db))
 
+    # FTS coverage audit (Phase 19 B.6): one row per (book, format) in a
+    # staleness class. With no sidecar the per-pair rows would be the
+    # whole library, so the CSV stays silent and the prose summary
+    # carries the never-indexed count instead.
+    staleness = fts_staleness(db)
+    if staleness["sidecar_present"]:
+        titles = {b["id"]: (b["title"] or "", b["author_sort"] or "") for b in books}
+        for bid, fmt in staleness["never_indexed"]:
+            title, author = titles.get(bid, ("", ""))
+            issues.append(
+                {
+                    "id": str(bid),
+                    "title": title,
+                    "author": author,
+                    "issue_type": "fts_coverage",
+                    "issues": f"fts_never_indexed [{fmt}]",
+                }
+            )
+        for bid, fmt in staleness["indexed_empty"]:
+            title, author = titles.get(bid, ("", ""))
+            issues.append(
+                {
+                    "id": str(bid),
+                    "title": title,
+                    "author": author,
+                    "issue_type": "fts_coverage",
+                    "issues": f"fts_indexed_empty [{fmt}]",
+                }
+            )
+        for bid, fmts in staleness["extraction_errors"].items():
+            title, author = titles.get(bid, ("", ""))
+            issues.append(
+                {
+                    "id": str(bid),
+                    "title": title,
+                    "author": author,
+                    "issue_type": "fts_coverage",
+                    "issues": f"fts_extraction_error [{', '.join(sorted(fmts))}]",
+                }
+            )
+        for bid, fmt in staleness["stale_queued"]:
+            title, author = titles.get(bid, ("", ""))
+            issues.append(
+                {
+                    "id": str(bid),
+                    "title": title,
+                    "author": author,
+                    "issue_type": "fts_coverage",
+                    "issues": f"fts_stale_queued [{fmt}]",
+                }
+            )
+
     fieldnames = ["id", "title", "author", "issue_type", "issues"]
     with open_output(output, db.db_path) as (f, out_path):
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -213,5 +266,30 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         print_tree_summary(
             [i for i in issues if i["issue_type"] == "tree"], quiet=quiet
         )
+
+        fts_rows = [i for i in issues if i["issue_type"] == "fts_coverage"]
+        if not quiet:
+            if staleness["sidecar_present"]:
+                counts = Counter(r["issues"].split(" [")[0] for r in fts_rows)
+                if counts:
+                    print(
+                        "\n"
+                        + color(
+                            f"FTS coverage: {len(fts_rows)} finding(s)",
+                            C_WARN,
+                        )
+                    )
+                    for cls, count in counts.most_common():
+                        print(f"  {cls}: {count}")
+            else:
+                never = len(staleness["never_indexed"])
+                print(
+                    "\n"
+                    + color(
+                        f"FTS sidecar absent ({never} text-capable "
+                        "format(s) never indexed; run --fts-status)",
+                        C_WARN,
+                    )
+                )
 
         print(f"\nFull report: {color(out_path, C_TITLE)}")
