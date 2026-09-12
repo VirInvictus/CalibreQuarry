@@ -8,6 +8,7 @@ from cquarry.integrity import find_untagged
 from cquarry_cli import VERSION
 from cquarry_cli.manifest import DEFAULT_AUDIENCE
 from cquarry_cli.output import OutputRefusedError
+from cquarry_cli.restrict import RestrictedView, restrict_refusal
 from cquarry_cli.modes.analytics import (
     show_author_stats,
     show_genre_breakdown,
@@ -206,6 +207,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--db",
         default=None,
         help="Path to Calibre metadata.db (auto-detected if omitted)",
+    )
+    p.add_argument(
+        "--restrict",
+        default=None,
+        metavar="SEARCH",
+        help="Scope every read mode to books matching this search "
+        "expression (or `vl:Name` for a virtual library): stats, audit, "
+        "analytics, exports, catalogs, and the rest compute over the "
+        "restricted set only. Refused with write verbs and --book/--id",
     )
     p.add_argument(
         "--wing", default=None, help="Filter to a specific virtual library wing"
@@ -778,6 +788,16 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         db_path = find_db(args.db)
 
+        # --restrict is a read-surface modifier (Phase 19 A.2). It composes
+        # with every read mode through the RestrictedView; the combinations
+        # where scoping is meaningless or dangerous are refused here,
+        # before anything opens.
+        if args.restrict:
+            refusal = restrict_refusal(args)
+            if refusal:
+                print(f"ERROR: --restrict {refusal}.", file=sys.stderr)
+                return 2
+
         # Set writes dispatch FIRST so a single-book/set combination is
         # rejected before any single-book verb executes; it returns None
         # when no set-mode flag is present. Write verbs (opt-in) are
@@ -792,8 +812,24 @@ def main(argv: list[str] | None = None) -> int:
         if handled is not None:
             return handled
 
-        if args.format_stats:
-            with CalibreDB(db_path) as db:
+        with CalibreDB(db_path) as db:
+            if args.restrict:
+                # One resolve point for the whole read surface: the view
+                # below scopes every mode's universe to these ids. A
+                # parse failure exits 1, matching --search's.
+                from cquarry.search import ParseException
+
+                try:
+                    restrict_ids = set(db.search(args.restrict))
+                except (ParseException, ValueError) as e:
+                    print(
+                        f"ERROR: could not parse the --restrict expression: {e}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                db = RestrictedView(db, restrict_ids)
+
+            if args.format_stats:
                 stats = db.get_format_stats()
                 total = sum(s["bytes"] for s in stats.values())
                 count_total = sum(s["count"] for s in stats.values())
@@ -802,9 +838,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{fmt:<10}{s['count']:>8}{s['bytes']:>16,}")
                 print("-" * 34)
                 print(f"{'TOTAL':<10}{count_total:>8}{total:>16,}")
-            return 0
+                return 0
 
-        with CalibreDB(db_path) as db:
             if args.export_annotations:
                 return run_annotations_export(
                     db, args.book_id, args.output, quiet=args.quiet
