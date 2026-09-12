@@ -16,7 +16,6 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest import mock
 
 from cquarry.db import CalibreDB
 
