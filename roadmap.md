@@ -1002,7 +1002,7 @@ two phase-1 seams and the output-path guard first, the manifest HMAC second,
 phase 3's rails third; the facility run that Phase 17's own postscript calls
 for should follow, not precede, those fixes.*
 
-## Phase 19: the upstream comparison — FTS search, scoping, the tree audit, and the utility integrations (proposed 2026-09-12, from REPORT-12-Sept.md)
+## Phase 19: the upstream comparison, FTS search, scoping, the tree audit, and the utility integrations (proposed 2026-09-12, from REPORT-12-Sept.md)
 
 Two research passes compared this repo against everything upstream
 Calibre exposes for library management (calibredb's 24 commands, the
@@ -1205,7 +1205,20 @@ analyzers, recorded there as well. Nothing here re-opens Phases 16-18.
   (SKIPPED by the recorded A.3 route decision: the tree audit shipped
   CQ-native in 3.37.0, so there is nothing for a subprocess to add.)
 
-Ship shape: A.2 (`--restrict`) first — it multiplies every other mode.
+Ship shape: A.2 (`--restrict`) first; it multiplies every other mode.
 Then A.1, B.1-B.8 (one audit class per commit, each with its fixture),
 then C. Every audit class ships with a fixture and a false-positive
 note; every integration ships with a dry-run before any write.
+
+## Recorded 2026-09-12 (manager verification pass; recorded options, not scheduled work)
+
+- Promotion option, sheet-recorded only until now: `ids=` scoping on
+  `get_entities`/the analytics surface (a future cquarry promotion
+  candidate; no consumer asks for it yet).
+- Functional-pass cosmetic (Matrix 3): a plan-line trailing space in
+  the drill output; recorded here because it lived only in the audit
+  sheet.
+- Routed from bindery-cli (the metadata-validity carve-out ruling,
+  2026-09-12): 51 OPF-085 invalid-UUID warnings plus a thin
+  date/language tail across the library. cquarry/CalibreQuarry own any
+  future metadata-quality work; bindery's side is closed.
