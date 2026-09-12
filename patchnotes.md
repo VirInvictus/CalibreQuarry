@@ -6,6 +6,11 @@
   yet): the FTS sidecar reads, the search-parity honesty pass, and the write
   completions land in the shared layer this CLI consumes; Phase 19 consumes
   them for real.
+- Adopts cquarry 1.19.0 (floor bump only): the four approved write verbs land
+  in the shared layer -- rename_entity/remove_entity_everywhere (the
+  misspelled-author fix), set_cover/remove_cover (closes the low-res-cover
+  audit loop), the verbatim sort setters, and save/restore_original_format.
+  Phase 19's curation and cover verbs build directly on these.
 
 # 3.36.0 (2026-09-10)
 
