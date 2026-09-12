@@ -1297,3 +1297,52 @@ class TestCheckPdf(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAuthorSortSanity(unittest.TestCase):
+    """Phase 19 B.3: advisory author_sort sweep, hosted locally in the
+    script by decision (the cquarry-predicate promotion is a future
+    option, never assumed to exist)."""
+
+    def _run(self, rows):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.executescript("""
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, author_sort TEXT);
+            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_authors_link (book INT, author INT);
+        """)
+        for bid, title, sort, authors in rows:
+            cur.execute("INSERT INTO books VALUES (?,?,?)", (bid, title, sort))
+            for aid, name in enumerate(authors, start=bid * 10):
+                cur.execute("INSERT INTO authors VALUES (?,?)", (aid, name))
+                cur.execute("INSERT INTO books_authors_link VALUES (?,?)", (bid, aid))
+        report = validate_metadata.Reporter()
+        validate_metadata.check_author_sort_sanity(cur, report)
+        return report
+
+    def test_never_inverted_multiword_sort_is_flagged(self):
+        report = self._run([(1, "Dune", "Frank Herbert", ["Frank Herbert"])])
+        codes = [c for c, _ in report.warnings]
+        self.assertIn("AUTHOR_SORT_NOT_INVERTED", codes)
+
+    def test_orphan_sort_is_flagged(self):
+        report = self._run([(1, "Dune", "Smersh, Beastly", ["Herbert, Frank"])])
+        codes = [c for c, _ in report.warnings]
+        self.assertIn("AUTHOR_SORT_ORPHAN", codes)
+
+    def test_proper_inversion_and_single_names_stay_silent(self):
+        report = self._run(
+            [
+                (1, "Dune", "Herbert, Frank", ["Herbert, Frank"]),
+                # Anonymous and single-word names: legitimate as-is.
+                (2, "Meditations", "Anonymous", ["Anonymous"]),
+                (3, "De Re Coquinaria", "Cicero", ["Cicero"]),
+            ]
+        )
+        self.assertEqual(report.warnings, [])
+
+    def test_empty_sort_stays_silent(self):
+        report = self._run([(1, "Untitled", "", [])])
+        self.assertEqual(report.warnings, [])

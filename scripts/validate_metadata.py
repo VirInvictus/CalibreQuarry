@@ -318,6 +318,54 @@ def check_amazon_is_isbn10(cur, report: Reporter) -> None:
             )
 
 
+def check_author_sort_sanity(cur, report: Reporter) -> None:
+    """Advisory sweep of books.author_sort (Phase 19 B.3; hosted locally
+    in this script by decision -- the cquarry-predicate promotion
+    remains a future option, do not assume it exists).
+
+    Two shapes are flagged: an author_sort that matches none of the
+    book's authors, and an author_sort identical to a multi-word display
+    name with no inversion comma (a person name that was never sorted).
+    Deliberate non-inverted sorts -- organizations, Anonymous, single
+    names, non-Western orders -- are false positives by nature; that is
+    why this is a warning and why the operator judges before editing.
+    """
+    cur.execute("""
+        SELECT b.id, b.title, b.author_sort, a.name AS author
+        FROM books b
+        JOIN books_authors_link bal ON bal.book = b.id
+        JOIN authors a ON a.id = bal.author
+    """)
+    books: dict[int, dict] = {}
+    for r in cur.fetchall():
+        entry = books.setdefault(
+            r["id"],
+            {
+                "title": r["title"],
+                "author_sort": (r["author_sort"] or "").strip(),
+                "authors": [],
+            },
+        )
+        entry["authors"].append(r["author"])
+    for bid in sorted(books):
+        entry = books[bid]
+        sort = entry["author_sort"]
+        if not sort:
+            continue
+        if sort not in entry["authors"]:
+            report.warning(
+                "AUTHOR_SORT_ORPHAN",
+                f"#{bid} '{entry['title']}' has author_sort '{sort}' "
+                "matching none of its authors",
+            )
+        elif ", " not in sort and len(sort.split()) > 1:
+            report.warning(
+                "AUTHOR_SORT_NOT_INVERTED",
+                f"#{bid} '{entry['title']}' has author_sort '{sort}' "
+                "identical to the display name (never inverted)",
+            )
+
+
 def check_orphan_cc_links(cur, report: Reporter) -> None:
     cur.execute("SELECT id, label FROM custom_columns")
     for col in cur.fetchall():
@@ -516,6 +564,7 @@ def main() -> int:
         check_no_sentinel_pubdate(cur, report)
         check_identifier_types(cur, report, forbidden, canonical, strict_ids)
         check_amazon_is_isbn10(cur, report)
+        check_author_sort_sanity(cur, report)
         check_orphan_cc_links(cur, report)
         # Opinionated layer
         if spec is not None:
