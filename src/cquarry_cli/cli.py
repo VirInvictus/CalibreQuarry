@@ -31,6 +31,7 @@ from cquarry_cli.modes.export import (
     run_export,
     run_search_export,
 )
+from cquarry_cli.modes.fts import run_fts_search, run_fts_status
 from cquarry_cli.modes.info import show_columns, show_info
 from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
@@ -113,6 +114,23 @@ def build_parser() -> argparse.ArgumentParser:
         "(prints to stdout unless --output is given; empty query = whole "
         "library). Supports custom grouped-search terms (GroupName:query) "
         "and annotations: full-text over e-reader highlights",
+    )
+    group.add_argument(
+        "--fts",
+        default=None,
+        metavar="QUERY",
+        help="Full-text content search over Calibre's full-text-search.db "
+        "sidecar (what the books' text actually says, not metadata). "
+        "Case- and accent-folded; composes with --restrict. Prints an "
+        "index-staleness summary after the matches unless --quiet",
+    )
+    group.add_argument(
+        "--fts-status",
+        dest="fts_status",
+        action="store_true",
+        help="Report FTS index staleness only: never-indexed formats, "
+        "indexed-empty documents, stale entries queued for re-index, and "
+        "extraction errors",
     )
     group.add_argument(
         "--wings", action="store_true", help="List all virtual library wings"
@@ -961,6 +979,15 @@ def main(argv: list[str] | None = None) -> int:
                     author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
+
+            if args.fts:
+                return run_fts_search(
+                    db, args.fts, args.output, fmt=args.format, quiet=args.quiet
+                )
+
+            if args.fts_status:
+                run_fts_status(db, quiet=args.quiet)
+                return 0
 
             if args.wings:
                 show_wings(db)

@@ -171,6 +171,24 @@ class RestrictedView(CalibreDB):
             if row["book"] in self._ids
         ]
 
+    def get_text_extractions(self, book_id: int | None = None) -> list[dict]:
+        if book_id is not None and book_id not in self._ids:
+            return []
+        return [
+            row
+            for row in CalibreDB.get_text_extractions(self)
+            if row["book"] in self._ids
+        ]
+
+    def search_book_text(
+        self, query: str, *, fmt: str | None = None, ids: set[int] | None = None
+    ) -> dict[int, set[str]]:
+        if ids is not None:
+            ids = set(ids) & self._ids
+        else:
+            ids = set(self._ids)
+        return CalibreDB.search_book_text(self, query, fmt=fmt, ids=ids)
+
     # --- the per-book getters: outside the universe nothing exists ---
 
     def get_book(self, book_id: int, include_comments: bool = False):
