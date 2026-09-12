@@ -220,10 +220,6 @@ class TestFtsStaleness(_FtsCase):
         self.assertEqual(before.st_mtime_ns, after.st_mtime_ns)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestFtsCoverageInAudit(_FtsCase):
     """Phase 19 B.6: the staleness classes render as --audit rows
     (fts_coverage) when the sidecar exists, and stay out of the CSV
@@ -268,3 +264,7 @@ class TestFtsCoverageInAudit(_FtsCase):
         self.assertIn(("2", "fts_indexed_empty [EPUB]"), found)
         self.assertNotIn(("3", "fts_never_indexed [EPUB]"), found)
         self.assertNotIn(("1", "fts_stale_queued [EPUB]"), found)
+
+
+if __name__ == "__main__":
+    unittest.main()
