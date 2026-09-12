@@ -323,15 +323,23 @@ def check_author_sort_sanity(cur, report: Reporter) -> None:
     in this script by decision -- the cquarry-predicate promotion
     remains a future option, do not assume it exists).
 
-    Two shapes are flagged: an author_sort that matches none of the
-    book's authors, and an author_sort identical to a multi-word display
-    name with no inversion comma (a person name that was never sorted).
+    Two shapes are flagged: an author_sort that matches no legitimate
+    shape of the book's authors, and an author_sort identical to a
+    multi-word display name with no inversion comma (a person name that
+    was never sorted). A sort "matches" when it equals the author's
+    display name, the authors-table sort column, or the mechanical
+    inversion of the display name ("Frank Herbert" -> "Herbert,
+    Frank"): those are all legitimate Calibre shapes, and without the
+    sort-column and inversion acceptance every properly-inverted book
+    in a real library flags as an orphan (the 2026-09-12 first cut's
+    false positive, caught by the real-library probe).
+
     Deliberate non-inverted sorts -- organizations, Anonymous, single
     names, non-Western orders -- are false positives by nature; that is
     why this is a warning and why the operator judges before editing.
     """
     cur.execute("""
-        SELECT b.id, b.title, b.author_sort, a.name AS author
+        SELECT b.id, b.title, b.author_sort, a.name AS name, a.sort AS asort
         FROM books b
         JOIN books_authors_link bal ON bal.book = b.id
         JOIN authors a ON a.id = bal.author
@@ -343,22 +351,35 @@ def check_author_sort_sanity(cur, report: Reporter) -> None:
             {
                 "title": r["title"],
                 "author_sort": (r["author_sort"] or "").strip(),
-                "authors": [],
+                "names": [],
+                "acceptable": set(),
+                "parts": [],
             },
         )
-        entry["authors"].append(r["author"])
+        name = (r["name"] or "").strip()
+        entry["names"].append(name)
+        entry["acceptable"].add(name)
+        if r["asort"]:
+            entry["acceptable"].add(r["asort"].strip())
+        if " " in name:
+            head, _, tail = name.rpartition(" ")
+            entry["acceptable"].add(f"{tail}, {head}")
+        entry["parts"].append(r["asort"].strip() if r["asort"] else name)
     for bid in sorted(books):
         entry = books[bid]
         sort = entry["author_sort"]
         if not sort:
             continue
-        if sort not in entry["authors"]:
+        if len(entry["parts"]) > 1:
+            # Calibre joins multi-author sorts with " & " (book order).
+            entry["acceptable"].add(" & ".join(entry["parts"]))
+        if sort not in entry["acceptable"]:
             report.warning(
                 "AUTHOR_SORT_ORPHAN",
                 f"#{bid} '{entry['title']}' has author_sort '{sort}' "
                 "matching none of its authors",
             )
-        elif ", " not in sort and len(sort.split()) > 1:
+        elif sort in entry["names"] and ", " not in sort and len(sort.split()) > 1:
             report.warning(
                 "AUTHOR_SORT_NOT_INVERTED",
                 f"#{bid} '{entry['title']}' has author_sort '{sort}' "

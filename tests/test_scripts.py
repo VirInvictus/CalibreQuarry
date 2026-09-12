@@ -1310,13 +1310,17 @@ class TestAuthorSortSanity(unittest.TestCase):
         cur = con.cursor()
         cur.executescript("""
             CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, author_sort TEXT);
-            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
             CREATE TABLE books_authors_link (book INT, author INT);
         """)
         for bid, title, sort, authors in rows:
             cur.execute("INSERT INTO books VALUES (?,?,?)", (bid, title, sort))
             for aid, name in enumerate(authors, start=bid * 10):
-                cur.execute("INSERT INTO authors VALUES (?,?)", (aid, name))
+                # authors rows carry (name, sort); a bare string means no
+                # sort-column value.
+                aname = name[0] if isinstance(name, tuple) else name
+                asort = name[1] if isinstance(name, tuple) else None
+                cur.execute("INSERT INTO authors VALUES (?,?,?)", (aid, aname, asort))
                 cur.execute("INSERT INTO books_authors_link VALUES (?,?)", (bid, aid))
         report = validate_metadata.Reporter()
         validate_metadata.check_author_sort_sanity(cur, report)
@@ -1331,6 +1335,28 @@ class TestAuthorSortSanity(unittest.TestCase):
         report = self._run([(1, "Dune", "Smersh, Beastly", ["Herbert, Frank"])])
         codes = [c for c, _ in report.warnings]
         self.assertIn("AUTHOR_SORT_ORPHAN", codes)
+
+    def test_real_library_shape_display_name_plus_sort_column(self):
+        # The real-library regression: authors.name holds the DISPLAY name
+        # and authors.sort the inverted one; a books.author_sort equal to
+        # that sort is the healthy case and must flag nothing. The first
+        # cut compared against display names only and flagged 7718 of
+        # 7842 real books as orphans.
+        report = self._run(
+            [
+                (1, "Dune", "Herbert, Frank", [("Frank Herbert", "Herbert, Frank")]),
+                (
+                    2,
+                    "Joint Book",
+                    "Herbert, Frank & Gibson, William",
+                    [
+                        ("Frank Herbert", "Herbert, Frank"),
+                        ("William Gibson", "Gibson, William"),
+                    ],
+                ),
+            ]
+        )
+        self.assertEqual(report.warnings, [])
 
     def test_proper_inversion_and_single_names_stay_silent(self):
         report = self._run(
