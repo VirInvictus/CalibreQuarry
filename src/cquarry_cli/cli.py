@@ -848,6 +848,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Path to Calibre metadata.db (before or after `run`)",
     )
+    # Same dual-position treatment for the report-shape and quiet flags.
+    run_p.add_argument(
+        "--format",
+        choices=["json"],
+        default=argparse.SUPPRESS,
+        help="emit the plan/report as JSON (before or after `run`)",
+    )
+    run_p.add_argument(
+        "--quiet",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="suppress decorative output (before or after `run`)",
+    )
     run_p.add_argument(
         "dir",
         nargs="?",

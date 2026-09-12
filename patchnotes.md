@@ -1,5 +1,19 @@
 # CalibreQuarry — Patch Notes
 
+# 3.39.2 (2026-09-12)
+
+### The functional-pass matrix audited backfill and the shared target plumbing; six defects fixed
+
+- **`run backfill --apply` was dead on arrival**: the command builder orphaned its own `--opf` argument (a leftover slice dropped the temp-file path), so the metadata source could never deliver and every book failed. Fixed and proven end to end: a mocked source writes a real OPF, the fetched title lands through cquarry's write module.
+- **`_apply_backfill` looked in the wrong namespace**: real fetch-ebook-metadata OPFs use `dc:`-prefixed elements; the code searched the opf wrapper namespace and would have found nothing. Fixed; the end-to-end test pins the real shape.
+- **`--fields comments` was accepted, planned, and then silently ignored** while reporting "applied": comments is now refused with the available list. Overwriting a curated description from a publisher OPF is a curation decision, not a backfill.
+- **`run backfill --apply` required no `--backup-dir`** despite mutating metadata.db: it is in the backup set now.
+- **`--search` silently beat `--ids`** when both were given (the ids, including unknown ones, were never validated): the combination is refused (exit 2), which is what "exactly one target source" always meant.
+- **A bad `--search` expression crashed with a raw traceback** in every verb: it is now a clean usage error (exit 2).
+- **`--format json` and `--quiet` work after `run`** (subcommand position), matching `--db`'s dual-position treatment; plans and reports carry `{plan}/{results}` JSON either way.
+- Backups moved to after plan validation: an invocation aborted by a usage error no longer writes a backup nobody needs (timestamped backups made this harmless, but it was undocumented behavior).
+- Found by the functional-pass matrix (inspection + dry-run probes) and closed with 6 new regression tests, including backfill's first. Suite: 476 → 482 tests.
+
 # 3.39.1 (2026-09-12)
 
 ### The live drills caught two calibredb seams

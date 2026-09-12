@@ -92,11 +92,20 @@ def _backup_db(db_path: str, backup_dir: str) -> str:
 
 def resolve_targets(db, args) -> list[int]:
     """Exactly one of --search/--ids (merge uses --keeper/--duplicate
-    instead). Unknown hand-supplied ids abort here, read-only."""
-    if getattr(args, "search", None):
-        ids = set(db.search(args.search))
-        return sorted(ids)
+    instead); giving both is refused, because silently preferring one
+    would leave the other's ids unvalidated. Unknown hand-supplied ids
+    abort here, read-only."""
+    search = getattr(args, "search", None)
     raw = getattr(args, "ids", None)
+    if search and raw:
+        raise ValueError("--search EXPR and --ids are exclusive")
+    if search:
+        from cquarry.search import ParseException
+
+        try:
+            return sorted(set(db.search(search)))
+        except ParseException as e:
+            raise ValueError(f"could not parse the search expression: {e}") from None
     if not raw:
         return []
     known = db.all_ids()
@@ -170,7 +179,7 @@ def plan_convert(db, args) -> list[dict]:
     return plans
 
 
-def run_convert(db, args, *, apply: bool) -> int:
+def run_convert(db, args, *, apply: bool, take_backup=None) -> int:
     try:
         plans = plan_convert(db, args)
     except ValueError as e:
@@ -178,6 +187,8 @@ def run_convert(db, args, *, apply: bool) -> int:
         return 2
     if not apply:
         return _print_plan(plans, args, "convert plan")
+    if take_backup and (rc := take_backup()):
+        return rc
     applied = failed = 0
     for p in plans:
         if p["action"] != "convert":
@@ -238,7 +249,7 @@ def plan_polish(db, args) -> list[dict]:
     return plans
 
 
-def run_polish(db, args, *, apply: bool) -> int:
+def run_polish(db, args, *, apply: bool, take_backup=None) -> int:
     try:
         plans = plan_polish(db, args)
     except ValueError as e:
@@ -246,6 +257,8 @@ def run_polish(db, args, *, apply: bool) -> int:
         return 2
     if not apply:
         return _print_plan(plans, args, "polish plan")
+    if take_backup and (rc := take_backup()):
+        return rc
     applied = failed = 0
     for p in plans:
         if p["action"] != "polish":
@@ -295,7 +308,7 @@ def plan_cover(db, args) -> list[dict]:
     return plans
 
 
-def run_cover(db, args, *, apply: bool) -> int:
+def run_cover(db, args, *, apply: bool, take_backup=None) -> int:
     try:
         plans = plan_cover(db, args)
     except ValueError as e:
@@ -303,6 +316,8 @@ def run_cover(db, args, *, apply: bool) -> int:
         return 2
     if not apply:
         return _print_plan(plans, args, "cover plan")
+    if take_backup and (rc := take_backup()):
+        return rc
     applied = failed = 0
     for p in plans:
         with WritableCalibreDB(db.db_path) as wdb:
@@ -329,7 +344,8 @@ def plan_export(db, args) -> list[dict]:
     ]
 
 
-def run_export(db, args, *, apply: bool) -> int:
+def run_export(db, args, *, apply: bool, take_backup=None) -> int:
+    """Export touches nothing in the library: no backup, ever."""
     try:
         plans = plan_export(db, args)
     except ValueError as e:
@@ -394,7 +410,7 @@ def plan_merge(db, args) -> list[dict]:
     ]
 
 
-def run_merge(db, args, *, apply: bool) -> int:
+def run_merge(db, args, *, apply: bool, take_backup=None) -> int:
     try:
         plans = plan_merge(db, args)
     except ValueError as e:
@@ -402,6 +418,8 @@ def run_merge(db, args, *, apply: bool) -> int:
         return 2
     if not apply:
         return _print_plan(plans, args, "merge plan")
+    if take_backup and (rc := take_backup()):
+        return rc
     applied = failed = 0
     for p in plans:
         p["results"] = []
@@ -445,7 +463,7 @@ def run_merge(db, args, *, apply: bool) -> int:
     return _print_results(plans, args, applied, failed)
 
 
-def run_flush(db, args, *, apply: bool) -> int:
+def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
     """Headless OPF-queue flush: calibredb embed_metadata for the ids in
     metadata_dirtied (chunked; the reconcile precedent)."""
     ids = db.get_dirtied_books()
@@ -465,6 +483,8 @@ def run_flush(db, args, *, apply: bool) -> int:
             f"chunk(s) of up to {chunk}: embed_metadata each"
         )
         return 0
+    if take_backup and (rc := take_backup()):
+        return rc
     done = 0
     # embed_metadata takes space-separated ids and hyphen ranges
     # (calibredb embed_metadata 1 2 10-15); --library is a DIRECTORY.
@@ -490,7 +510,10 @@ def run_flush(db, args, *, apply: bool) -> int:
 
 def plan_backfill(db, args) -> list[dict]:
     fields = [f for f in (args.fields or "").split(",") if f]
-    allowed = {"title", "authors", "publisher", "isbn", "comments"}
+    # comments is deliberately NOT offered: the OPF round-trip carries
+    # publisher HTML and overwriting a curated description from it is a
+    # curation decision, not a backfill.
+    allowed = {"title", "authors", "publisher", "isbn"}
     bad = [f for f in fields if f not in allowed]
     if bad:
         raise ValueError(
@@ -515,7 +538,7 @@ def plan_backfill(db, args) -> list[dict]:
     return plans
 
 
-def run_backfill(db, args, *, apply: bool) -> int:
+def run_backfill(db, args, *, apply: bool, take_backup=None) -> int:
     try:
         plans = plan_backfill(db, args)
     except ValueError as e:
@@ -523,6 +546,8 @@ def run_backfill(db, args, *, apply: bool) -> int:
         return 2
     if not apply:
         return _print_plan(plans, args, "backfill plan")
+    if take_backup and (rc := take_backup()):
+        return rc
     if not shutil.which("fetch-ebook-metadata"):
         print("ERROR: fetch-ebook-metadata is not on PATH.", file=sys.stderr)
         return 2
@@ -537,13 +562,14 @@ def run_backfill(db, args, *, apply: bool) -> int:
             query += ["--title", p["title"] or ""]
             if p["authors"]:
                 query += ["--authors", p["authors"][0]]
-        query += ["--opf", "-"]
         try:
             fd, opf = tempfile.mkstemp(suffix=".opf")
             os.close(fd)
-            query[-1] = opf
             proc = subprocess.run(
-                query[:-1], capture_output=True, text=True, timeout=300
+                [*query, "--opf", opf],
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
             if proc.returncode != 0 or os.path.getsize(opf) == 0:
                 p["result"] = "failed"
@@ -561,7 +587,13 @@ def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
     """Apply the requested fields from an OPF through cquarry writes."""
     import xml.etree.ElementTree as ET
 
-    ns = {"o": "http://www.idpf.org/2007/opf"}
+    # Real fetch-ebook-metadata OPFs declare the dc namespace and use
+    # dc:-prefixed elements (dc:title, dc:creator, ...); the opf prefix
+    # only wraps them.
+    ns = {
+        "o": "http://www.idpf.org/2007/opf",
+        "dc": "http://purl.org/dc/elements/1.1/",
+    }
     root = ET.parse(opf_path).getroot()
     meta = root.find("o:metadata", ns)
     if meta is None:
@@ -570,7 +602,7 @@ def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
         return False
 
     def _text(tag):
-        el = meta.find(f"o:{tag}", ns)
+        el = meta.find(f"dc:{tag}", ns)
         return el.text.strip() if el is not None and el.text else None
 
     with WritableCalibreDB(db.db_path) as wdb:
@@ -580,7 +612,7 @@ def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
             if "authors" in plan["fields"]:
                 names = [
                     c.text.strip()
-                    for c in meta.findall("o:creator", ns)
+                    for c in meta.findall("dc:creator", ns)
                     if c.text and c.text.strip()
                 ]
                 if names:
@@ -638,7 +670,9 @@ def dispatch_integrate(args) -> int:
     db_path = find_db(getattr(args, "db", None))
     apply = bool(getattr(args, "apply", False))
     verbs_need_targets = {"convert", "polish", "cover", "export", "backfill"}
-    needs_backup = {"convert", "polish", "cover", "merge", "flush"}
+    # backfill mutates metadata.db at --apply too (matrix-C finding:
+    # it was the one write verb escaping the backup requirement).
+    needs_backup = {"convert", "polish", "cover", "merge", "flush", "backfill"}
 
     if args.phase in verbs_need_targets and not (
         getattr(args, "search", None) or getattr(args, "ids", None)
@@ -662,7 +696,9 @@ def dispatch_integrate(args) -> int:
             )
             return 2
 
-    def _guarded_backup() -> int:
+    def take_backup() -> int:
+        """Called by the verbs AFTER plan validation, so an invocation
+        that aborts on usage never writes a backup nobody needs."""
         try:
             _backup_db(db_path, args.backup_dir)
         except ValueError as e:
@@ -672,11 +708,7 @@ def dispatch_integrate(args) -> int:
 
     with CalibreDB(db_path) as db:
         if args.phase == "merge":
-            if apply and args.backup_dir:
-                rc = _guarded_backup()
-                if rc:
-                    return rc
-            return run_merge(db, args, apply=apply)
+            return run_merge(db, args, apply=apply, take_backup=take_backup)
         verb = {
             "convert": run_convert,
             "polish": run_polish,
@@ -685,8 +717,5 @@ def dispatch_integrate(args) -> int:
             "flush": run_flush,
             "backfill": run_backfill,
         }[args.phase]
-        if apply and args.phase in needs_backup:
-            rc = _guarded_backup()
-            if rc:
-                return rc
-        return verb(db, args, apply=apply)
+        backup = take_backup if (apply and args.phase in needs_backup) else None
+        return verb(db, args, apply=apply, take_backup=backup)
