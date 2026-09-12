@@ -12,6 +12,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -163,6 +164,10 @@ def _build(tmpdir: Path) -> Path:
     return db_path
 
 
+@unittest.skipUnless(
+    shutil.which("pdfinfo"),
+    "poppler's pdfinfo is not installed (CI carries no poppler)",
+)
 class TestTruncation(unittest.TestCase):
     def setUp(self):
         self.tmpdir = Path(tempfile.mkdtemp(prefix="cquarry_trunc_"))
