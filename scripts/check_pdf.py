@@ -11,8 +11,9 @@ For each file it reports, without changing anything:
                 exits 3 on warning-only files all the time) / errors
                 (a real structural problem) / unavailable (no qpdf)
   fonts         pdffonts: how many fonts are NOT embedded (print hazard)
-  text_layer    pdftotext sample of page 1: present / absent / unavailable
-  images        pdfimages -list: image count
+  text_layer    pdftotext sampled at pages 1, middle, and last (the
+                page-1-only sample used to pass OCR-once scans)
+  images        pdfimages -list: image count and area-weighted DPI
 
 Every external tool is optional; a missing tool marks its check
 "unavailable" rather than failing the file. Exit codes: 0 all files
@@ -94,18 +95,61 @@ def _unembedded_fonts(path: str) -> int | None:
     return count
 
 
-def _has_text_layer(path: str) -> str:
-    proc = _run(["pdftotext", "-l", "1", path, "-"])
-    if proc is None or proc.returncode != 0:
-        return "unavailable"
-    return "present" if proc.stdout.strip() else "absent"
+def sample_pages(pages: int | None) -> list[int]:
+    """The page numbers the text layer is sampled at: 1, middle, last."""
+    if not pages:
+        return [1]
+    return sorted({1, (pages + 1) // 2, pages})
 
 
-def _image_count(path: str) -> int | None:
+def _text_layer_samples(path: str, pages: int | None) -> dict[str, str]:
+    """present/absent per sampled page (first/middle/last keys)."""
+    out: dict[str, str] = {}
+    labels = {1: "first", (pages + 1) // 2: "middle", pages: "last"}
+    for page in sample_pages(pages):
+        proc = _run(["pdftotext", "-f", str(page), "-l", str(page), path, "-"])
+        label = labels.get(page, f"p{page}")
+        if proc is None or proc.returncode != 0:
+            out[label] = "unavailable"
+        else:
+            out[label] = "present" if proc.stdout.strip() else "absent"
+    return out
+
+
+def _parse_pdfimages_list(stdout: str) -> dict | None:
+    """Image count and area-weighted DPI from `pdfimages -list` output.
+
+    Row shape (the documented header): page num type width height color
+    comp bpc enc interp object ID x-ppi y-ppi size ratio. The DPI is the
+    area-weighted mean of min(x-ppi, y-ppi), so a small logo cannot
+    hide a full-page 72-dpi scan. Pure: takes the tool's stdout.
+    """
+    images = []
+    for line in stdout.splitlines()[2:]:
+        cols = line.split()
+        if len(cols) < 14 or cols[0] == "page":
+            continue
+        try:
+            width, height = int(cols[3]), int(cols[4])
+            x_ppi, y_ppi = float(cols[12]), float(cols[13])
+        except ValueError:
+            continue
+        ppi = min(x_ppi, y_ppi)
+        if ppi <= 0 or width <= 0 or height <= 0:
+            continue
+        images.append({"area": width * height, "ppi": ppi})
+    if not images:
+        return {"count": 0, "weighted_ppi": None}
+    total_area = sum(i["area"] for i in images)
+    weighted = sum(i["area"] * i["ppi"] for i in images) / total_area
+    return {"count": len(images), "weighted_ppi": round(weighted, 1)}
+
+
+def _image_stats(path: str) -> dict | None:
     proc = _run(["pdfimages", "-list", path])
     if proc is None or proc.returncode != 0:
         return None
-    return max(0, len(proc.stdout.splitlines()) - 2)
+    return _parse_pdfimages_list(proc.stdout)
 
 
 def check_file(path: str) -> dict:
@@ -150,15 +194,36 @@ def check_file(path: str) -> dict:
             report["findings"].append(
                 {"kind": "unembedded_fonts", "detail": f"{fonts} font(s) not embedded"}
             )
-    layer = _has_text_layer(path)
-    report["text_layer"] = layer
-    if layer == "absent":
+    samples = _text_layer_samples(path, pages)
+    report["text_layer"] = samples
+    present = [v for v in samples.values() if v == "present"]
+    absent = [v for v in samples.values() if v == "absent"]
+    if absent and present:
         report["findings"].append(
-            {"kind": "text_layer", "detail": "no text on page 1 (scan?)"}
+            {
+                "kind": "text_layer_partial",
+                "detail": "text on some sampled pages only: an OCR pass "
+                "that covered page 1 (the old page-1 sample passed this), "
+                "or a truncated file",
+            }
         )
-    images = _image_count(path)
-    if images is not None:
-        report["image_count"] = images
+    elif absent:
+        report["findings"].append(
+            {"kind": "text_layer", "detail": "no text on any sampled page (scan?)"}
+        )
+    stats = _image_stats(path)
+    if stats is not None:
+        report["image_count"] = stats["count"]
+        if stats["weighted_ppi"] is not None:
+            report["avg_dpi"] = stats["weighted_ppi"]
+            if stats["weighted_ppi"] < 150:
+                report["findings"].append(
+                    {
+                        "kind": "low_dpi",
+                        "detail": f"area-weighted {stats['weighted_ppi']} dpi "
+                        "(below 150: soft or screen-resolution scans)",
+                    }
+                )
     return report
 
 

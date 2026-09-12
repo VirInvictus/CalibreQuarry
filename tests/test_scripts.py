@@ -1402,3 +1402,64 @@ class TestIsbnChecksum(unittest.TestCase):
     def test_empty_and_missing_values_ignored(self):
         report = self._run(["", "   "])
         self.assertEqual(report.warnings, [])
+
+
+check_pdf = _load("check_pdf")
+
+
+class TestCheckPdfDepth(unittest.TestCase):
+    """Phase 19 B.7: text sampled at 1/middle/last, image DPI parsed from
+    the existing pdfimages -list output (area-weighted)."""
+
+    def test_sample_pages_covers_first_middle_last(self):
+        self.assertEqual(check_pdf.sample_pages(1), [1])
+        self.assertEqual(check_pdf.sample_pages(2), [1, 2])
+        self.assertEqual(check_pdf.sample_pages(10), [1, 5, 10])
+        self.assertEqual(check_pdf.sample_pages(None), [1])
+
+    def test_partial_text_layer_is_its_own_finding(self):
+        # The page-1-only OCR pass: text on page 1, none mid/last. The old
+        # single-page sample called this file clean.
+        outputs = {
+            1: ("chapter one", 0),
+            3: ("", 0),
+            5: ("", 0),
+        }
+
+        def fake_run(cmd):
+            page = int(cmd[cmd.index("-f") + 1])
+            text, rc = outputs[page]
+            return subprocess.CompletedProcess(cmd, rc, text, "")
+
+        with mock.patch.object(check_pdf, "_run", side_effect=fake_run):
+            samples = check_pdf._text_layer_samples("f.pdf", 5)
+        self.assertEqual(
+            samples, {"first": "present", "middle": "absent", "last": "absent"}
+        )
+        report = {"findings": []}
+        present = [v for v in samples.values() if v == "present"]
+        absent = [v for v in samples.values() if v == "absent"]
+        if absent and present:
+            report["findings"].append({"kind": "text_layer_partial"})
+        self.assertEqual(report["findings"][0]["kind"], "text_layer_partial")
+
+    def test_pdfimages_parse_weights_by_area(self):
+        # A small sharp logo must not hide a full-page low-dpi scan.
+        header = (
+            "page num  type   width height color comp bpc enc interp "
+            "object ID x-ppi y-ppi size ratio\n"
+            "----------------------------------------------------------------"
+            "---------------\n"
+        )
+        big_low = "   1   0 image   600   800  rgb     3   8  image  no     187   0    72    72  2457600 jpeg\n"
+        small_sharp = "   1   1 image    50    50  rgb     3   8  image  no     201   0   600   600    7500 image\n"
+        stats = check_pdf._parse_pdfimages_list(header + big_low + small_sharp)
+        self.assertEqual(stats["count"], 2)
+        # (600*800*72 + 50*50*600) / (600*800 + 50*50) ~= 74.9
+        self.assertAlmostEqual(stats["weighted_ppi"], 74.9, delta=0.5)
+
+    def test_pdfimages_parse_handles_empty_and_junk(self):
+        self.assertEqual(
+            check_pdf._parse_pdfimages_list("no data here"),
+            {"count": 0, "weighted_ppi": None},
+        )
