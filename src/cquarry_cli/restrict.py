@@ -108,10 +108,22 @@ class RestrictedView(CalibreDB):
     def __init__(self, db: CalibreDB, ids: set[int]):
         self.__dict__.update(db.__dict__)
         self._ids = frozenset(ids)
+        self._origin = db
 
     @property
     def restrict_ids(self) -> frozenset[int]:
         return self._ids
+
+    @property
+    def origin(self) -> CalibreDB:
+        """The unrestricted database behind the view.
+
+        For the few checks that are library-shape rather than book-set
+        shaped (the tree audit's orphan classes): a directory is orphan
+        or not with respect to the whole library, whatever the active
+        restriction is.
+        """
+        return self._origin
 
     # --- the collection methods every mode and predicate consumes ---
 

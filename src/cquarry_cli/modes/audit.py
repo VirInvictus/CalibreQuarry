@@ -22,6 +22,7 @@ from cquarry.integrity import (
     find_unrated,
 )
 
+from cquarry_cli.modes.treeaudit import print_tree_summary, tree_audit
 from cquarry_cli.output import open_output
 
 
@@ -131,6 +132,11 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         )
     issues.extend(override_issues)
 
+    # Filesystem-vs-database tree audit (Phase 19 A.3, CQ-native route):
+    # book-level classes follow the active --restrict view, library-shape
+    # classes (orphans, malformed dirs, root strays) are global.
+    issues.extend(tree_audit(db))
+
     fieldnames = ["id", "title", "author", "issue_type", "issues"]
     with open_output(output, db.db_path) as (f, out_path):
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -203,5 +209,9 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 print(f"  #{bid} {titles.get(bid, '?')}")
             if len(dirtied) > 10:
                 print(f"  ... and {len(dirtied) - 10} more")
+
+        print_tree_summary(
+            [i for i in issues if i["issue_type"] == "tree"], quiet=quiet
+        )
 
         print(f"\nFull report: {color(out_path, C_TITLE)}")
