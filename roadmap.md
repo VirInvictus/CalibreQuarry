@@ -1001,3 +1001,92 @@ a ten-line fix that should not wait. Suggested order when work resumes: the
 two phase-1 seams and the output-path guard first, the manifest HMAC second,
 phase 3's rails third; the facility run that Phase 17's own postscript calls
 for should follow, not precede, those fixes.*
+
+## Phase 19: the upstream comparison — FTS search, scoping, the tree audit, and the utility integrations (proposed 2026-09-12, from REPORT-12-Sept.md)
+
+Two research passes compared this repo against everything upstream
+Calibre exposes for library management (calibredb's 24 commands, the
+GUI's library views and view layer, FTS, annotations, devices,
+conversion, the polish tool) and against the full audit/quality problem
+space. Full evidence and upstream pointers live in REPORT-12-Sept.md.
+Cross-repo routing: B3/B5/B6 route to cquarry predicates and bindery
+analyzers, recorded there as well. Nothing here re-opens Phases 16-18.
+
+### A. The read-surface batch
+
+- [ ] **`--fts` content search over `full-text-search.db`** (read-only;
+  the plain `books_text` table needs no FTS5 machinery — the read half
+  is cquarry Phase 13 A.1) with `--restrict-to`; plus index-staleness
+  audit rows from `dirtied_formats`. M.
+- [ ] **`--restrict SEARCH` scoping every read mode** (stats, audit,
+  analytics, exports, catalog) by search or virtual library; upstream
+  precedent `--restrict-to` (cmd_fts_search.py) and restricted-id
+  category counts (db/categories.py:212). S/M.
+- [ ] **Filesystem-vs-database tree audit** as --audit rows: orphan
+  book dirs, extra/unknown files, missing/extra formats on disk,
+  extra covers, malformed paths (upstream check_library parity,
+  calibre/library/check_library.py:34-47; the CQ-native narrow form).
+  M.
+- [ ] **Reading analytics (read-only)**: status funnel from
+  `#reading_status`; days-to-read and recent-finishes from `#date_read`.
+  The NON-NEGOTIABLES write ban is untouched. S/M.
+- [ ] **`--all-saved-searches` catalog sweep** (the --all-wings analog;
+  saved searches live in the preferences table). S.
+- [ ] **`@Name` user-category resolution** in search and analytics
+  (upstream db/categories.py:114); only if the library's user
+  categories are in active use. M.
+
+### B. The audit-depth batch (routing marked)
+
+- [ ] **Content-duplicate fingerprinting** (`audit_duplicates_content.py`):
+  64-bit simhash over 3-word shingles of spine text; clusters with
+  containment classification (re-download vs omnibus overlap). M.
+- [ ] **Truncation cross-checks**: PDF real page count vs Count Pages
+  data disagreeing >20% (the battery already reads the count), stale
+  plugin data reported as its own class. M (EPUB-tail half routed to
+  bindery).
+- [ ] **Author-sort sanity**: cquarry predicate `find_bad_author_sorts`
+  + --audit `bad_author_sort` render (advisory class; deliberate
+  non-inverted sorts documented). S/M (predicate half routed to
+  cquarry).
+- [ ] **DB-level ISBN checksum/shape** in validate_metadata
+  (INVALID_ISBN via cquarry's existing checksum helper). S (helper
+  routed to cquarry).
+- [ ] **Cover aspect distortion**: cquarry predicate
+  `find_distorted_covers` + --audit render (ratio bands, advisory). S
+  (predicate routed to cquarry).
+- [ ] **FTS coverage audit**: books absent from `full-text-search.db`
+  or indexed near-empty; "never indexed" vs "indexed empty" separate.
+  S (predicate routed to cquarry).
+- [ ] **PDF battery depth**: text layer sampled at pages 1/middle/last;
+  image DPI parsed from the existing `pdfimages -list` output. S.
+- [ ] **Copyright-year vs pubdate** as an audit_isbns extension
+  (VARIANT-class advisory; (c)-year patterns only). M.
+
+### C. The integration batch (all subprocess-driven; no new deps)
+
+- [ ] **`run convert` format-conversion batching**: drive
+  `ebook-convert` per search set; register output via cquarry
+  add_format/remove_format. M.
+- [ ] **Batch quality-polish**: drive `ebook-polish` (smarten, unused
+  CSS, image compression, font subset/embed, jacket, kepubify);
+  cquarry id sets + post-verify. M.
+- [ ] **Cover remediation verb**: drives cquarry `set_cover` (its
+  promotion candidate); closes the coverless/low-res audit loop. M.
+- [ ] **Save-to-disk bulk export**: drive `calibredb export --template`
+  per cquarry-resolved id sets. S.
+- [ ] **Duplicate-record merge verb**: compose add_format file
+  placement + remove_book; detection exists. M.
+- [ ] **Headless OPF-queue flush**: drive `calibredb
+  embed_metadata`/`backup_metadata` for dirtied ids (chunked embed
+  machinery exists in reconcile). S.
+- [ ] **Metadata-source backfill**: drive fetch-ebook-metadata for a
+  search set into OPF, then cquarry writes (pattern proven in run.py).
+  S-M.
+- [ ] **check_library subprocess parity** if A.3's native form is not
+  chosen. S.
+
+Ship shape: A.2 (`--restrict`) first — it multiplies every other mode.
+Then A.1, B.1-B.8 (one audit class per commit, each with its fixture),
+then C. Every audit class ships with a fixture and a false-positive
+note; every integration ships with a dry-run before any write.
