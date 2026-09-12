@@ -71,6 +71,29 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Tags** | `--tags` | Flat dump of every tag with its book count |
 | **Version** | `--version` | Show version and exit |
 
+### The integration verbs (Phase 19 C)
+
+`run convert`, `run polish`, `run cover`, `run export`, `run merge`,
+`run flush`, and `run backfill` drive the external tools
+(`ebook-convert`, `ebook-polish`, `calibredb`,
+`fetch-ebook-metadata`) over a resolved set and register the outcome
+through cquarry's write module. Every verb is a dry run until
+`--apply`, which demands a closed Calibre and (for the
+metadata-mutating verbs) a `--backup-dir` outside the library.
+
+```bash
+# Plan conversions for a wing, then run them
+cquarry run convert --search 'formats:PDF' --to EPUB --db ~/Calibre/metadata.db
+cquarry run convert --search 'formats:PDF' --to EPUB --apply     --backup-dir ~/backups --db ~/Calibre/metadata.db
+
+# Fold a duplicate into its keeper (unique formats move; the duplicate
+# lands in the library's trash, recoverable by hand)
+cquarry run merge --keeper 42 --duplicate 43 --apply     --backup-dir ~/backups --db ~/Calibre/metadata.db
+
+# Regenerate embedded metadata for everything Calibre has queued
+cquarry run flush --db ~/Calibre/metadata.db
+```
+
 ### The acquisition run verbs (Phase 17)
 
 `run phase1 DIR` vets a downloads directory and emits the batch manifest;

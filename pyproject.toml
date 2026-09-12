@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "calibrequarry"
-version = "3.38.0"
+version = "3.39.0"
 description = "Calibre library toolkit: catalog, stats, audit, export"
 readme = "README.md"
 keywords = ["calibre", "ebooks", "library", "tui", "cli"]

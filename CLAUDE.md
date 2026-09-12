@@ -214,3 +214,27 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   advisory:** the structural total (header, qpdf_errors) and the
   exit contract run.py's seam honors are unchanged, so phase-1
   manifests keep their shape.
+
+## Programmer-facing contract notes (3.39.0 onward, Phase 19 C)
+
+- **The integration verbs live in `src/cquarry_cli/integrate.py`** and
+  dispatch through `run`'s subparser (`INTEGRATE_PHASES` in run.py).
+  They are write-path code: read modes never import them. The shared
+  lifecycle is `dispatch_integrate`: usage guards (exit 2 before the
+  library opens), read-only target resolution (`--search`/`--ids`,
+  unknown ids abort), then dry-run plans or the guarded `--apply`
+  (anchored pgrep, timestamped `_backup_db` outside the library for
+  convert/polish/cover/merge/flush; export touches nothing and needs
+  no backup).
+- **External programs are subprocess seams**: ebook-convert,
+  ebook-polish, calibredb, fetch-ebook-metadata. Every seam tolerates
+  the binary being missing as a setup refusal (exit 2), never a
+  traceback. `run backfill` is the only verb that touches the network,
+  and only at `--apply` (fetch-ebook-metadata).
+- **run merge sends the duplicate to the trash**
+  (`remove_book(..., delete_files="trash")`, cquarry 1.20's
+  `.caltrash/b/<id>/`); `run flush` is the only verb that consumes a
+  queue rather than a target list, and an empty queue is exit 0.
+- **`run` accepts `--db` after the subcommand** (argparse SUPPRESS so
+  the pre-`run` form still wins); the facility-run doc has been
+  suggesting that shape all along.

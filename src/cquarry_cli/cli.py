@@ -731,10 +731,122 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.add_argument(
         "phase",
-        choices=("phase1", "sign", "phase2", "phase3"),
+        choices=(
+            "phase1",
+            "sign",
+            "phase2",
+            "phase3",
+            "convert",
+            "polish",
+            "cover",
+            "export",
+            "merge",
+            "flush",
+            "backfill",
+        ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; phase2: import the signed "
-        "manifest; phase3: curate + mechanical pass",
+        "manifest; phase3: curate + mechanical pass; the Phase 19 C "
+        "verbs (dry-run by default, --apply executes): convert "
+        "(ebook-convert), polish (ebook-polish), cover (set/remove "
+        "cover), export (calibredb), merge (duplicate into keeper), "
+        "flush (embed the OPF queue), backfill (metadata source)",
+    )
+    for flag, help_text in (
+        ("--search", "target set: books matching a search expression"),
+        ("--ids", "target set: explicit book ids (ID[,ID...])"),
+    ):
+        run_p.add_argument(flag, default=None, help=help_text)
+    run_p.add_argument(
+        "--apply",
+        dest="apply",
+        action="store_true",
+        help="execute the plan (default is a dry run)",
+    )
+    run_p.add_argument(
+        "--to",
+        dest="to",
+        default=None,
+        metavar="FORMAT",
+        help="convert: the output format",
+    )
+    run_p.add_argument(
+        "--from-format",
+        dest="from_format",
+        default=None,
+        metavar="FORMAT",
+        help="convert: the source format (default: the largest other format)",
+    )
+    run_p.add_argument(
+        "--polish-ops",
+        dest="polish_ops",
+        default=None,
+        metavar="OP[,OP...]",
+        help="polish: comma list of smarten,unused-css,compress-images,"
+        "subset-fonts,jacket,kepubify",
+    )
+    run_p.add_argument(
+        "--cover",
+        dest="cover",
+        default=None,
+        metavar="FILE",
+        help="cover: image file to place on every targeted book",
+    )
+    run_p.add_argument(
+        "--remove-cover",
+        dest="remove_cover",
+        action="store_true",
+        help="cover: remove the cover instead of setting one",
+    )
+    run_p.add_argument(
+        "--dest",
+        dest="dest",
+        default=None,
+        metavar="DIR",
+        help="export: destination directory",
+    )
+    run_p.add_argument(
+        "--template",
+        dest="template",
+        default=None,
+        metavar="TPL",
+        help="export: calibredb save template (default '{author_sort}/{title} {id}')",
+    )
+    run_p.add_argument(
+        "--keeper",
+        dest="keeper",
+        default=None,
+        metavar="ID",
+        help="merge: the book that survives",
+    )
+    run_p.add_argument(
+        "--duplicate",
+        dest="duplicate",
+        default=None,
+        metavar="ID",
+        help="merge: the book folded into the keeper (lands in the trash)",
+    )
+    run_p.add_argument(
+        "--chunk",
+        dest="chunk",
+        type=int,
+        default=None,
+        metavar="N",
+        help="flush: embed_metadata chunk size (default 50)",
+    )
+    run_p.add_argument(
+        "--fields",
+        dest="fields",
+        default=None,
+        metavar="F[,F...]",
+        help="backfill: comma list of title,authors,publisher,isbn,comments",
+    )
+    # --db in subparser position too (SUPPRESS keeps the main parser's
+    # value when the flag is only given before `run`).
+    run_p.add_argument(
+        "--db",
+        default=argparse.SUPPRESS,
+        help="Path to Calibre metadata.db (before or after `run`)",
     )
     run_p.add_argument(
         "dir",

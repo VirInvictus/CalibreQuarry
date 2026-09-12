@@ -1,5 +1,21 @@
 # CalibreQuarry — Patch Notes
 
+# 3.39.0 (2026-09-12)
+
+### Phase 19 C: the integration verbs (subprocess-driven; no new dependencies; every verb dry-run first)
+
+- **`run convert`**: `ebook-convert` over a resolved set (`--search`/`--ids`); the source is `--from-format` or the largest other format, the output lands in the book's directory under Calibre naming and registers through `WritableCalibreDB.add_format`. Failures are per-book and listed.
+- **`run polish`**: `ebook-polish` with `--polish-ops` (smarten, unused-css, compress-images, subset-fonts, jacket, kepubify) on each book's EPUB; the post-verify re-syncs the polished file's size through `set_format`, so Calibre never sees a stale size.
+- **`run cover`**: places an image (`--cover FILE`) or removes the cover (`--remove-cover`) through cquarry 1.19's `set_cover`/`remove_cover`; closes the loop the coverless/low-res/aspect audits open.
+- **`run export`**: `calibredb export --template` per resolved ids into `--dest`; calibredb missing is a clean setup refusal, not a traceback.
+- **`run merge --keeper ID --duplicate ID`**: the duplicate's unique formats are copied into the keeper's directory and registered, then the duplicate's removal goes to cquarry 1.20's trash (`.caltrash/b/<id>/`, recoverable by hand until expired or emptied).
+- **`run flush`**: the headless OPF-queue flush: `calibredb embed_metadata` over the `metadata_dirtied` ids in `--chunk` batches; an empty queue is a clean exit 0.
+- **`run backfill`**: drives `fetch-ebook-metadata` per book (network only at `--apply`) and applies the requested `--fields` through cquarry writes, one batch per book.
+- **Shared discipline across all seven**: dry-run by default with a printed plan; `--apply` demands a closed Calibre (anchored pgrep) and, for metadata-mutating verbs, a timestamped `--backup-dir` outside the library; targets resolve read-only first and unknown hand-supplied ids abort (exit 2) before anything opens writable; one report shape with per-book results and `--format json`.
+- **check_library subprocess parity: skipped** by the recorded A.3 route decision (the tree audit is CQ-native since 3.37.0).
+- Erratum for 3.38.0: that release's note said the skills sweep found "nothing stale"; the sweep also ADDED teaching (phase-1's check_pdf depth note and phase-3's year_mismatch interpretation), which the released entry undersold.
+- `run` now also accepts `--db` after the subcommand (the facility-run document has been suggesting that shape all along). Suite: 461 → 474 tests.
+
 # 3.38.0 (2026-09-12)
 
 ### Phase 19 B: the audit-depth batch (one class per commit, each with its fixture and false-positive note)

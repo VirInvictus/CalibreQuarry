@@ -1163,26 +1163,47 @@ analyzers, recorded there as well. Nothing here re-opens Phases 16-18.
 
 ### C. The integration batch (all subprocess-driven; no new deps)
 
-- [ ] **`run convert` format-conversion batching**: drive
+- [x] **`run convert` format-conversion batching**: drive
   `ebook-convert` per search set; register output via cquarry
   add_format/remove_format. M.
-- [ ] **Batch quality-polish**: drive `ebook-polish` (smarten, unused
+  (SHIPPED 3.39.0: source format is --from-format or the largest other
+  format; output registered through WritableCalibreDB.add_format;
+  dry-run plan, --apply with the closed-Calibre guard and a timestamped
+  backup outside the library.)
+- [x] **Batch quality-polish**: drive `ebook-polish` (smarten, unused
   CSS, image compression, font subset/embed, jacket, kepubify);
   cquarry id sets + post-verify. M.
-- [ ] **Cover remediation verb**: drives cquarry `set_cover` (its
+  (SHIPPED 3.39.0: --polish-ops maps onto ebook-polish flags; the
+  post-verify syncs the polished file's size through set_format.)
+- [x] **Cover remediation verb**: drives cquarry `set_cover` (its
   promotion candidate); closes the coverless/low-res audit loop. M.
-- [ ] **Save-to-disk bulk export**: drive `calibredb export --template`
+  (SHIPPED 3.39.0: cquarry 1.19 shipped set_cover/remove_cover, so the
+  verb rides them; --cover FILE or --remove-cover over --ids/--search.)
+- [x] **Save-to-disk bulk export**: drive `calibredb export --template`
   per cquarry-resolved id sets. S.
-- [ ] **Duplicate-record merge verb**: compose add_format file
+  (SHIPPED 3.39.0: run export --dest DIR [--template TPL]; calibredb
+  absence is a clean setup refusal.)
+- [x] **Duplicate-record merge verb**: compose add_format file
   placement + remove_book; detection exists. M.
-- [ ] **Headless OPF-queue flush**: drive `calibredb
+  (SHIPPED 3.39.0: run merge --keeper ID --duplicate ID; unique formats
+  move into the keeper's directory and register, and the duplicate's
+  removal goes to cquarry 1.20's trash (delete_files="trash",
+  .caltrash/b/<id>/, recoverable by hand).)
+- [x] **Headless OPF-queue flush**: drive `calibredb
   embed_metadata`/`backup_metadata` for dirtied ids (chunked embed
   machinery exists in reconcile). S.
-- [ ] **Metadata-source backfill**: drive fetch-ebook-metadata for a
+  (SHIPPED 3.39.0: run flush reads metadata_dirtied and embeds in
+  --chunk batches; empty queue is a clean exit 0.)
+- [x] **Metadata-source backfill**: drive fetch-ebook-metadata for a
   search set into OPF, then cquarry writes (pattern proven in run.py).
   S-M.
-- [ ] **check_library subprocess parity** if A.3's native form is not
+  (SHIPPED 3.39.0: run backfill --fields title,authors,publisher,isbn
+  drives fetch-ebook-metadata per book (network only at --apply) and
+  applies through cquarry writes in one batch per book.)
+- [x] **check_library subprocess parity** if A.3's native form is not
   chosen. S.
+  (SKIPPED by the recorded A.3 route decision: the tree audit shipped
+  CQ-native in 3.37.0, so there is nothing for a subprocess to add.)
 
 Ship shape: A.2 (`--restrict`) first — it multiplies every other mode.
 Then A.1, B.1-B.8 (one audit class per commit, each with its fixture),

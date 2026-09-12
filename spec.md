@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.38.0  
+**Version:** 3.39.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry` (>= 1.20.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -104,6 +104,7 @@ The path is saved to config on first successful resolution.
 | Run: sign | `run sign --manifest FILE` | Seal the reviewed manifest for phase 2: structure checks (no seal check, so re-signing after a deliberate edit works), then an HMAC seal over the approved set, the per-file stamps, provenance, and lossy flags, and the decisions list |
 | Run: phase2 | `run phase2 --manifest FILE` | Import the SIGNED, SEALED manifest as ONE `batch()` through `add_book` (the seal is recomputed at load; a post-sign edit refuses to load until re-signed); `#source`/`#audience` stamped, tags+rating cleared on the imported ids only, downloads after the commit (failures become decisions), resumable |
 | Run: phase3 | `run phase3 --manifest FILE` | Curate via TTY prompts or `--answer-file` in ONE `batch()`, then bindery phase3 + file reconciliation + re-validation to 0 errors and the prose batch record |
+| Run: integration verbs | `run convert\|polish\|cover\|export\|merge\|flush\|backfill` | The Phase 19 C batch (dry-run by default; `--apply` requires a closed Calibre and, for metadata-mutating verbs, a `--backup-dir` outside the library). convert drives `ebook-convert` and registers the output through `add_format`; polish drives `ebook-polish` and re-syncs the size; cover drives cquarry's `set_cover`/`remove_cover`; export drives `calibredb export --template`; merge folds a duplicate's unique formats into the keeper and sends the duplicate to cquarry 1.20's trash; flush embeds the OPF queue via `calibredb embed_metadata` in chunks; backfill drives `fetch-ebook-metadata` (network only at `--apply`) and applies the requested fields through cquarry writes. Targets resolve read-only from `--search`/`--ids`; unknown ids abort before anything opens writable |
 
 ### 3.1 Modifiers
 

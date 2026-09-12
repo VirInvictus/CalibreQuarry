@@ -1058,9 +1058,26 @@ def sign_manifest(manifest_path: str) -> int:
     return 0
 
 
+INTEGRATE_PHASES = (
+    "convert",
+    "polish",
+    "cover",
+    "export",
+    "merge",
+    "flush",
+    "backfill",
+)
+
+
 def dispatch_run(args) -> int:
-    """The `cquarry run` subcommand dispatch (phase1/sign/phase2/phase3)."""
+    """The `cquarry run` subcommand dispatch (the acquisition phases and
+    the Phase 19 C integration verbs)."""
     from cquarry_cli.cli import find_db
+
+    if args.phase in INTEGRATE_PHASES:
+        from cquarry_cli.integrate import dispatch_integrate
+
+        return dispatch_integrate(args)
 
     quiet = bool(getattr(args, "quiet", False))
     # Usage guards precede the library resolution for every phase: a
