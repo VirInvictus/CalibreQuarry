@@ -1,5 +1,12 @@
 # CalibreQuarry — Patch Notes
 
+# Unreleased
+
+- Adopts cquarry 1.18.0 (floor bump only; no behavior change required here
+  yet): the FTS sidecar reads, the search-parity honesty pass, and the write
+  completions land in the shared layer this CLI consumes; Phase 19 consumes
+  them for real.
+
 # 3.36.0 (2026-09-10)
 
 ### The audit mode absorbs conversion overrides
