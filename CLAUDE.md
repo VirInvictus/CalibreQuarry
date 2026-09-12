@@ -46,12 +46,14 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - **`--analytics reading` is read-only by charter** (the
   NON-NEGOTIABLES `#reading_status` ban is untouched; an mtime-pinned
   test proves it). The funnel renders in the column's configured enum
-  order. NOTE for searching enum columns: the exact form
-  `#reading_status:=Read` is correct; the contains form
-  (`#reading_status:Read`, quoted or not) currently matches the whole
-  library over normalized enum columns. That is a cquarry search
-  engine issue (found 2026-09-12, recorded here and in the audit
-  sheet); fixing it belongs upstream, not in this frontend.
+  order. NOTE for searching enum columns: prefer the exact form
+  (`#reading_status:=Read`) -- the contains form honestly substring-
+  matches every value containing the word (in this library "To Read",
+  "Reading", and "Read" all contain "read", so the contains form
+  matches the whole library). The 3.37-era note calling this a cquarry
+  engine issue was a MISDIAGNOSIS, retracted 2026-09-12 after
+  instrumented comparison with upstream's CONTAINS_MATCH
+  (calibre/db/search.py: `query in t`): cquarry is faithful.
 - **`@Name` user-category resolution was skipped by its own gate:**
   the real library's preferences carry zero user categories (read-only
   peek, 2026-09-12). If categories ever appear, the right home is the

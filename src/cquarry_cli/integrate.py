@@ -555,7 +555,11 @@ def run_backfill(db, args, *, apply: bool, take_backup=None) -> int:
     import tempfile
 
     for p in plans:
-        query = ["fetch-ebook-metadata", "--allowed-plugin", "Google Images"]
+        # No --allowed-plugin: by default every enabled metadata source
+        # runs, which is what a backfill wants ("Google Images" here was
+        # the cover plugin and silently allowed no metadata source at all
+        # -- caught by the authorized live drill, 3.39.2-era).
+        query = ["fetch-ebook-metadata", "-o"]
         if p["isbn"]:
             query += ["--isbn", p["isbn"]]
         else:
@@ -571,11 +575,13 @@ def run_backfill(db, args, *, apply: bool, take_backup=None) -> int:
                 text=True,
                 timeout=300,
             )
-            if proc.returncode != 0 or os.path.getsize(opf) == 0:
+            if proc.returncode != 0 or not proc.stdout.strip():
                 p["result"] = "failed"
                 p["detail"] = "metadata source returned nothing"
                 failed += 1
                 continue
+            with open(opf, "w", encoding="utf-8") as f:
+                f.write(proc.stdout)
             applied += 1 if _apply_backfill(db, p, opf, args) else 0
         finally:
             if os.path.exists(opf):

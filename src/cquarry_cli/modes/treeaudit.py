@@ -35,7 +35,12 @@ False-positive tolerances, on purpose: ``metadata.opf``, any ``*.opf``
 (Calibre's legacy per-book metadata habit), ``cover.jpg/jpeg/png``,
 and the ``data/`` directory are never extras; on-disk name comparison
 is case-insensitive, so an extension cased differently from the data
-row is not reported as a missing-plus-extra pair.
+row is not reported as a missing-plus-extra pair. At the library root,
+dot-entries and the workspace doc/tool set (``_ROOT_WORKSPACE``: the
+README/CLAUDE/roadmap family, the taxonomy files, validate_library.py)
+are never reported -- a library that doubles as a working checkout
+carries them by design, and reporting them was 93% of this audit's
+output on the real library (the 2026-09-12 whitelist decision).
 
 Book-level classes (missing dir/format/cover/extras) follow the active
 --restrict view; library-shape classes (orphans, malformed, strays)
@@ -136,6 +141,36 @@ _ROOT_IGNORES = {
     ".calnotes",
 }
 
+# Workspace furniture at the library root (the 2026-09-12 decision:
+# whitelisted in code). A library directory that doubles as a working
+# checkout carries these by design -- the .claude/ skills tree is
+# load-bearing -- and reporting them every run was 93% noise. Anything
+# dot-prefixed at the root is workspace, not Calibre (Calibre's own
+# .caltrash/.calnotes are listed above); the named files are the docs
+# and tools the ecosystem keeps beside metadata.db.
+_ROOT_WORKSPACE = frozenset(
+    {
+        "AGENTS.md",
+        "CLAUDE.md",
+        "MEMORY.md",
+        "README.md",
+        "roadmap.md",
+        "spec.md",
+        "patchnotes.md",
+        "refresh.md",
+        "TAXONOMY.md",
+        "taxonomy.json",
+        "taxonomy.yaml",
+        "validate_library.py",
+    }
+)
+
+
+def _is_root_furniture(name: str) -> bool:
+    """True for root entries the tree audit never reports."""
+    return name.startswith(".") or name in _ROOT_IGNORES or name in _ROOT_WORKSPACE
+
+
 _BOOK_DIR_ID = re.compile(r"^(.*) \((\d+)\)$")
 
 
@@ -225,7 +260,7 @@ def tree_audit(db: CalibreDB) -> list[dict[str, str]]:
         return rows
 
     for entry in top:
-        if entry.name in _ROOT_IGNORES or not entry.is_dir():
+        if not entry.is_dir() or _is_root_furniture(entry.name):
             continue
         if entry.name not in author_dirs:
             rows.append(_row("", entry.name, "orphan_author_dir"))
@@ -248,7 +283,7 @@ def tree_audit(db: CalibreDB) -> list[dict[str, str]]:
                 )
 
     for entry in top:
-        if not entry.is_dir() and entry.name not in _ROOT_IGNORES:
+        if not entry.is_dir() and not _is_root_furniture(entry.name):
             rows.append(_row("", entry.name, "extra_library_file"))
 
     return rows

@@ -90,7 +90,7 @@ CREATE TABLE books_custom_column_11_link (book INTEGER, value INTEGER,
 -- real enum values (cquarry 1.17's dispatch refuses the text+direct shape
 -- this fixture used to model, which no real Calibre schema creates).
 INSERT INTO custom_columns VALUES (10, 'source', 'Source', 'enumeration', 0, 1,
-    '{"enum_values": ["Standard Ebooks", "Library Genesis", "Bought EPUB", "Bought physical", "ripped", "Anna''s Archive", "Free", "Gifted", "Other"]}');
+    '{"enum_values": ["Standard Ebooks", "Library Genesis", "Bought EPUB", "Bought physical", "ripped", "Anna''s Archive", "Free", "Gifted", "Other", "Z-Library"]}');
 INSERT INTO custom_columns VALUES (11, 'audience', 'Audience', 'text', 1, 1, '{}');
 """
 
@@ -166,16 +166,18 @@ class TestProvenanceSeeds(unittest.TestCase):
             "Anna's Archive",
         )
 
-    def test_z_library_site_naming_seeds_other(self):
-        # z-lib downloads have no #source enum value of their own yet; the
-        # seed is the recorded practice of both runs ("Other") pending
-        # Brandon's Z-Library enum decision.
+    def test_z_library_site_naming_seeds_z_library(self):
+        # The Z-Library enum decision (2026-09-12): z-lib naming seeds the
+        # dedicated "Z-Library" value. The library's #source enum must
+        # carry the value BEFORE phase 2 stamps it -- enum validation
+        # refuses unknown values, deliberately loudly -- and the fixture's
+        # enum now includes it for exactly that reason.
         self.assertEqual(
             _provenance_from_filename(
                 "How to do things with videogames (Bogost, Ian) "
                 "(z-library.sk, 1lib.sk, z-lib.sk).pdf"
             ),
-            "Other",
+            "Z-Library",
         )
 
     def test_libgen_names_seed_library_genesis(self):

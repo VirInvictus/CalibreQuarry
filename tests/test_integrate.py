@@ -560,10 +560,11 @@ class TestMatrixCFixes(unittest.TestCase):
         )
 
         def fake_fetch(cmd, capture_output, text, timeout):
-            dst = cmd[cmd.index("--opf") + 1]
-            with open(dst, "w") as f:
-                f.write(opf_text)
-            return mock.Mock(returncode=0, stdout="", stderr="")
+            # The tool prints the OPF to stdout under `-o` (the 3.39.2
+            # cut passed --opf <file>, which fetch-ebook-metadata does
+            # not even know); the verb stages stdout to a temp file.
+            assert "-o" in cmd
+            return mock.Mock(returncode=0, stdout=opf_text, stderr="")
 
         with (
             mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),

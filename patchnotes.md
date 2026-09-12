@@ -1,5 +1,15 @@
 # CalibreQuarry — Patch Notes
 
+# 3.40.0 (2026-09-12)
+
+### The post-release decisions: whitelist, Z-Library provenance, and a retraction
+
+- **The enum "bug" was a misdiagnosis -- retracted.** The 3.37.0 notes recorded that the contains form over a normalized enum column (`#reading_status:Read`) matching the whole library was a cquarry engine issue. Instrumented comparison says otherwise: contains is honest case-insensitive substring semantics, identical to upstream's CONTAINS_MATCH (`query in t`), and in this library every status value -- "To Read", "Reading", "Read" -- contains the substring "read", so a full-library match is the correct answer. cquarry needed no fix. Prefer the exact form (`=Read`) for precise enum selection; that guidance stands.
+- **The tree audit whitelists the library root's workspace furniture** (the 2026-09-12 decision): dot-entries (`.claude/`, `.ruff_cache/`, `.nomedia`, `.trackerignore`) and the named doc/tool set (CLAUDE/AGENTS/MEMORY/README/roadmap/spec/patchnotes/refresh/TAXONOMY `.md`, `taxonomy.json`/`taxonomy.yaml`, `validate_library.py`) are never findings -- a library that doubles as a working checkout carries them by design. On the real library this drops 13 findings to zero.
+- **Z-Library provenance goes forward** (the enum decision pending since 3.35): z-lib filename markers (`z-library.sk`, `1lib.sk`, `z-lib.sk`) now seed #source "Z-Library" instead of "Other". Your one-time step: add the `Z-Library` value to the #source enum in Calibre BEFORE importing a z-lib batch -- enum validation refuses unknown values, deliberately. Existing "Other" rows stay untouched.
+- **`run backfill` live-verified** under an authorized one-off network drill on a scratch library: the fetch, the OPF round-trip, and the title write all work end to end (the drill also caught that the verb's plugin restriction allowed no metadata source at all; fixed alongside).
+- Suite: 482 → 483 tests.
+
 # 3.39.2 (2026-09-12)
 
 ### The functional-pass matrix audited backfill and the shared target plumbing; six defects fixed

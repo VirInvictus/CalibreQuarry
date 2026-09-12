@@ -11,6 +11,7 @@ from the --audit CSV rows (issue_type ``tree``).
 import csv
 import io
 import os
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -189,3 +190,72 @@ class TestTreeAudit(_TreeAuditCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRootWhitelist(unittest.TestCase):
+    """The 2026-09-12 decision: root dot-entries and the workspace
+    doc/tool set are never findings -- a library that doubles as a
+    working checkout carries them by design."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="cquarry_tree_wl_")
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, "metadata.db")
+        _build_db(self.db_path)
+        for name in (
+            ".claude",
+            ".ruff_cache",
+            ".nomedia",
+            ".trackerignore",
+            "CLAUDE.md",
+            "MEMORY.md",
+            "roadmap.md",
+            "refresh.md",
+            "TAXONOMY.md",
+            "taxonomy.yaml",
+            "validate_library.py",
+        ):
+            path = os.path.join(self.tmpdir, name)
+            if name in (".claude", ".ruff_cache"):
+                os.makedirs(path)
+            else:
+                with open(path, "w") as f:
+                    f.write("x")
+
+    def test_furniture_silent_real_strays_still_report(self):
+        out = io.StringIO()
+        err = io.StringIO()
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)
+        self.addCleanup(os.unlink, path)
+        with redirect_stdout(out), redirect_stderr(err):
+            code = main(["--audit", "--db", self.db_path, "--output", path])
+        self.assertEqual(code, 0)
+        with open(path) as f:
+            rows = [r for r in csv.DictReader(f) if r["issue_type"] == "tree"]
+        reported = {r["title"] for r in rows}
+        for name in (
+            ".claude",
+            ".ruff_cache",
+            ".nomedia",
+            ".trackerignore",
+            "CLAUDE.md",
+            "MEMORY.md",
+            "roadmap.md",
+            "refresh.md",
+            "TAXONOMY.md",
+            "taxonomy.yaml",
+            "validate_library.py",
+        ):
+            self.assertNotIn(name, reported)
+        # No book directories were built in this test: the three
+        # missing_book_dir rows are the only findings left, and every
+        # piece of furniture stayed silent.
+        self.assertEqual(
+            reported,
+            {
+                "Author A/Clean Book (1)",
+                "Author A/Sloppy Book (2)",
+                "Author B/Ghost Db Book (3)",
+            },
+        )

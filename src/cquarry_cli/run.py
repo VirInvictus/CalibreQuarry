@@ -160,14 +160,14 @@ def _stamps_from_filename(path: str) -> dict[str, Any]:
 #: manifest's provenance). Observed download naming, 2026-09-08 and
 #: 2026-09-10 runs: "(z-library.sk, 1lib.sk, z-lib.sk)" site suffixes, the
 #: "-- Anna's Archive" trailer, and libgen.li. The trailer names its source
-#: outright; libgen.* is the enum's "Library Genesis"; z-lib naming is its
-#: own route and has no #source enum value yet, so it seeds "Other" (the
-#: recorded practice of both runs) pending Brandon's Z-Library enum
-#: decision. A name carrying no marker seeds None: absence of evidence is
-#: not a source.
+#: outright; libgen.* is the enum's "Library Genesis". The Z-Library enum
+#: decision landed 2026-09-12: z-lib naming seeds "Z-Library" -- the value
+#: must exist in the library's #source enum BEFORE phase 2 stamps it
+#: (enum validation refuses unknown values, deliberately loudly). A name
+#: carrying no marker seeds None: absence of evidence is not a source.
 _PROVENANCE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"anna[’']s\s+archive", re.IGNORECASE), "Anna's Archive"),
-    (re.compile(r"\b(?:z[\s_-]?lib(?:rary)?|1lib)\b", re.IGNORECASE), "Other"),
+    (re.compile(r"\b(?:z[\s_-]?lib(?:rary)?|1lib)\b", re.IGNORECASE), "Z-Library"),
     (re.compile(r"\blibgen\b", re.IGNORECASE), "Library Genesis"),
 )
 
