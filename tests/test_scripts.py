@@ -1157,6 +1157,9 @@ class TestCommentsCensus(unittest.TestCase):
         self.assertEqual(scoped, {3: "<p>Three.</p>"})
 
 
+audit_isbns = _load("audit_isbns")
+
+
 class TestCheckPdf(unittest.TestCase):
     """Phase 17 box 2's battery: classification is pure; the tool
     invocations are mocked so the suite never needs qpdf/poppler."""
@@ -1463,3 +1466,29 @@ class TestCheckPdfDepth(unittest.TestCase):
             check_pdf._parse_pdfimages_list("no data here"),
             {"count": 0, "weighted_ppi": None},
         )
+
+
+class TestIsbnCopyrightYear(unittest.TestCase):
+    """Phase 19 B.8: (c)-years captured in the front-matter pass; a gap
+    over the tolerance against the pubdate year is VARIANT-class
+    advisory (a reprint legitimately prints the original year)."""
+
+    def test_year_shapes(self):
+        years = audit_isbns._copyright_years(
+            "Copyright (c) 1985, 2001 by Acme Books\n"
+            "Printed in the United States of America. 2019 is a print year "
+            "with no (c) marker."
+        )
+        self.assertEqual(years, [1985, 2001])
+
+    def test_bare_years_are_not_captured(self):
+        # Dates and phone fragments without copyright furniture stay out.
+        self.assertEqual(audit_isbns._copyright_years("met in 2019 and 2020"), [])
+
+    def test_gap_tolerance(self):
+        # Two years off: a normal paperback-original lag, not a finding.
+        self.assertFalse(audit_isbns._year_disagrees([2019], 2021))
+        # Three years off: advisory.
+        self.assertTrue(audit_isbns._year_disagrees([1985], 2020))
+        self.assertFalse(audit_isbns._year_disagrees([], 2020))
+        self.assertFalse(audit_isbns._year_disagrees([1985], None))

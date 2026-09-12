@@ -134,6 +134,16 @@ SELF_ID_RE = re.compile(
 )
 SELF_ID_WINDOW = 260
 
+# (c)-years on the copyright page (Phase 19 B.8): the classic shapes are
+# "(c) 2019", "(c) 2019 by Someone", "Copyright (c) 1985, 2001 Acme".
+COPYRIGHT_MARKER_RE = re.compile(r"\(c\)|©|copyright", re.IGNORECASE)
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+# A reprint legitimately prints the ORIGINAL copyright year, so the
+# comparison uses the earliest captured year against the pubdate year,
+# and only a gap of this many years or more is a finding: one or two
+# years off is a normal paperback-original / UK-US lag.
+YEAR_GAP_TOLERANCE = 2
+
 TAG_RE = re.compile(r"<[^>]+>")
 XHTML_SUFFIXES = (".xhtml", ".html", ".htm")
 
@@ -363,6 +373,31 @@ def classify(
     return "MISMATCH"
 
 
+def _copyright_years(text: str) -> list[int]:
+    """Distinct (c)-years in copyright-page shapes, ascending.
+
+    Each copyright marker opens a window over the rest of its line (a
+    real page lists "Copyright (c) 1985, 2001 by ..."; every year in
+    the window is a claimed copyright year). Bare years elsewhere
+    (dates, phone fragments) have no marker and stay out.
+    """
+    years: set[int] = set()
+    for m in COPYRIGHT_MARKER_RE.finditer(text or ""):
+        window = (text or "")[m.end() : m.end() + 60].splitlines()[0]
+        years.update(int(y) for y in _YEAR_RE.findall(window))
+    return sorted(years)
+
+
+def _year_disagrees(years: list[int], pub_year: int | None) -> bool:
+    """True when the earliest (c)-year and the pubdate year disagree by
+    more than YEAR_GAP_TOLERANCE. An old (c)-year with a recent pubdate
+    is usually a legitimate reprint; the advisory asks whether the
+    pubdate describes THIS edition."""
+    if not years or pub_year is None:
+        return False
+    return abs(years[0] - pub_year) > YEAR_GAP_TOLERANCE
+
+
 # --------------------------------------------------------------------------- #
 # database (read-only) and scoping
 # --------------------------------------------------------------------------- #
@@ -412,7 +447,7 @@ def load_targets(
     try:
         rows = con.execute(
             """
-            SELECT b.id, b.title, b.path, i.val
+            SELECT b.id, b.title, b.path, i.val, b.pubdate
               FROM books b
               JOIN identifiers i ON i.book = b.id AND i.type = 'isbn'
              ORDER BY b.id
@@ -443,6 +478,7 @@ def load_targets(
                 "isbn": to_isbn13(r[3]),
                 "tag": display_tag(tags, prefixes),
                 "tags": tags,
+                "pubdate": r[4],
             }
         )
     return out
@@ -470,6 +506,20 @@ def report_text(results: list[dict], quiet: bool) -> None:
             print(f"  [{r['verdict']}] #{r['id']} {_plain(r['title'])[:60]}")
             print(f"      stored:  {r['isbn']}")
             print(f"      printed: {', '.join(r['printed']) or '-'}  ({r['format']})")
+        print()
+
+    year_hits = [r for r in results if r.get("year_mismatch")]
+    if year_hits:
+        print(f"Copyright year vs pubdate ({len(year_hits)} advisory gap(s)):")
+        for r in year_hits:
+            print(
+                f"  #{r['id']} {_plain(r['title'])[:60]}  "
+                f"(c) {r['copyright_year']} vs pubdate {r['pub_year']}"
+            )
+        print(
+            "      A reprint prints the ORIGINAL copyright year; judge "
+            "whether the pubdate describes this edition."
+        )
         print()
 
     if not quiet:
@@ -567,12 +617,26 @@ def main() -> int:
             # no supported format present at all vs one that yielded nothing
             verdict = "SKIPPED" if fmt is None else "UNREADABLE"
             printed = []
+            years: list[int] = []
         else:
             printed = printed_isbns(text)
             claimed = self_identified_isbns(text)
             verdict = classify(target["isbn"], printed, args.max_printed, claimed)
+            years = _copyright_years(text)
+        pub_year = None
+        pubdate = target.get("pubdate") or ""
+        if pubdate[:4].isdigit():
+            pub_year = int(pubdate[:4])
         results.append(
-            {**target, "verdict": verdict, "printed": printed, "format": fmt}
+            {
+                **target,
+                "verdict": verdict,
+                "printed": printed,
+                "format": fmt,
+                "copyright_year": years[0] if years else None,
+                "pub_year": pub_year,
+                "year_mismatch": _year_disagrees(years, pub_year),
+            }
         )
 
     if args.format == "json":
@@ -583,7 +647,10 @@ def main() -> int:
     else:
         report_text(results, args.quiet)
 
-    flagged = any(r["verdict"] in (*FINDINGS, "UNREADABLE") for r in results)
+    flagged = any(
+        r["verdict"] in (*FINDINGS, "UNREADABLE") or r.get("year_mismatch")
+        for r in results
+    )
     return 1 if flagged else 0
 
 
