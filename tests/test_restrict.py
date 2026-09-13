@@ -374,6 +374,17 @@ class TestRestrictModes(_TempDBCase):
         self.assertEqual(code, 2)
         self.assertIn("--id", err)
 
+    def test_run_verbs_refused(self):
+        # 3.41.0: the run dispatch sits before the refusal gate in
+        # main(), so `--restrict EXPR run ...` used to silently ignore
+        # the modifier and execute unrestricted.
+        code, _, err = self.run_cli(
+            "--restrict", "id:1", "run", "flush", "--db", self.db_path
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("read modes only", err)
+        self.assertIn("run verbs", err)
+
     def test_empty_restriction_is_a_valid_universe(self):
         code, out, _ = self.run_cli(
             "--stats", "--restrict", "tags:NoSuchTag", "--db", self.db_path

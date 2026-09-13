@@ -1087,6 +1087,18 @@ def dispatch_run(args) -> int:
     the Phase 19 C integration verbs)."""
     from cquarry_cli.cli import find_db
 
+    # --restrict scopes the read surface only (spec 3.4); the run verbs
+    # take explicit targets. main() dispatches `run` before the
+    # read-surface refusal gate, so `--restrict EXPR run ...` used to
+    # silently ignore the modifier entirely.
+    if getattr(args, "restrict", None):
+        print(
+            "ERROR: --restrict scopes read modes only; the run verbs "
+            "take explicit targets (--ids/--search).",
+            file=sys.stderr,
+        )
+        return 2
+
     if args.phase in INTEGRATE_PHASES:
         from cquarry_cli.integrate import dispatch_integrate
 
