@@ -266,18 +266,35 @@ def show_reading_stats(db: CalibreDB, *, quiet: bool = False) -> None:
                 spans.append((parsed - added).days)
         if spans and not quiet:
             print(color("Days from added to finished:", C_HEADER))
-            print(
-                f"  median {median(spans):.0f}   mean {mean(spans):.1f}   "
-                f"min {min(spans)}   max {max(spans)}   ({len(spans)} books)"
-            )
-            negative = sum(1 for s in spans if s < 0)
-            if negative:
+            era = [s for s in spans if s >= 0]
+            pre = [s for s in spans if s < 0]
+            if pre:
+                # The era cut (2026-09-13): backfilled pre-library reads
+                # dominated the combined median (the real library's was
+                # -489), so the two populations report separately.
+                if era:
+                    print(
+                        f"  library era:  median {median(era):.0f}   "
+                        f"mean {mean(era):.1f}   min {min(era)}   "
+                        f"max {max(era)}   ({len(era)} books)"
+                    )
+                print(
+                    f"  pre-library:  median {median(pre):.0f}   "
+                    f"mean {mean(pre):.1f}   min {min(pre)}   "
+                    f"max {max(pre)}   ({len(pre)} book(s) finished "
+                    "before their added date)"
+                )
                 print(
                     color(
-                        f"  {negative} book(s) finished before their added "
-                        "date (pre-library reads or a stale timestamp).",
+                        "  Pre-library reads are backfilled history; the "
+                        "era split keeps them from dominating the median.",
                         C_DIM,
                     )
+                )
+            else:
+                print(
+                    f"  median {median(spans):.0f}   mean {mean(spans):.1f}   "
+                    f"min {min(spans)}   max {max(spans)}   ({len(spans)} books)"
                 )
             print(
                 color(

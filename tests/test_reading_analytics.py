@@ -129,13 +129,18 @@ class TestReadingAnalytics(_ReadingCase):
         second = out.index("2025-12-15  The Blade Itself")
         self.assertLess(first, second)
 
-    def test_days_to_read_includes_stale_note(self):
+    def test_days_to_read_splits_the_eras(self):
+        # The era cut (2026-09-13): a backfilled pre-library read used to
+        # drag the single median negative (the real library's was -489),
+        # so the mixed case reports the two populations separately.
         code, out, _ = self.run_cli("--analytics", "reading", "--db", self.db_path)
         self.assertIn("Days from added to finished:", out)
-        self.assertIn("mean 51.5", out)
-        self.assertIn("min -17", out)
-        self.assertIn("max 120", out)
+        self.assertIn("library era:", out)
+        self.assertIn("median 120", out)
+        self.assertIn("pre-library:", out)
+        self.assertIn("median -17", out)
         self.assertIn("finished before their added date", out)
+        self.assertIn("era split keeps them from dominating", out)
         self.assertIn("not the date reading started", out)
 
     def test_restrict_scopes_every_section(self):
@@ -157,6 +162,27 @@ class TestReadingAnalytics(_ReadingCase):
         code, _, _ = self.run_cli("--analytics", "reading", "--db", self.db_path)
         self.assertEqual(code, 0)
         self.assertEqual(before, os.stat(self.db_path).st_mtime_ns)
+
+
+class TestReadingAnalyticsSingleEra(_ReadingCase):
+    """No pre-library reads: the single-median shape is unchanged."""
+
+    def setUp(self):
+        super().setUp()
+        import sqlite3 as s3
+
+        con = s3.connect(self.db_path)
+        con.execute("UPDATE custom_column_2 SET value='2026-03-01' WHERE book=2")
+        con.commit()
+        con.close()
+
+    def test_no_negatives_keeps_the_single_median(self):
+        code, out, _ = self.run_cli("--analytics", "reading", "--db", self.db_path)
+        self.assertIn("Days from added to finished:", out)
+        self.assertIn("median 90", out)
+        self.assertIn("(2 books)", out)
+        self.assertNotIn("pre-library:", out)
+        self.assertNotIn("library era:", out)
 
 
 class TestReadingAnalyticsNoColumns(_ReadingCase):
