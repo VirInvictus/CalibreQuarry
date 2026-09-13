@@ -670,6 +670,30 @@ class TestMatrixCFixes(unittest.TestCase):
         with CalibreDB(str(self.db_path)) as db:
             self.assertEqual(db.get_book(1)["title"], "Backfilled Title")
 
+
+    def test_plan_lines_carry_no_trailing_space(self):
+        # The Matrix 3 cosmetic: detail-less plan lines (backfill, polish,
+        # cover) ended with a trailing space after the action.
+        import contextlib as cl
+
+        buf = io.StringIO()
+        with cl.redirect_stdout(buf), cl.redirect_stderr(io.StringIO()):
+            rc = main(
+                [
+                    "run",
+                    "backfill",
+                    "--fields",
+                    "title",
+                    "--ids",
+                    "1",
+                    "--db",
+                    str(self.db_path),
+                ]
+            )
+        self.assertEqual(rc, 0)
+        for line in buf.getvalue().splitlines():
+            self.assertFalse(line != line.rstrip(), repr(line))
+
     def test_format_json_after_run(self):
         code, out, _ = self.run_cli(
             "run",

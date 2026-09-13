@@ -723,7 +723,10 @@ def _print_plan(plans: list[dict], args, title: str) -> int:
         detail = p.get("detail") or p.get("source") or ""
         if p.get("moves"):
             detail += " moves: " + ", ".join(m["fmt"] for m in p["moves"])
-        print(f"  #{p['book']} {p['action']} {detail}")
+        line = f"  #{p['book']} {p['action']}"
+        if detail:
+            line += f" {detail}"
+        print(line)
     print(
         "\nDry run: nothing executed. Pass --apply to run it "
         "(Calibre closed, --backup-dir outside the library)."
