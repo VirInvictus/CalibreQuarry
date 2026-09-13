@@ -14,6 +14,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from cquarry.db import CalibreDB
+
 from cquarry_cli import tui
 
 _GARBAGE = b"this is definitely not a sqlite database\n" * 8
@@ -119,3 +121,102 @@ class TestMenuDegrade(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMenuSections(unittest.TestCase):
+    """The menu structure: the Phase 19 read surfaces have entries, and
+    the Settings coordinates the s/q aliases pin are unchanged."""
+
+    def test_new_read_surfaces_are_on_the_menu(self):
+        sections = tui._menu_sections()
+        first = dict(sections)[""]
+        analytics = dict(sections)["Analytics"]
+        self.assertIn("Content Search (FTS)", first)
+        self.assertIn("Saved Search Catalogs", first)
+        self.assertIn("Library Health", first)
+        self.assertIn("Reading Analytics", analytics)
+        self.assertIn("FTS Index Status", analytics)
+
+    def test_settings_coordinates_are_stable(self):
+        # s/q are letter aliases onto (5, 0)/(5, 1): inserting a section
+        # or reordering Settings breaks them silently.
+        sections = tui._menu_sections()
+        self.assertEqual(sections[-1][0], "Settings")
+        self.assertEqual(sections[-1][1], ["Change Database", "Quit"])
+        self.assertEqual(tui._SEL_CHANGE_DB, (5, 0))
+        self.assertEqual(tui._SEL_QUIT, (5, 1))
+
+
+class TestRestrictedPrompt(unittest.TestCase):
+    """The shared scope prompt behind the new entries: blank keeps the
+    whole library, an expression wraps the session db in the CLI's
+    RestrictedView, a parse failure notifies and stays unrestricted."""
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db", prefix="cquarry_tuir_")
+        os.close(fd)
+        con = sqlite3.connect(self.db_path)
+        con.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT,
+                author_sort TEXT, timestamp TEXT, pubdate TEXT, has_cover INT,
+                last_modified TEXT, series_index REAL DEFAULT 1.0, path TEXT,
+                uuid TEXT);
+            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
+            CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT,
+                author INT);
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT,
+                tag INT);
+            CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT,
+                series INT);
+            CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT);
+            CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT,
+                rating INT);
+            CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT,
+                publisher INT);
+            CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
+            CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT,
+                lang_code INT);
+            CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT,
+                name TEXT, uncompressed_size INT);
+            CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+            CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
+            """
+        )
+        con.execute(
+            "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+            "has_cover,last_modified,series_index,path,uuid) VALUES "
+            "(1,'Dune','Dune','H','2024-01-01','2020-01-01',0,'2024-01-01',"
+            "1.0,'p1','u1'), (2,'Emma','Emma','A','2024-01-01','2020-01-01',0,"
+            "'2024-01-01',1.0,'p2','u2')"
+        )
+        con.commit()
+        con.close()
+        self.db = CalibreDB(self.db_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.db_path)
+
+    def test_blank_keeps_the_whole_library(self):
+        with mock.patch.object(tui, "ask", return_value=""):
+            self.assertIs(tui._restricted(self.db), self.db)
+
+    def test_an_expression_scopes_the_view(self):
+        with mock.patch.object(tui, "ask", return_value="id:1"):
+            view = tui._restricted(self.db)
+        self.assertIsNot(view, self.db)
+        self.assertEqual(view.restrict_ids, frozenset({1}))
+        self.assertIs(view.origin, self.db)
+
+    def test_a_parse_failure_stays_unrestricted(self):
+        with (
+            mock.patch.object(tui, "ask", return_value="((nope"),
+            mock.patch.object(tui, "print") as print_mock,
+        ):
+            view = tui._restricted(self.db)
+        self.assertIs(view, self.db)
+        self.assertTrue(print_mock.called)

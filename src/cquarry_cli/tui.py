@@ -26,11 +26,17 @@ from cquarry_cli.modes.analytics import (
     show_author_stats,
     show_genre_breakdown,
     show_pace_stats,
+    show_reading_stats,
     show_tag_tree,
     show_wing_overlap,
 )
-from cquarry_cli.modes.audit import run_audit
-from cquarry_cli.modes.catalog import write_all_wings, write_catalog
+from cquarry_cli.modes.audit import run_audit, show_health
+from cquarry_cli.modes.catalog import (
+    run_all_saved_searches,
+    write_all_wings,
+    write_catalog,
+)
+from cquarry_cli.modes.fts import run_fts_search, run_fts_status
 from cquarry_cli.modes.detail import show_book
 from cquarry_cli.modes.display import (
     show_entities,
@@ -92,8 +98,11 @@ def _db_opens(db_path: str) -> bool:
         return False
 
 
-def _select_main() -> tuple | str | None:
-    sections = [
+def _menu_sections() -> list:
+    """The main menu's sections. Settings must stay the LAST section
+    with Change Database first and Quit second: the s/q letter aliases
+    and _SEL_CHANGE_DB/_SEL_QUIT pin those coordinates."""
+    return [
         (
             "",
             [
@@ -102,6 +111,9 @@ def _select_main() -> tuple | str | None:
                 "Statistics",
                 "Audit Database",
                 "Search & Export",
+                "Content Search (FTS)",
+                "Saved Search Catalogs",
+                "Library Health",
             ],
         ),
         (
@@ -112,6 +124,8 @@ def _select_main() -> tuple | str | None:
                 "Tag Tree",
                 "Genre Breakdown",
                 "Wing Overlap",
+                "Reading Analytics",
+                "FTS Index Status",
             ],
         ),
         (
@@ -151,10 +165,33 @@ def _select_main() -> tuple | str | None:
             ],
         ),
     ]
+
+
+def _restricted(db: CalibreDB) -> CalibreDB:
+    """The Phase 19 scope prompt, shared by the read entries that gained
+    restriction in the CLI: blank keeps the whole library; an expression
+    resolves once through the CLI's RestrictedView. A parse failure
+    notifies and stays unrestricted (the CLI exits 1; the menu session
+    has nowhere to exit to)."""
+    expr = ask("Restrict to a search expression (blank = whole library)", "")
+    if not expr.strip():
+        return db
+    from cquarry.search import ParseException
+
+    from cquarry_cli.restrict import RestrictedView
+
+    try:
+        return RestrictedView(db, set(db.search(expr)))
+    except (ParseException, ValueError) as e:
+        print(f"Could not parse the expression ({e}); using the whole library.")
+        return db
+
+
+def _select_main() -> tuple | str | None:
     letter_keys = {"Change Database": ("s", "self"), "Quit": ("q", None)}
     aliases = {"s": (5, 0), "q": None, "quit": None}
     return tui_select(
-        "CalibreQuarry", sections, aliases=aliases, letter_keys=letter_keys
+        "CalibreQuarry", _menu_sections(), aliases=aliases, letter_keys=letter_keys
     )
 
 
@@ -475,13 +512,22 @@ def _menu_session() -> int:
                     primary = ask_yn("Primary author only? (y/N)")
                     tags = ask_yn("Show tags instead of ratings? (y/N)")
                     ids = ask_yn("Show book IDs? (y/N)")
-                    output = prompt_out("Output file", "catalog.txt")
+                    md = ask_yn("Markdown format? (y/N)")
+                    output = prompt_out(
+                        "Output file", "catalog.md" if md else "catalog.txt"
+                    )
                     reset_terminal()
                     run_with_capture(
                         "Catalog",
-                        lambda o=output, w=wing, p=primary, t=tags, i=ids: (
+                        lambda o=output, w=wing, p=primary, t=tags, i=ids, m=md: (
                             write_catalog(
-                                db, o, wing=w, primary_only=p, show_tags=t, show_id=i
+                                db,
+                                o,
+                                wing=w,
+                                primary_only=p,
+                                show_tags=t,
+                                show_id=i,
+                                fmt="md" if m else None,
                             )
                         ),
                         footer=out_note(output),
@@ -491,11 +537,19 @@ def _menu_session() -> int:
                     primary = ask_yn("Primary author only? (y/N)")
                     tags = ask_yn("Show tags instead of ratings? (y/N)")
                     ids = ask_yn("Show book IDs? (y/N)")
+                    md = ask_yn("Markdown format? (y/N)")
                     reset_terminal()
                     run_with_capture(
                         "Generate Wings",
-                        lambda o=outdir, p=primary, t=tags, i=ids: write_all_wings(
-                            db, o, primary_only=p, show_tags=t, show_id=i
+                        lambda o=outdir, p=primary, t=tags, i=ids, m=md: (
+                            write_all_wings(
+                                db,
+                                o,
+                                primary_only=p,
+                                show_tags=t,
+                                show_id=i,
+                                fmt="md" if m else None,
+                            )
                         ),
                         footer=f"Wings written to {os.path.abspath(outdir)}",
                     )
@@ -617,6 +671,52 @@ def _menu_session() -> int:
                         "LibraryThing Export",
                         lambda o=outdir: run_librarything_export(db, o),
                         footer=f"CSV written to {os.path.abspath(outdir)}",
+                    )
+                elif result == (0, 5):
+                    query = ask("Content query (full-text over extracted text)", "")
+                    if not query.strip():
+                        _notify("Content search needs a non-empty query.")
+                        continue
+                    output = prompt_out("Output file", "fts_results.txt")
+                    restricted = _restricted(db)
+                    reset_terminal()
+                    run_with_capture(
+                        "FTS Content Search",
+                        lambda q=query, o=output, v=restricted: run_fts_search(v, q, o),
+                        footer=out_note(output),
+                    )
+                elif result == (0, 6):
+                    outdir = prompt_out("Output directory", "saved_search_catalogs")
+                    md = ask_yn("Markdown format? (y/N)")
+                    restricted = _restricted(db)
+                    reset_terminal()
+                    run_with_capture(
+                        "Saved Search Catalogs",
+                        lambda o=outdir, m=md, v=restricted: run_all_saved_searches(
+                            v, o, fmt="md" if m else None
+                        ),
+                        footer=(
+                            f"Saved-search catalogs written to "
+                            f"{os.path.abspath(outdir)}"
+                        ),
+                    )
+                elif result == (0, 7):
+                    restricted = _restricted(db)
+                    reset_terminal()
+                    run_with_capture(
+                        "Library Health", lambda v=restricted: show_health(v)
+                    )
+                elif result == (1, 5):
+                    restricted = _restricted(db)
+                    reset_terminal()
+                    run_with_capture(
+                        "Reading Analytics", lambda v=restricted: show_reading_stats(v)
+                    )
+                elif result == (1, 6):
+                    restricted = _restricted(db)
+                    reset_terminal()
+                    run_with_capture(
+                        "FTS Index Status", lambda v=restricted: run_fts_status(v)
                     )
                 elif result == (4, 0):
                     _edit_book_session(db_path)
