@@ -12,6 +12,7 @@ from cquarry.helpers import (
 )
 from cquarry.integrity import (
     find_authorless,
+    find_bad_language_codes,
     find_coverless,
     find_deprecated_formats,
     find_formatless,
@@ -181,6 +182,38 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         )
     issues.extend(sentinel_rows)
 
+    # Bad language codes (cquarry 1.21's find_bad_language_codes): books
+    # linked to a value that is not an ISO 639-2 code shape.
+    # False positive: none from the shape check itself -- it demands
+    # exactly three ASCII lowercase letters, so a valid but rare code
+    # never flags; bare names ("English") and two-letter codes are the
+    # smell the OPF linters flag.
+    language_values = {b["id"]: (b.get("languages") or []) for b in books}
+    language_rows: list[dict[str, str]] = []
+    for bid in find_bad_language_codes(db):
+        title, author = book_names.get(bid, ("", ""))
+        bad = [
+            code
+            for code in language_values.get(bid, [])
+            if not (
+                isinstance(code, str)
+                and len(code) == 3
+                and code.isascii()
+                and code.isalpha()
+                and code.islower()
+            )
+        ]
+        language_rows.append(
+            {
+                "id": str(bid),
+                "title": title,
+                "author": author,
+                "issue_type": "bad_language",
+                "issues": f"bad_language [{', '.join(bad)}]",
+            }
+        )
+    issues.extend(language_rows)
+
     # Filesystem-vs-database tree audit (Phase 19 A.3, CQ-native route):
     # book-level classes follow the active --restrict view, library-shape
     # classes (orphans, malformed dirs, root strays) are global.
@@ -322,6 +355,20 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 print(f"  #{i['id']} {i['title']}: {i['issues']}")
             if len(sentinel_rows) > 10:
                 print(f"  ... and {len(sentinel_rows) - 10} more")
+
+        if language_rows:
+            print(
+                "\n"
+                + color(
+                    f"Metadata quality: {len(language_rows)} book(s) with a "
+                    "non-ISO-639-2 language value",
+                    C_WARN,
+                )
+            )
+            for i in language_rows[:10]:
+                print(f"  #{i['id']} {i['title']}: {i['issues']}")
+            if len(language_rows) > 10:
+                print(f"  ... and {len(language_rows) - 10} more")
 
         # Books whose sidecar .opf Calibre will regenerate at next startup
         # (its metadata_dirtied queue — external writes land here).

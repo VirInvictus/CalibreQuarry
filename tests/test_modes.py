@@ -445,3 +445,70 @@ class TestAuditSentinelPubdates(unittest.TestCase):
                     r for r in csv.DictReader(f) if r["issue_type"] == "sentinel_pubdate"
                 ]
             self.assertEqual(rows, [])
+
+
+class TestAuditBadLanguages(unittest.TestCase):
+    """run_audit's bad_language rows (3.41.0): cquarry 1.21's
+    find_bad_language_codes, rendered the audit's way. False positive:
+    none from the shape check -- exactly three ASCII lowercase letters,
+    so a valid but rare ISO 639-2 code never flags; bare names and
+    two-letter codes are the smell."""
+
+    def _library(self, tmp, codes_by_book):
+        db_path = os.path.join(tmp, "metadata.db")
+        con = sqlite3.connect(db_path)
+        con.executescript(_SCHEMA)
+        lang_ids = {}
+        for bid, codes in codes_by_book.items():
+            con.execute(
+                "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+                "has_cover,last_modified,series_index,path,uuid) VALUES "
+                f"({bid},'T{bid}','T{bid}','A','2024-01-01','2020-01-01',0,"
+                f"'2024-01-01',1.0,'A/T{bid} ({bid})','{_VALID_UUID}')"
+            )
+            for code in codes:
+                if code not in lang_ids:
+                    lang_ids[code] = len(lang_ids) + 1
+                    con.execute(
+                        "INSERT INTO languages (id,lang_code) VALUES (?,?)",
+                        (lang_ids[code], code),
+                    )
+                con.execute(
+                    "INSERT INTO books_languages_link (book,lang_code) VALUES (?,?)",
+                    (bid, lang_ids[code]),
+                )
+        con.commit()
+        con.close()
+        return db_path
+
+    def test_bare_name_and_two_letter_code_flag_with_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, {1: ["English"], 2: ["en"]})
+            db = CalibreDB(db_path)
+            out = os.path.join(tmp, "audit.csv")
+            try:
+                run_audit(db, out, quiet=True)
+            finally:
+                db.close()
+            with open(out, newline="", encoding="utf-8") as f:
+                rows = [
+                    r for r in csv.DictReader(f) if r["issue_type"] == "bad_language"
+                ]
+            self.assertEqual([r["id"] for r in rows], ["1", "2"])
+            self.assertIn("[English]", rows[0]["issues"])
+            self.assertIn("[en]", rows[1]["issues"])
+
+    def test_a_proper_iso_code_never_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, {1: ["eng", "gle"]})
+            db = CalibreDB(db_path)
+            out = os.path.join(tmp, "audit.csv")
+            try:
+                run_audit(db, out, quiet=True)
+            finally:
+                db.close()
+            with open(out, newline="", encoding="utf-8") as f:
+                rows = [
+                    r for r in csv.DictReader(f) if r["issue_type"] == "bad_language"
+                ]
+            self.assertEqual(rows, [])
