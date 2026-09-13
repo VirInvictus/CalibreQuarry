@@ -13,6 +13,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 from cquarry_cli.cli import main
 
@@ -125,7 +126,26 @@ class TestAllSavedSearches(unittest.TestCase):
         self.assertIn("Broken Picks", err)
         self.assertIn("skipped", err)
         self.assertIn("(no matches, no catalog written)", out)
-        self.assertIn("2 saved-search catalog(s) written", out)
+        # 2 written of the 4 defined (one empty, one unresolvable).
+        self.assertIn("2 of 4 saved-search catalog(s) written", out)
+
+    def test_a_failed_write_drops_the_stale_file_and_fails_the_sweep(self):
+        # 3.41.0: a per-file write failure used to be swallowed (exit 0,
+        # any stale catalog standing in for the fresh one).
+        stale = os.path.join(self.outdir, "SciFi_Picks_SavedSearch.txt")
+        with open(stale, "w") as f:
+            f.write("stale content")
+        with mock.patch(
+            "cquarry_cli.modes.catalog.write_catalog", return_value=1
+        ) as wc:
+            code, out, err = self.run_cli(
+                "--all-saved-searches", "--outdir", self.outdir, "--db", self.db_path
+            )
+        self.assertEqual(code, 1)
+        self.assertEqual(wc.call_count, 2)  # only the resolvable, non-empty ones
+        self.assertFalse(os.path.exists(stale), "stale catalog must be dropped")
+        self.assertIn("SciFi Picks", err)
+        self.assertIn("failed", err)
 
     def test_catalog_content_and_provenance(self):
         code, _, _ = self.run_cli(

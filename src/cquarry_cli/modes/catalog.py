@@ -190,16 +190,20 @@ def write_all_wings(
     plugin_data: str | None = None,
     author_details: bool = False,
     quiet: bool = False,
-) -> None:
-    """Generate a catalog file for each virtual library wing."""
+) -> int:
+    """Generate a catalog file for each virtual library wing. Returns 1
+    when any wing failed: the failure is dropped (any stale file goes
+    with it), never swallowed behind a blanket exit 0."""
     vls = db.get_virtual_libraries()
     if not vls:
         print("No virtual libraries defined.", file=sys.stderr)
-        return
+        return 0
 
     ensure_output_dir(outdir, db.db_path)
 
     used: set[str] = set()
+    written = 0
+    failed: list[str] = []
     for i, name in enumerate(sorted(vls.keys())):
         safe_name = re.sub(r"[^\w\s-]", "", name).strip().replace(" ", "_")
         # Sanitizing is lossy: "Tabletop: RPG" and "Tabletop RPG" both reduce to
@@ -217,7 +221,7 @@ def write_all_wings(
         output = os.path.join(outdir, f"{safe_name}_Library.txt")
         if not quiet:
             print(f"\u2192 {color(name, C_HEADER)}")
-        write_catalog(
+        rc = write_catalog(
             db,
             output,
             wing=name,
@@ -229,9 +233,29 @@ def write_all_wings(
             author_details=author_details,
             quiet=True,
         )
+        if rc:
+            # The wing's catalog failed (an unresolvable expression, an
+            # unknown column): drop any stale file so it cannot stand
+            # in for the fresh one that was never written.
+            if os.path.exists(output):
+                os.unlink(output)
+            failed.append(name)
+            if not quiet:
+                print(f"    FAILED ({rc}); no catalog written")
+        elif os.path.exists(output):
+            written += 1
+        elif not quiet:
+            print("    (no books, no catalog written)")
 
     if not quiet:
-        print(f"\nAll wings written to: {color(outdir, C_TITLE)}")
+        print(
+            f"\n{written} of {len(vls)} wing catalog(s) written to: "
+            f"{color(outdir, C_TITLE)}"
+        )
+    for name in failed:
+        # Failure detail is load-bearing; --quiet gates decoration, not this.
+        print(f"WARNING: wing '{name}' failed; no catalog written.", file=sys.stderr)
+    return 1 if failed else 0
 
 
 def run_all_saved_searches(
@@ -245,24 +269,27 @@ def run_all_saved_searches(
     plugin_data: str | None = None,
     author_details: bool = False,
     quiet: bool = False,
-) -> None:
+) -> int:
     """Generate a catalog file per saved search (the --all-wings analog).
 
     Saved searches live in the preferences table and resolve through the
     same engine as --search, so each catalog is the search's own answer,
     under the active --restrict view when one is in play. A saved search
     whose expression no longer parses is skipped with a warning, not a
-    dead sweep.
+    dead sweep. Returns 1 when any catalog write failed; the failure is
+    dropped (any stale file goes with it), never swallowed behind a
+    blanket exit 0.
     """
     searches = db.get_saved_searches()
     if not searches:
         print("No saved searches defined.", file=sys.stderr)
-        return
+        return 0
 
     ensure_output_dir(outdir, db.db_path)
 
     used: set[str] = set()
     written = 0
+    failed: list[str] = []
     for i, name in enumerate(sorted(searches)):
         expr = searches[name]
         try:
@@ -291,7 +318,7 @@ def run_all_saved_searches(
                 print("    (no matches, no catalog written)")
             continue
         output = os.path.join(outdir, f"{safe_name}_SavedSearch.txt")
-        write_catalog(
+        rc = write_catalog(
             db,
             output,
             matching_ids=ids,
@@ -304,9 +331,22 @@ def run_all_saved_searches(
             author_details=author_details,
             quiet=True,
         )
-        written += 1
+        if rc:
+            if os.path.exists(output):
+                os.unlink(output)
+            failed.append(name)
+        else:
+            written += 1
 
     if not quiet:
         print(
-            f"\n{written} saved-search catalog(s) written to: {color(outdir, C_TITLE)}"
+            f"\n{written} of {len(searches)} saved-search catalog(s) written "
+            f"to: {color(outdir, C_TITLE)}"
         )
+    for name in failed:
+        print(
+            f"WARNING: catalog for saved search '{name}' failed; "
+            "no file written.",
+            file=sys.stderr,
+        )
+    return 1 if failed else 0

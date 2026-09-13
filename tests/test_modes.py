@@ -14,6 +14,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
 from cquarry.db import CalibreDB
 
@@ -157,6 +158,54 @@ class TestWriteAllWingsFilenames(unittest.TestCase):
             self.assertEqual(len(set(files)), 3, files)
             # a name that sanitizes to nothing still gets a usable filename
             self.assertNotIn("_Library.txt", files)
+
+
+class TestWriteAllWingsFailures(unittest.TestCase):
+    """3.41.0: a per-wing failure is dropped (any stale file goes with
+    it), counted in the summary, and fails the sweep, instead of being
+    swallowed behind \"All wings written\" at exit 0."""
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db", prefix="cquarry_test_")
+        os.close(fd)
+        con = sqlite3.connect(self.db_path)
+        con.executescript(_SCHEMA)
+        con.execute(
+            "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+            "has_cover,last_modified,series_index,path,uuid) VALUES "
+            "(1,'T1','T1','A','2024-01-01','2020-01-01',0,'2024-01-01',1.0,'p1','u1')"
+        )
+        con.execute(
+            "INSERT INTO preferences (key, val) VALUES ('virtual_libraries', ?)",
+            (json.dumps({"Wing One": "title:T1", "Wing Two": "title:T1"}),),
+        )
+        con.commit()
+        con.close()
+        self.db = CalibreDB(self.db_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.db_path)
+
+    def test_failed_wing_drops_stale_file_and_propagates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = os.path.join(tmp, "Wing_One_Library.txt")
+            with open(stale, "w") as f:
+                f.write("stale content")
+            with mock.patch(
+                "cquarry_cli.modes.catalog.write_catalog", return_value=2
+            ) as wc:
+                rc = write_all_wings(self.db, tmp, quiet=True)
+            self.assertEqual(rc, 1)
+            self.assertEqual(wc.call_count, 2)  # every wing attempted
+            self.assertFalse(os.path.exists(stale), "stale catalog must be dropped")
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_a_clean_sweep_still_exits_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = write_all_wings(self.db, tmp, quiet=True)
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(os.listdir(tmp)), 2)
 
 
 class TestAuditCoverChecks(unittest.TestCase):

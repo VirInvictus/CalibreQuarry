@@ -1043,7 +1043,7 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.all_wings:
                 outdir = args.outdir or "catalogs"
-                write_all_wings(
+                return write_all_wings(
                     db,
                     outdir,
                     primary_only=args.primary_only,
@@ -1053,11 +1053,10 @@ def main(argv: list[str] | None = None) -> int:
                     author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
-                return 0
 
             if args.all_saved_searches:
                 outdir = args.outdir or "saved_search_catalogs"
-                run_all_saved_searches(
+                return run_all_saved_searches(
                     db,
                     outdir,
                     primary_only=args.primary_only,
@@ -1068,7 +1067,6 @@ def main(argv: list[str] | None = None) -> int:
                     author_details=args.show_author_details,
                     quiet=args.quiet,
                 )
-                return 0
 
             if args.stats:
                 show_stats(db, quiet=args.quiet)
