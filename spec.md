@@ -1,6 +1,6 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.41.0  
+**Version:** 3.42.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry` (>= 1.21.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -78,15 +78,16 @@ The path is saved to config on first successful resolution.
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| Catalog | `--catalog` | Formatted text grouped by author with ratings and series |
-| All wings | `--all-wings` | Separate catalog per virtual library |
+| Catalog | `--catalog` | Formatted text grouped by author with ratings and series; `--format md` renders the Markdown shape (headings per author, bulleted books, bold totals) |
+| All wings | `--all-wings` | Separate catalog per virtual library (`--format md` names the files `.md`); a per-file failure drops the stale file and fails the sweep |
 | All saved searches | `--all-saved-searches` | Separate catalog per saved search (`--outdir`), each headed with the search's expression |
 | Statistics | `--stats` | Format breakdown, ratings, tags, publishers |
+| Health digest | `--health` | The audit's finding counts in one short screen; same `collect_issues` derivation as `--audit` (the two renderers cannot drift); book-level classes follow the active `--restrict` view, library-shape classes stay global; exit 0 always |
 | Audit | `--audit` | Untagged, unrated, coverless/low-res books, and covers the DB claims but the disk lacks; deprecated formats; duplicates; series gaps; manual conversion overrides (per-book `conversion_options`, surfaced by size and format, never unpickled); metadata-quality rows (invalid uuid, sentinel pubdate, bad language; advisory inventory from the cquarry 1.21 predicates, false-positive notes in the renderer); filesystem-vs-database tree rows (missing book dirs/format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths, root strays) |
 | Full-text search | `--fts QUERY` | Content search over the `full-text-search.db` sidecar's plain `books_text` table (read-only; no FTS5 machinery), with an index-staleness summary after the matches; `--fts-status` reports the staleness classes on their own; `--format json` exports the matches |
 | Recent | `--recent N` | N most recently added books |
 | Series | `--series` | All series with completeness and gap detection |
-| Analytics | `--analytics {author,pace,tags,genres,overlap,reading}` | Per-author stats, reading-pace trend, tag tree, genre share breakdown (`--genre-depth N` for deeper hierarchy levels), Wing overlap, reading analytics (`#reading_status` funnel in enum order, `#date_read` recent finishes, days-from-added-to-finished; read-only) |
+| Analytics | `--analytics {author,pace,tags,genres,overlap,reading}` | Per-author stats, reading-pace trend, tag tree, genre share breakdown (`--genre-depth N` for deeper hierarchy levels), Wing overlap, reading analytics (`#reading_status` funnel in enum order, `#date_read` recent finishes, days-from-added-to-finished with the era split (pre-library reads, finished before their added date, report separately so they cannot dominate the median); read-only) |
 | Export | `--export` | Full library to JSON, CSV, or AI-readable format |
 | Search | `--search QUERY` | Books matching a search expression; prints to stdout, or a file with `--output` |
 | Annotations | `--export-annotations` | E-reader highlights/bookmarks/notes as JSON; `--id N` scopes to one book |

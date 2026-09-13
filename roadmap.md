@@ -1270,19 +1270,25 @@ note; every integration ships with a dry-run before any write.
       past --quiet, and propagate nonzero; setwrite's backup takes the
       sqlite API; the three __main__ guards moved below the newest
       classes.)
-- [ ] **Blitz candidates:** the routed metadata-quality audit rows
+- [x] **Blitz candidates:** the routed metadata-quality audit rows
       (find_invalid_uuids + sentinel-pubdate + bad-language via cquarry
       predicates, 51 OPF-085 counted - the recorded carrier); TUI adoption
       of the Phase 19 read surfaces; reading-analytics era cut (pre-
       library reads dominate the real median); --health one-shot digest;
       catalog Markdown emitter. Floor bump when cquarry's Wave-13 write
       fixes ship.
-      (PARTIALLY SHIPPED 3.41.0: the three audit rows landed one class
-      per commit with fixtures and false-positive notes; real-library
-      probe 2026-09-13 found all three classes clean at the DB level,
-      so bindery's 51 OPF-085s were file-side, stale sidecar OPFs. The
-      floor bump rode the same release. The rest of the box stays open:
-      TUI adoption, the era cut, --health, the Markdown emitter.)
+      (SHIPPED across 3.41.0 + 3.42.0: the three audit rows landed one
+      class per commit with fixtures and false-positive notes, the
+      real-library probe finding all three classes clean at the DB level
+      (the 51 OPF-085s were file-side, stale sidecar OPFs), and the
+      floor bump rode 3.41.0. 3.42.0 closed the rest: --health over a
+      shared collect_issues derivation; the reading-analytics era split
+      (fires only when negative spans exist); the catalog Markdown
+      emitter (--format md on the catalog and both sweeps); the TUI menu
+      gains Content Search (FTS), Saved Search Catalogs, Library Health,
+      Reading Analytics, and FTS Index Status, each with the shared
+      _restricted scope prompt, plus a Markdown prompt on the catalog
+      entries.)
 - [x] **GitHub presentation (workspace batch):** description truncated at
       the 350 cap citing a dead file (replacement drafted); topics
       zero-dependencies/stdlib-only are now false; Releases for

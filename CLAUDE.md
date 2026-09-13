@@ -5,6 +5,31 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.42.0 onward, the blitz candidates)
+
+- **`--audit` and `--health` share one derivation.**
+  `modes/audit.py:collect_issues` returns every row plus the non-row
+  extras (staleness, dirtied queue, the named metadata rows the prose
+  blocks use); `run_audit` renders CSV + prose, `show_health` renders
+  counts. Exit 0 always for --health (a dashboard, not the audit's
+  CSV contract). Never derive an audit row in either renderer.
+- **The catalog Markdown shape is `fmt="md"`** on write_catalog and
+  both sweeps: `#` header (same provenance content), `##` per author,
+  `- ` bullets with bold titles, hr + bold total. `--format` accepts
+  `md`; the sweeps name files `.md`; json/csv/ai on a catalog stay
+  silently-ignored text (pre-existing). Text form is unchanged.
+- **Reading analytics' era split fires only when negative spans
+  exist**: library-era spans (finished >= added) and pre-library
+  reads report separate medians; a clean library keeps the old
+  single-median line byte-for-byte.
+- **The TUI's scope prompt is `_restricted(db)`**: blank = whole
+  library, an expression resolves once through RestrictedView, a
+  parse failure notifies and stays unrestricted (the CLI would exit
+  1; the session has nowhere to exit to). Menu structure lives in
+  `_menu_sections()` and Settings must stay the last section with
+  Change Database/Quit first/second: the s/q aliases pin those
+  coordinates.
+
 ## Programmer-facing contract notes (3.41.0 onward, the six-lens batch)
 
 - **calibredb id lists are space-separated, never ranges.**

@@ -1,5 +1,16 @@
 # CalibreQuarry — Patch Notes
 
+# 3.42.0 (2026-09-13)
+
+### The blitz candidates close: --health, the era split, Markdown catalogs, and the TUI's Phase 19 surfaces
+
+- **`--health`, the one-shot digest.** The audit's finding counts in one short screen: book issues with the top problems, duplicate groups, series gaps, conversion overrides, the metadata-quality trio, the filesystem tree, FTS coverage, and the pending OPF queue. Both renderers now consume one shared derivation (`collect_issues`), so the CSV and the digest cannot drift; `--restrict` scopes the book-level classes exactly as it scopes `--audit`, and `--health` always exits 0 (a dashboard, not the audit's CSV).
+- **The reading-analytics era split.** Days-from-added-to-finished used one median over all spans, and backfilled pre-library reads (finished before their added date) dominated it: the real library's median was -489, which said nothing about how cataloged books actually read. When negative spans exist the two populations report separately (library era / pre-library, each with median, mean, min, max); a library with no pre-library reads keeps the previous single line unchanged.
+- **Markdown catalogs.** `--format md` renders the catalog's Markdown shape: one `#` header with the same provenance content, `##` per author, bulleted books with bold titles, an hr and a bold total. `--catalog` passes its format through, and the wing and saved-search sweeps name their files `.md`. The plain text form is untouched when no format is given.
+- **The TUI joins Phase 19.** Five new menu entries, each with a shared scope prompt that adopts the `--restrict` modifier per invocation (blank = whole library; an expression resolves once through the CLI's RestrictedView; a parse failure notifies and stays unrestricted): Content Search (FTS), Saved Search Catalogs, and Library Health in the first section; Reading Analytics and FTS Index Status under Analytics. The Catalog and Catalog Wings entries gain a Markdown prompt. The menu structure is testable now, with the Settings section pinned where the s/q aliases need it.
+- **Cosmetic**: detail-less plan lines (backfill, polish, cover, flush dry runs) no longer end in a trailing space (the recorded Matrix 3 note).
+- Suite: 512 → 525 tests.
+
 # 3.41.0 (2026-09-13)
 
 ### The six-lens audit batch: three HIGH integration-seam defects, the run-verb hardening, and the routed metadata-quality rows
