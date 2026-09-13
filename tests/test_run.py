@@ -1047,6 +1047,16 @@ class TestRunSign(RunCase):
 
 
 class TestRunPhase3(RunCase):
+    def setUp(self):
+        super().setUp()
+        # The whole class runs closed-Calibre: only the refusal test
+        # exercises the guard itself (it overrides this patch). Without
+        # it, a desktop Calibre that happens to be open flips every
+        # outcome to the guard's exit 2.
+        pg = mock.patch("cquarry_cli.run.calibre_running", return_value=False)
+        pg.start()
+        self.addCleanup(pg.stop)
+
     def _ready_manifest(self, imported_ids):
         man = manifest.new_manifest(self.downloads)
         entry = manifest.new_file_entry("book.epub")

@@ -609,17 +609,20 @@ class TestMatrixCFixes(unittest.TestCase):
         self.assertIn("unknown field", err)
 
     def test_backfill_apply_requires_backup_dir(self):
-        code, _, err = self.run_cli(
-            "run",
-            "backfill",
-            "--fields",
-            "title",
-            "--ids",
-            "1",
-            "--apply",
-            "--db",
-            str(self.db_path),
-        )
+        with mock.patch(
+            "cquarry_cli.integrate._calibre_running", return_value=False
+        ):
+            code, _, err = self.run_cli(
+                "run",
+                "backfill",
+                "--fields",
+                "title",
+                "--ids",
+                "1",
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
         self.assertEqual(code, 2)
         self.assertIn("--backup-dir", err)
 
