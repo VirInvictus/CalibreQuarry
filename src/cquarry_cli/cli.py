@@ -248,7 +248,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scope every read mode to books matching this search "
         "expression (or `vl:Name` for a virtual library): stats, audit, "
         "analytics, exports, catalogs, and the rest compute over the "
-        "restricted set only. Refused with write verbs and --book/--id",
+        "restricted set only. Refused with write verbs, the run verbs, "
+        "and --book/--id",
     )
     p.add_argument(
         "--wing", default=None, help="Filter to a specific virtual library wing"

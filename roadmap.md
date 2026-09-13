@@ -1225,22 +1225,32 @@ note; every integration ships with a dry-run before any write.
 
 ## New findings 2026-09-12 late (six-lens full audit; detail: audit/FULL-AUDIT-2026-09-12.md, Wave 14)
 
-- [ ] **HIGH: run flush --apply writes embedded metadata into books
+- [x] **HIGH: run flush --apply writes embedded metadata into books
       outside the dirtied set.** integrate.py:493 joins distinct ids into
       a hyphen range ("5-900") which calibredb treats as EVERY book
       between; get_dirtied_books returns non-contiguous ids. Fix: pass
       space-separated ids + a non-contiguous regression test.
-- [ ] **HIGH: run phase2's _fetch_metadata can never succeed.**
+      (SHIPPED 3.41.0: ids pass individually, the 1,3-queue regression
+      test pins the between book untouched, and flush --ids/--search
+      errors are clean exit 2s instead of resolve_targets tracebacks.)
+- [x] **HIGH: run phase2's _fetch_metadata can never succeed.**
       run.py:532 passes -o <path> but -o is a store_true flag writing to
       stdout; opf_path is a silently-ignored stray positional, so the
       success gate always fails and the ok branch/_apply_opf/
       clobber_watch are dead code (the sibling of the seam 3.39.2 fixed).
       Stage stdout like run_backfill does.
-- [ ] **HIGH: run convert --apply to an existing format overwrites the
+      (SHIPPED 3.41.0: stdout staged to the temp file; the ambiguity
+      sniff reads "multiple" only since "No matches found" tripped the
+      bare word; seam tests mock subprocess so the revived ok path,
+      _apply_opf, and the clobber watch run for real.)
+- [x] **HIGH: run convert --apply to an existing format overwrites the
       file then tracebacks** (plan never skips already-has-target;
       add_format then raises uncaught). Skip at plan time like the merge
       verb; wrap registration.
-- [ ] **Integration-verb hardening:** --restrict is silently ignored by
+      (SHIPPED 3.41.0: plan-time skip "already has TARGET", apply
+      counts it already-so so idempotent re-runs exit 0, registration
+      wrapped into failed report rows.)
+- [x] **Integration-verb hardening:** --restrict is silently ignored by
       the run verbs (dispatch order; docs promise refusal); integrate's
       pgrep guard inverts the recorded timeout semantics (assume-running);
       backfill failures don't increment failed + malformed OPF
@@ -1250,6 +1260,16 @@ note; every integration ships with a dry-run before any write.
       exit 0; set-mode backup should use the sqlite backup like the other
       doors; three test files orphan their newest suites below __main__
       guards.
+      (SHIPPED 3.41.0, all eight: dispatch_run refuses --restrict exit
+      2; the pgrep guard is fail-closed (timeout/OSError -> assumed
+      running) matching run.py; backfill counts failures and fails the
+      verb, wraps OPF parse/write like _apply_opf, prefers
+      opf:scheme=ISBN via to_isbn13, drops the stray --opf positional,
+      and catches hung lookups; flush resolve errors exit 2 (note above);
+      the sweeps drop stale files, count only written, warn per failure
+      past --quiet, and propagate nonzero; setwrite's backup takes the
+      sqlite API; the three __main__ guards moved below the newest
+      classes.)
 - [ ] **Blitz candidates:** the routed metadata-quality audit rows
       (find_invalid_uuids + sentinel-pubdate + bad-language via cquarry
       predicates, 51 OPF-085 counted - the recorded carrier); TUI adoption
@@ -1257,7 +1277,18 @@ note; every integration ships with a dry-run before any write.
       library reads dominate the real median); --health one-shot digest;
       catalog Markdown emitter. Floor bump when cquarry's Wave-13 write
       fixes ship.
-- [ ] **GitHub presentation (workspace batch):** description truncated at
+      (PARTIALLY SHIPPED 3.41.0: the three audit rows landed one class
+      per commit with fixtures and false-positive notes; real-library
+      probe 2026-09-13 found all three classes clean at the DB level,
+      so bindery's 51 OPF-085s were file-side, stale sidecar OPFs. The
+      floor bump rode the same release. The rest of the box stays open:
+      TUI adoption, the era cut, --health, the Markdown emitter.)
+- [x] **GitHub presentation (workspace batch):** description truncated at
       the 350 cap citing a dead file (replacement drafted); topics
       zero-dependencies/stdlib-only are now false; Releases for
       v3.37-v3.40; homepage -> PyPI; [project.urls]; a TUI screenshot.
+      (SHIPPED 2026-09-13 per decision 60: description replaced, the two
+      false topics swapped for audit/ebook-manager, six Releases
+      (v3.37.0-v3.40.0) created verbatim from patchnotes, homepage ->
+      PyPI, [project.urls] added to pyproject, a TUI-screenshot
+      placeholder comment in the README, wiki off / discussions on.)

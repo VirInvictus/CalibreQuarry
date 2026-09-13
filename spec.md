@@ -1,8 +1,8 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.40.0  
+**Version:** 3.41.0  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry` (>= 1.20.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.21.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -20,7 +20,7 @@ Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a s
 ### 2.1 Decoupled Shared Library Architecture
 The CalibreQuarry architecture relies on a strict separation of concerns, decoupling the CLI/TUI frontend from the database and search logic. 
 
-**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.14.0: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, unknown virtual libraries raise instead of matching nothing, the `--set-*`/`--remove-book` write verbs run on `WritableCalibreDB` (`set_pubdate`, `batch()`), `analytics.genre_distribution()` powers `--analytics genres`, the set-mode verbs consume the 1.13 write helpers (`clear_tags`, `add_custom_column_values`, `clear_rating`), and the `run phase2` import consumes 1.14's `add_book` creation path.
+**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.14.0: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, unknown virtual libraries raise instead of matching nothing, the `--set-*`/`--remove-book` write verbs run on `WritableCalibreDB` (`set_pubdate`, `batch()`), `analytics.genre_distribution()` powers `--analytics genres`, the set-mode verbs consume the 1.13 write helpers (`clear_tags`, `add_custom_column_values`, `clear_rating`), and the `run phase2` import consumes 1.14's `add_book` creation path. 1.21.0 adds the metadata-quality predicates (`find_invalid_uuids`, `find_sentinel_pubdates`, `find_bad_language_codes`) that `--audit` renders, plus the write-path fixes the 3.41 run-verb batch rides on.
 
 **`cquarry_cli` (Internal Package)**: The frontend modules live in `src/cquarry_cli/`:
 
@@ -82,7 +82,7 @@ The path is saved to config on first successful resolution.
 | All wings | `--all-wings` | Separate catalog per virtual library |
 | All saved searches | `--all-saved-searches` | Separate catalog per saved search (`--outdir`), each headed with the search's expression |
 | Statistics | `--stats` | Format breakdown, ratings, tags, publishers |
-| Audit | `--audit` | Untagged, unrated, coverless/low-res books, and covers the DB claims but the disk lacks; deprecated formats; duplicates; series gaps; manual conversion overrides (per-book `conversion_options`, surfaced by size and format, never unpickled); filesystem-vs-database tree rows (missing book dirs/format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths, root strays) |
+| Audit | `--audit` | Untagged, unrated, coverless/low-res books, and covers the DB claims but the disk lacks; deprecated formats; duplicates; series gaps; manual conversion overrides (per-book `conversion_options`, surfaced by size and format, never unpickled); metadata-quality rows (invalid uuid, sentinel pubdate, bad language; advisory inventory from the cquarry 1.21 predicates, false-positive notes in the renderer); filesystem-vs-database tree rows (missing book dirs/format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths, root strays) |
 | Full-text search | `--fts QUERY` | Content search over the `full-text-search.db` sidecar's plain `books_text` table (read-only; no FTS5 machinery), with an index-staleness summary after the matches; `--fts-status` reports the staleness classes on their own; `--format json` exports the matches |
 | Recent | `--recent N` | N most recently added books |
 | Series | `--series` | All series with completeness and gap detection |
@@ -190,9 +190,11 @@ secondary columns. Book-level audit classes and the FTS staleness
 report follow the restriction; library-shape classes (orphan dirs,
 malformed paths, root strays) always report globally against the
 origin database, since they belong to no restriction. `--restrict`
-with write verbs, `--book`, or `--id` is refused (exit 2): write
-targets are chosen by `--ids`/`--from-search`, and explicit ids are
-not a set to narrow. An unparseable expression exits 1, matching
+with write verbs, the run verbs, `--book`, or `--id` is refused
+(exit 2): write targets are chosen by `--ids`/`--from-search`, and
+explicit ids are not a set to narrow. The refusal covers the run
+subcommand specifically because its dispatch precedes the read-
+surface refusal gate in `main()`. An unparseable expression exits 1, matching
 `--search`; an empty result is a valid (empty) universe, not an error.
 
 ### 3.5 Full-text content search (Phase 19)

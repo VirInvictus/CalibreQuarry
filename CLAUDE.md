@@ -5,6 +5,62 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.41.0 onward, the six-lens batch)
+
+- **calibredb id lists are space-separated, never ranges.**
+  `run flush` joins each chunk's ids individually: calibredb reads
+  `5-900` as EVERY book between the endpoints, and the dirtied queue
+  is generally non-contiguous (the range form embedded metadata into
+  books the queue never named). `run flush --ids/--search` resolution
+  failures are usage errors (exit 2), matching the other verbs.
+- **fetch-ebook-metadata's `-o/--opf` is a store flag.** The OPF
+  arrives on stdout; both call sites (`run._fetch_metadata` in phase
+  2 and integrate's `run_backfill`) stage stdout to a temp file. The
+  phase-2 ambiguity sniff reads "multiple" only: the no-result log
+  says "No matches found", so bare "matches" classified every empty
+  lookup as ambiguous. The seam tests mock subprocess, not the verb,
+  so a regression cannot hide behind a mocked `_fetch_metadata`.
+- **`run convert` skips already-has-target at plan time** (the merge
+  verb's shape); apply counts those already-so, not failed. A
+  registration failure after a successful conversion is a failed
+  report row, never a traceback.
+- **`dispatch_run` refuses `--restrict` (exit 2).** main() dispatches
+  the run subcommand BEFORE the read-surface refusal gate, so the
+  check lives at the top of dispatch_run; new run-verb plumbing must
+  keep it there.
+- **integrate's pgrep guard is fail-closed**: timeout or OSError
+  means assumed-RUNNING (refuse --apply), matching run.py's recorded
+  semantics. The old cut inverted it and proceeded against live
+  Calibre.
+- **Backfill apply failures are counted and fail the verb (exit 1)**;
+  `_apply_backfill` wraps parse and write like run.py's `_apply_opf`
+  (a malformed OPF is a failed row). ISBN selection prefers
+  `opf:scheme=ISBN` and falls back to an ISBN shape through cquarry's
+  `to_isbn13` (recomputed check digit; the first `dc:identifier` may
+  be a Goodreads id).
+- **The catalog sweeps propagate per-file failures (exit 1)**:
+  `--all-wings`/`--all-saved-searches` count only files that exist,
+  drop a failed entry's stale file (it must not stand in for the
+  fresh write), warn regardless of `--quiet`, and report "N of M
+  written". A saved search that no longer parses stays a
+  warning-and-skip (the A.5 contract); a WRITE failure is not.
+- **Set mode's backup takes the sqlite-API route** (run.py and
+  integrate.py share the shape): timestamped, outside the library,
+  `_UsageError` on failure. No copy2 anywhere on a write door.
+- **`--audit` carries the metadata-quality rows** (the bindery-routed
+  item): `find_invalid_uuids`, `find_sentinel_pubdates`,
+  `find_bad_language_codes` as advisory `issue_type` rows with value
+  brackets and summary blocks. False-positive notes live in the
+  renderer comments (none by construction for uuids; year-1/101
+  pubdates indistinguishable by design; the 3-letter shape check
+  never flags a rare valid code). Real-library probe 2026-09-13: all
+  three classes CLEAN at the DB level; bindery's 51 OPF-085s were
+  file-side (stale sidecar OPFs), not DB drift.
+- **Test guards stay below the last class.** Three files had suites
+  appended after `if __name__ == "__main__"` (invisible to direct
+  file runs, caught by the same repair as 0dc4789); appended classes
+  go at file end.
+
 ## Programmer-facing contract notes (3.37.0 onward, Phase 19 A)
 
 - **`--restrict` is a scoping view, not per-mode filters.**
@@ -23,8 +79,9 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   checks an explicit write-flag dest tuple that must keep step with
   `build_parser()`'s write/set groups; new write verbs must be added
   there. Resolution happens once in `cli.main` (parse failure exits 1,
-  matching `--search`); write verbs and `--book`/`--id` refuse the
-  combination (exit 2).
+  matching `--search`); write verbs, the run verbs, and `--book`/`--id`
+  refuse the combination (exit 2; the run verbs in `dispatch_run`,
+  see the 3.41.0 notes).
 - **`--fts` route decision (recorded).** Content search goes through
   cquarry's `search_book_text`; coverage flows through cquarry's
   `get_text_extractions`; the sidecar's `dirtied_formats` queue is the

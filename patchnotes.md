@@ -1,5 +1,21 @@
 # CalibreQuarry — Patch Notes
 
+# 3.41.0 (2026-09-13)
+
+### The six-lens audit batch: three HIGH integration-seam defects, the run-verb hardening, and the routed metadata-quality rows
+
+- **`run flush --apply` no longer writes outside the queue.** The verb joined each chunk's distinct ids into one hyphen range ("5-900"), and calibredb reads a range as EVERY book between the endpoints, so a non-contiguous dirtied set embedded metadata into books the queue never named. Ids now pass space-separated, and the regression test pins a 1,3 queue against touching the between book. A bad `--ids`/`--search` on flush is a usage error (exit 2) instead of a traceback.
+- **`run phase2`'s metadata fetch can actually succeed now.** `_fetch_metadata` passed the output path after `-o`, but `-o/--opf` is a store flag whose OPF arrives on stdout: the path was a silently-ignored stray positional, the success gate always failed, every import queued a bogus `metadata_download` decision, and the ok branch, `_apply_opf`, and the clobber watch were dead code (the sibling seam 3.39.2 fixed in the backfill; this call site was missed). Stdout is staged to the temp file like the backfill does; the ambiguity sniff reads "multiple" only, since the no-result log's "No matches found" classified every empty lookup as ambiguous. The seam tests mock the subprocess, not the verb, so the revived path runs for real.
+- **`run convert --apply` no longer overwrites an existing target.** Converting to a format the book already has used to plan the conversion anyway: ebook-convert overwrote the file, then the registration raised uncaught. Like the merge verb's move list, the plan skips such books ("already has TARGET"), apply counts them already-so, and a registration failure is a failed report row instead of a traceback.
+- **`--restrict` is refused with the run verbs** (spec 3.4's contract, previously bypassed by dispatch order): `--restrict EXPR run ...` ran unrestricted; it now exits 2.
+- **The integration-verb pgrep guard is fail-closed**: a pgrep timeout (or an unrunnable pgrep) answers assumed-RUNNING and refuses `--apply`, matching run.py's recorded semantics instead of proceeding against a live Calibre.
+- **`run backfill` failures are real**: a book whose OPF fails to apply is a counted failure that fails the verb (exit 1) instead of "Applied 0, failed/skipped 0" at exit 0; a malformed OPF or refused write is a report row, not a traceback; a hung lookup times out into a failed row; `--fields isbn` prefers the `opf:scheme=ISBN` identifier and falls back to an ISBN shape through cquarry's `to_isbn13` (the first `dc:identifier` could be a Goodreads id); the fetch no longer appends a stray `--opf <path>` positional.
+- **The catalog sweeps report per-file failures**: `--all-wings` discarded write failures entirely ("All wings written" at exit 0), and `--all-saved-searches` counted a catalog before the write ran. Both now count only files that exist, drop the stale file of a failed entry, warn per failure regardless of `--quiet`, report "N of M written", and exit nonzero.
+- **Set mode's backup goes through the sqlite backup API** (the last copy2 door among the write paths; a file copy of a database with a hot journal can snapshot a state its WAL would never replay into).
+- **`--audit` renders the routed metadata-quality rows** (the bindery ruling of 2026-09-12): cquarry 1.21's `find_invalid_uuids`, `find_sentinel_pubdates`, and `find_bad_language_codes` as advisory `issue_type` rows with the offending values in brackets and summary blocks, one class per commit with fixtures and false-positive notes. Real-library probe: all three classes are clean at the database level; bindery's 51 OPF-085 warnings were file-side (stale sidecar OPFs), not DB drift.
+- **Test hygiene**: the `__main__` guards of three test files moved below the suites appended after them, so direct-file runs exercise the 3.39/3.40 regression classes again (discovery was never affected); and the phase-3/backfill guard tests now pin the closed-Calibre pgrep instead of assuming it, so a desktop Calibre that happens to be open no longer flips five outcomes.
+- Suite: 483 → 512 tests. Floor: cquarry >= 1.21.0 (the write-path fixes plus the predicates).
+
 # 3.40.0 (2026-09-12)
 
 ### The post-release decisions: whitelist, Z-Library provenance, and a retraction

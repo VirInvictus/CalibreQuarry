@@ -46,11 +46,11 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | Mode | Flag | Description |
 |------|------|-------------|
 | **Catalog** | `--catalog` | Formatted text catalog grouped by author, with ratings and series info |
-| **All wings** | `--all-wings` | Generate a separate catalog file for every virtual library |
-| **All saved searches** | `--all-saved-searches` | Generate a catalog per saved search into `--outdir` (the `--all-wings` analog); each file is headed with the search's expression, zero-hit searches write nothing and say so |
+| **All wings** | `--all-wings` | Generate a separate catalog file for every virtual library; a wing that fails drops its stale file, is warned about, and fails the sweep (exit 1) |
+| **All saved searches** | `--all-saved-searches` | Generate a catalog per saved search into `--outdir` (the `--all-wings` analog); each file is headed with the search's expression, zero-hit searches write nothing and say so, and a failed write drops the stale file and fails the sweep (exit 1) |
 | **Full-text search** | `--fts QUERY` | Content search over Calibre's `full-text-search.db` sidecar: what the books actually say, not their metadata. Case- and accent-folded; every match names its formats; each run ends with an index-staleness summary (unless `--quiet`), and `--fts-status` reports those classes on their own |
 | **Statistics** | `--stats` | Format breakdown, rating distribution, tag taxonomy, publisher counts |
-| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with manual conversion overrides and pending OPF sync; and audit the filesystem against the database (missing book dirs and format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths; root dot-entries and workspace docs whitelisted) |
+| **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with manual conversion overrides and pending OPF sync; flag invalid uuids, sentinel pubdates, and non-ISO-639-2 language values (the metadata-quality rows, advisory); and audit the filesystem against the database (missing book dirs and format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths; root dot-entries and workspace docs whitelisted) |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
 | **Analytics** | `--analytics {author,pace,tags,genres,overlap,reading}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, genre share breakdown (`--genre-depth N` descends the tag hierarchy), Wing-overlap analysis, and reading analytics (status funnel in the column's enum order, recent finishes, days-from-added-to-finished; strictly read-only) |
@@ -81,7 +81,13 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 `fetch-ebook-metadata`) over a resolved set and register the outcome
 through cquarry's write module. Every verb is a dry run until
 `--apply`, which demands a closed Calibre and (for the
-metadata-mutating verbs) a `--backup-dir` outside the library.
+metadata-mutating verbs) a `--backup-dir` outside the library. A
+book that already has the requested conversion target is skipped at
+plan time ("already has TARGET"; the file stands untouched), the
+flush passes ids to `calibredb embed_metadata` space-separated (a
+hyphen range would cover every book between its endpoints), and the
+closed-Calibre pgrep guard is fail-closed: a timeout counts as
+Calibre running.
 
 ```bash
 # Plan conversions for a wing, then run them
@@ -117,7 +123,7 @@ provenance, and every run of it takes a timestamped backup in
 `--backup-dir`. All of it needs the repository checkout (the verbs drive
 `scripts/`, which the wheel does not carry).
 
-Modifiers: `--restrict SEARCH` scopes every read mode to the books matching a search expression (or `vl:Name` for a wing): stats, audits, analytics, exports, catalogs, and full-text search all compute over the restricted set only; write verbs and `--book`/`--id` refuse the combination, since explicit targets are not a set to narrow. `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search` (and emits the set writes' machine-readable report as JSON), `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout (and no file output can ever be the database itself: the read surface refuses `metadata.db` and its sqlite sidecars before anything opens, and stages every file through a temp copy so a failed report never truncates), `--quiet` suppresses decorative output.
+Modifiers: `--restrict SEARCH` scopes every read mode to the books matching a search expression (or `vl:Name` for a wing): stats, audits, analytics, exports, catalogs, and full-text search all compute over the restricted set only; write verbs, the `run` verbs, and `--book`/`--id` refuse the combination, since explicit targets are not a set to narrow. `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai}` selects the output shape for `--export` and `--search` (and emits the set writes' machine-readable report as JSON), `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout (and no file output can ever be the database itself: the read surface refuses `metadata.db` and its sqlite sidecars before anything opens, and stages every file through a temp copy so a failed report never truncates), `--quiet` suppresses decorative output.
 
 Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager (supporting `/` search and `n`/`N` match jumping) or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions, and a corrupt or foreign database at the configured path is reported in prose and re-prompted, never a traceback. Its menu covers every read mode above plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats, all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
 
@@ -598,7 +604,7 @@ options:
                         expression (or `vl:Name` for a virtual library):
                         stats, audit, analytics, exports, catalogs, and the
                         rest compute over the restricted set only. Refused
-                        with write verbs and --book/--id
+                        with write verbs, the run verbs, and --book/--id
   --wing WING           Filter to a specific virtual library wing
   --output OUTPUT       Output file path
   --outdir OUTDIR       Output directory for --all-wings (default: current
