@@ -30,8 +30,11 @@ from cquarry_cli.modes.treeaudit import print_tree_summary, tree_audit
 from cquarry_cli.output import open_output
 
 
-def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
-    """Report library issues to CSV."""
+def collect_issues(db: CalibreDB) -> tuple[list[dict[str, str]], dict]:
+    """Derive every audit row once for both renderers (the CSV audit
+    and the --health digest). Returns (issues, extras); extras carries
+    the FTS staleness report and the pending OPF queue, which are
+    summarized rather than rendered as rows."""
     books = db.get_all_books()
     all_series = db.get_all_series()
     issues: list[dict[str, str]] = []
@@ -271,6 +274,27 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 }
             )
 
+    return issues, {
+        "staleness": staleness,
+        "dirtied": db.get_dirtied_books(),
+        "override_issues": override_issues,
+        "uuid_rows": uuid_rows,
+        "sentinel_rows": sentinel_rows,
+        "language_rows": language_rows,
+    }
+
+
+def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
+    """Report library issues to CSV."""
+    issues, extras = collect_issues(db)
+    staleness = extras["staleness"]
+    override_issues = extras["override_issues"]
+    uuid_rows = extras["uuid_rows"]
+    sentinel_rows = extras["sentinel_rows"]
+    language_rows = extras["language_rows"]
+    books = db.get_all_books()
+    all_series = db.get_all_series()
+
     fieldnames = ["id", "title", "author", "issue_type", "issues"]
     with open_output(output, db.db_path) as (f, out_path):
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -372,7 +396,7 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
 
         # Books whose sidecar .opf Calibre will regenerate at next startup
         # (its metadata_dirtied queue — external writes land here).
-        dirtied = db.get_dirtied_books()
+        dirtied = extras["dirtied"]
         if dirtied:
             print(
                 "\n"
@@ -415,3 +439,61 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 )
 
         print(f"\nFull report: {color(out_path, C_TITLE)}")
+
+
+def show_health(db: CalibreDB, *, quiet: bool = False) -> int:
+    """The one-shot health digest: every audit class's row count in a
+    short form, always exit 0 (a dashboard, not --audit's CSV). Book-
+    level classes follow the active --restrict view; library-shape
+    classes stay global, exactly as in --audit, because both renderers
+    consume the same collect_issues derivation."""
+    books = db.get_all_books()
+    issues, extras = collect_issues(db)
+    staleness = extras["staleness"]
+    dirtied = extras["dirtied"]
+
+    if quiet:
+        return 0
+
+    by_type: Counter = Counter(i["issue_type"] for i in issues)
+    book_rows = [i for i in issues if i["issue_type"] == "book"]
+    problem_counts: Counter = Counter()
+    for row in book_rows:
+        for problem in row["issues"].split(", "):
+            problem_counts[problem] += 1
+
+    print(f"=== Library health ({len(books)} books) ===")
+    lib_uuid = db.get_library_uuid()
+    if lib_uuid:
+        print(f"library {lib_uuid}")
+
+    if book_rows:
+        top = ", ".join(f"{p} {n}" for p, n in problem_counts.most_common(5))
+        print(f"  book issues          : {len(book_rows)} book(s) ({top})")
+    else:
+        print("  book issues          : none")
+    print(f"  duplicate groups     : {by_type['duplicate']}")
+    print(f"  series gaps          : {by_type['series_gap']}")
+    print(f"  conversion overrides : {by_type['conversion_override']}")
+    print(
+        f"  metadata quality     : {len(extras['uuid_rows'])}"
+        f" invalid uuid(s), {len(extras['sentinel_rows'])} sentinel pubdate(s), "
+        f"{len(extras['language_rows'])} bad language value(s)"
+    )
+    tree_count = by_type["tree"]
+    print(
+        f"  filesystem tree      : {tree_count} finding(s)"
+        if tree_count
+        else "  filesystem tree      : no discrepancies"
+    )
+    if staleness["sidecar_present"]:
+        print(f"  FTS coverage         : {by_type['fts_coverage']} finding(s)")
+    else:
+        never = len(staleness["never_indexed"])
+        print(
+            f"  FTS coverage         : sidecar absent ({never} text-capable "
+            "format(s) never indexed)"
+        )
+    print(f"  pending OPF sync     : {len(dirtied)} book(s)")
+    print("  Full detail: --audit (CSV); tree/metadata rows carry their own views.")
+    return 0

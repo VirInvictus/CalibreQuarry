@@ -18,6 +18,7 @@ from unittest import mock
 
 from cquarry.db import CalibreDB
 
+from cquarry_cli.cli import main
 from cquarry_cli.modes.audit import run_audit
 from cquarry_cli.modes.catalog import write_all_wings, write_catalog
 
@@ -516,3 +517,73 @@ class TestAuditBadLanguages(unittest.TestCase):
                     r for r in csv.DictReader(f) if r["issue_type"] == "bad_language"
                 ]
             self.assertEqual(rows, [])
+
+
+class TestHealthDigest(unittest.TestCase):
+    """--health: the audit's finding counts in one short screen, exit 0
+    always (a dashboard, not the CSV). Same derivation as --audit, so
+    --restrict scopes the book-level classes identically."""
+
+    def _library(self, tmp, *, uuids=None, tags_by_book=None):
+        tags_by_book = tags_by_book or {}
+        db_path = os.path.join(tmp, "metadata.db")
+        con = sqlite3.connect(db_path)
+        con.executescript(_SCHEMA)
+        tag_ids = {}
+        for bid, uuid in uuids.items():
+            con.execute(
+                "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+                "has_cover,last_modified,series_index,path,uuid) VALUES "
+                f"({bid},'T{bid}','T{bid}','A','2024-01-01','0101-01-01',0,"
+                f"'2024-01-01',1.0,'A/T{bid} ({bid})','{uuid}')"
+            )
+            for tag in tags_by_book.get(bid, []):
+                if tag not in tag_ids:
+                    tag_ids[tag] = len(tag_ids) + 1
+                    con.execute("INSERT INTO tags (id,name) VALUES (?,?)", (tag_ids[tag], tag))
+                con.execute(
+                    "INSERT INTO books_tags_link (book,tag) VALUES (?,?)",
+                    (bid, tag_ids[tag]),
+                )
+        con.commit()
+        con.close()
+        return db_path
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_digest_counts_every_class(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, uuids={1: "garbage", 2: _VALID_UUID})
+            code, out, _ = self.run_cli("--health", "--db", db_path)
+        self.assertEqual(code, 0)
+        self.assertIn("Library health (2 books)", out)
+        # Both fixture books carry the sentinel pubdate the builder writes.
+        self.assertIn("metadata quality     : 1 invalid uuid(s), 2 sentinel pubdate(s), 0 bad language value(s)", out)
+        # The fixture creates no book directories, so the tree audit sees them.
+        self.assertIn("filesystem tree      : 2 finding(s)", out)
+        self.assertIn("Full detail: --audit", out)
+
+    def test_restrict_scopes_the_book_classes(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(
+                tmp,
+                uuids={1: "garbage", 2: _VALID_UUID},
+                tags_by_book={2: ["Curated"]},
+            )
+            code, out, _ = self.run_cli(
+                "--health", "--restrict", "id:2", "--db", db_path
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("Library health (1 books)", out)
+        # Book 1's garbage uuid is outside the restricted universe.
+        self.assertIn("0 invalid uuid(s)", out)
+        # The tree audit's library-shape classes stay global by design.
+        self.assertIn("filesystem tree", out)

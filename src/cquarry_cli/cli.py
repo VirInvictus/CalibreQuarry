@@ -17,7 +17,7 @@ from cquarry_cli.modes.analytics import (
     show_tag_tree,
     show_wing_overlap,
 )
-from cquarry_cli.modes.audit import run_audit
+from cquarry_cli.modes.audit import run_audit, show_health
 from cquarry_cli.modes.catalog import (
     run_all_saved_searches,
     write_all_wings,
@@ -102,6 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--audit",
         action="store_true",
         help="Report issues (untagged, unrated, series gaps, conversion overrides)",
+    )
+    group.add_argument(
+        "--health",
+        dest="health",
+        action="store_true",
+        help="One-shot health digest: the audit's finding counts in a "
+        "short form (composes with --restrict; always exit 0)",
     )
     group.add_argument(
         "--recent",
@@ -1094,6 +1101,9 @@ def main(argv: list[str] | None = None) -> int:
             elif args.analytics == "reading":
                 show_reading_stats(db, quiet=args.quiet)
                 return 0
+
+            if args.health:
+                return show_health(db, quiet=args.quiet)
 
             if args.audit:
                 output = args.output or "audit.csv"
