@@ -18,6 +18,7 @@ from cquarry.integrity import (
     find_invalid_uuids,
     find_low_res_covers,
     find_missing_cover_files,
+    find_sentinel_pubdates,
     find_series_gaps,
     find_untagged,
     find_unrated,
@@ -158,6 +159,28 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         )
     issues.extend(uuid_rows)
 
+    # Sentinel pubdates (cquarry 1.21's find_sentinel_pubdates): books
+    # whose pubdate is Calibre's undefined-date sentinel (0101-01-01 or
+    # its 0100-01-01 ancestor, the same pair the search engine and the
+    # listing sort treat as dateless).
+    # False positive: a genuine year-1/101 publication date would be
+    # indistinguishable; nobody has one.
+    pubdate_values = {b["id"]: (b.get("pubdate") or "") for b in books}
+    sentinel_rows: list[dict[str, str]] = []
+    for bid in find_sentinel_pubdates(db):
+        title, author = book_names.get(bid, ("", ""))
+        value = (pubdate_values.get(bid) or "")[:10]
+        sentinel_rows.append(
+            {
+                "id": str(bid),
+                "title": title,
+                "author": author,
+                "issue_type": "sentinel_pubdate",
+                "issues": f"sentinel_pubdate [{value}]",
+            }
+        )
+    issues.extend(sentinel_rows)
+
     # Filesystem-vs-database tree audit (Phase 19 A.3, CQ-native route):
     # book-level classes follow the active --restrict view, library-shape
     # classes (orphans, malformed dirs, root strays) are global.
@@ -285,6 +308,20 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 print(f"  #{i['id']} {i['title']}: {i['issues']}")
             if len(uuid_rows) > 10:
                 print(f"  ... and {len(uuid_rows) - 10} more")
+
+        if sentinel_rows:
+            print(
+                "\n"
+                + color(
+                    f"Metadata quality: {len(sentinel_rows)} sentinel "
+                    "pubdate(s) (Calibre's undefined-date value)",
+                    C_WARN,
+                )
+            )
+            for i in sentinel_rows[:10]:
+                print(f"  #{i['id']} {i['title']}: {i['issues']}")
+            if len(sentinel_rows) > 10:
+                print(f"  ... and {len(sentinel_rows) - 10} more")
 
         # Books whose sidecar .opf Calibre will regenerate at next startup
         # (its metadata_dirtied queue — external writes land here).

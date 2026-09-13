@@ -391,3 +391,57 @@ class TestAuditInvalidUuids(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._library(tmp, {1: _VALID_UUID, 2: _VALID_UUID})
             self.assertEqual(self._rows(db_path, tmp, "invalid_uuid"), [])
+
+
+class TestAuditSentinelPubdates(unittest.TestCase):
+    """run_audit's sentinel_pubdate rows (3.41.0): cquarry 1.21's
+    find_sentinel_pubdates, rendered the audit's way. False positive: a
+    genuine year-1/101 publication date would be indistinguishable from
+    Calibre's undefined-date sentinel; nobody has one."""
+
+    def _library(self, tmp, pubdates):
+        db_path = os.path.join(tmp, "metadata.db")
+        con = sqlite3.connect(db_path)
+        con.executescript(_SCHEMA)
+        for bid, pubdate in pubdates.items():
+            con.execute(
+                "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+                "has_cover,last_modified,series_index,path,uuid) VALUES "
+                f"({bid},'T{bid}','T{bid}','A','2024-01-01','{pubdate}',0,"
+                f"'2024-01-01',1.0,'A/T{bid} ({bid})','{_VALID_UUID}')"
+            )
+        con.commit()
+        con.close()
+        return db_path
+
+    def test_both_sentinel_shapes_flag_with_their_dates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, {1: "0101-01-01", 2: "0100-01-01"})
+            db = CalibreDB(db_path)
+            out = os.path.join(tmp, "audit.csv")
+            try:
+                run_audit(db, out, quiet=True)
+            finally:
+                db.close()
+            with open(out, newline="", encoding="utf-8") as f:
+                rows = [
+                    r for r in csv.DictReader(f) if r["issue_type"] == "sentinel_pubdate"
+                ]
+            self.assertEqual([r["id"] for r in rows], ["1", "2"])
+            self.assertIn("[0101-01-01]", rows[0]["issues"])
+            self.assertIn("[0100-01-01]", rows[1]["issues"])
+
+    def test_a_real_pubdate_never_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, {1: "1968-10-18"})
+            db = CalibreDB(db_path)
+            out = os.path.join(tmp, "audit.csv")
+            try:
+                run_audit(db, out, quiet=True)
+            finally:
+                db.close()
+            with open(out, newline="", encoding="utf-8") as f:
+                rows = [
+                    r for r in csv.DictReader(f) if r["issue_type"] == "sentinel_pubdate"
+                ]
+            self.assertEqual(rows, [])
