@@ -15,6 +15,7 @@ from cquarry.integrity import (
     find_coverless,
     find_deprecated_formats,
     find_formatless,
+    find_invalid_uuids,
     find_low_res_covers,
     find_missing_cover_files,
     find_series_gaps,
@@ -133,6 +134,30 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         )
     issues.extend(override_issues)
 
+    # Metadata-quality rows (the routed bindery item, recorded 2026-09-12:
+    # bindery counted 51 OPF-085 invalid-UUID warnings across this
+    # library -- its view of the class cquarry owns). cquarry 1.21's
+    # predicate, rendered the audit's way: one advisory row per book,
+    # the stored value shown in brackets.
+    # False positives: none by construction. A parseable UUID never
+    # flags; an empty uuid (the pre-uuid-column reader degrade) and
+    # hand-built garbage are reported as seen, not assumed away.
+    uuid_values = {b["id"]: (b.get("uuid") or "") for b in books}
+    uuid_rows: list[dict[str, str]] = []
+    for bid in find_invalid_uuids(db):
+        title, author = book_names.get(bid, ("", ""))
+        value = uuid_values.get(bid, "")
+        uuid_rows.append(
+            {
+                "id": str(bid),
+                "title": title,
+                "author": author,
+                "issue_type": "invalid_uuid",
+                "issues": f"invalid_uuid [{value or '(empty)'}]",
+            }
+        )
+    issues.extend(uuid_rows)
+
     # Filesystem-vs-database tree audit (Phase 19 A.3, CQ-native route):
     # book-level classes follow the active --restrict view, library-shape
     # classes (orphans, malformed dirs, root strays) are global.
@@ -247,6 +272,19 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
                 "  The recipe blobs are Calibre pickles; open the book's "
                 "conversion dialog in Calibre to inspect or clear them."
             )
+
+        if uuid_rows:
+            print(
+                "\n"
+                + color(
+                    f"Metadata quality: {len(uuid_rows)} invalid uuid(s)",
+                    C_WARN,
+                )
+            )
+            for i in uuid_rows[:10]:
+                print(f"  #{i['id']} {i['title']}: {i['issues']}")
+            if len(uuid_rows) > 10:
+                print(f"  ... and {len(uuid_rows) - 10} more")
 
         # Books whose sidecar .opf Calibre will regenerate at next startup
         # (its metadata_dirtied queue — external writes land here).

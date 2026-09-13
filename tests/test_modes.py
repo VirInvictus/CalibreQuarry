@@ -341,3 +341,53 @@ class TestAuditConversionOverrides(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_VALID_UUID = "c9bf9e57-1685-4c89-bafb-ff5af830be8a"
+
+
+class TestAuditInvalidUuids(unittest.TestCase):
+    """run_audit's invalid_uuid rows (3.41.0, the routed bindery item:
+    bindery's 51 OPF-085 warnings are this class seen from the OPF
+    side). cquarry 1.21's find_invalid_uuids, rendered the audit's way.
+    False positives: none by construction -- a parseable UUID never
+    flags; empty (the pre-uuid-column degrade) and hand-built garbage
+    are reported as seen."""
+
+    def _library(self, tmp, uuids):
+        db_path = os.path.join(tmp, "metadata.db")
+        con = sqlite3.connect(db_path)
+        con.executescript(_SCHEMA)
+        for bid, uuid in uuids.items():
+            con.execute(
+                "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+                "has_cover,last_modified,series_index,path,uuid) VALUES "
+                f"({bid},'T{bid}','T{bid}','A','2024-01-01','2020-01-01',0,"
+                f"'2024-01-01',1.0,'A/T{bid} ({bid})','{uuid}')"
+            )
+        con.commit()
+        con.close()
+        return db_path
+
+    def _rows(self, db_path, tmp, issue_type):
+        db = CalibreDB(db_path)
+        out = os.path.join(tmp, "audit.csv")
+        try:
+            run_audit(db, out, quiet=True)
+        finally:
+            db.close()
+        with open(out, newline="", encoding="utf-8") as f:
+            return [r for r in csv.DictReader(f) if r["issue_type"] == issue_type]
+
+    def test_garbage_and_empty_uuids_flag_with_their_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, {1: "garbage-not-a-uuid", 2: ""})
+            rows = self._rows(db_path, tmp, "invalid_uuid")
+            self.assertEqual([r["id"] for r in rows], ["1", "2"])
+            self.assertIn("[garbage-not-a-uuid]", rows[0]["issues"])
+            self.assertIn("[(empty)]", rows[1]["issues"])
+
+    def test_a_parseable_uuid_never_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._library(tmp, {1: _VALID_UUID, 2: _VALID_UUID})
+            self.assertEqual(self._rows(db_path, tmp, "invalid_uuid"), [])
