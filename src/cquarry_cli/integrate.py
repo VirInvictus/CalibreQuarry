@@ -44,7 +44,13 @@ POLISH_OPS = {
 
 
 def _calibre_running() -> bool:
-    """The anchored-name pgrep guard (fetch_library_codes.py precedent)."""
+    """The anchored-name pgrep guard (fetch_library_codes.py precedent).
+
+    Fail-closed on anything that is not a clean "not running" answer: a
+    pgrep timeout (or a pgrep that cannot run at all) is assumed-RUNNING,
+    because refusing costs a re-run while guessing wrong writes to a
+    live database (run.py's recorded semantics; the old cut returned
+    False on a timeout and proceeded to --apply against live Calibre)."""
     try:
         proc = subprocess.run(
             ["pgrep", "^calibre"],
@@ -52,8 +58,10 @@ def _calibre_running() -> bool:
             timeout=_PGREP_TIMEOUT,
             check=False,
         )
-    except OSError, subprocess.TimeoutExpired:
-        return False
+    except subprocess.TimeoutExpired:
+        return True
+    except OSError:
+        return True
     return proc.returncode == 0
 
 

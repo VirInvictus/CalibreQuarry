@@ -20,6 +20,7 @@ from unittest import mock
 
 from cquarry.db import CalibreDB
 
+from cquarry_cli import integrate
 from cquarry_cli.cli import main
 
 _SCHEMA = """
@@ -687,6 +688,31 @@ class TestMatrixCFixes(unittest.TestCase):
         self.assertEqual(code, 0)
         data = json.loads(out)
         self.assertEqual(data["plan"][0]["action"], "convert")
+
+
+class TestCalibreGuard(unittest.TestCase):
+    """3.41.0: the pgrep guard is fail-closed. A timeout (or a pgrep
+    that cannot run) used to answer "not running" and --apply proceeded
+    against a live Calibre; run.py's guard has always assumed-running."""
+
+    def test_timeout_assumes_running(self):
+        import subprocess as sp
+
+        with mock.patch(
+            "subprocess.run",
+            side_effect=sp.TimeoutExpired(cmd="pgrep", timeout=10),
+        ):
+            self.assertTrue(integrate._calibre_running())
+
+    def test_pgrep_unavailable_assumes_running(self):
+        with mock.patch("subprocess.run", side_effect=OSError("no pgrep")):
+            self.assertTrue(integrate._calibre_running())
+
+    def test_a_clean_answer_passes_through(self):
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
+            self.assertFalse(integrate._calibre_running())
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)):
+            self.assertTrue(integrate._calibre_running())
 
 
 class TestFlushIdTargets(unittest.TestCase):
