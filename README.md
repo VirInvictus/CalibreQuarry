@@ -9,6 +9,8 @@
 
 <p align="center">
   <img src="docs/screenshots/stats.png" alt="CalibreQuarry (cquarry-cli) --stats output: hierarchical tag taxonomy, series with book counts, publishers, languages, and recent additions">
+  <!-- TODO screenshot: the curses TUI (the interactive menu) deserves a
+       shot beside this one; capturing it needs a live terminal. -->
 </p>
 
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. 
