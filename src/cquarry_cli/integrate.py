@@ -135,13 +135,25 @@ def _dest_path(db, book_id: int, ext: str) -> Path:
 
 
 def plan_convert(db, args) -> list[dict]:
-    """One planned conversion per book: source format -> --to."""
+    """One planned conversion per book: source format -> --to. A book
+    that already has the target skips at plan time (the merge verb's
+    shape): running ebook-convert anyway used to overwrite the existing
+    target file and then die on the registration."""
     to_fmt = (args.to or "").upper()
     if not to_fmt:
         raise ValueError("run convert needs --to FORMAT")
     plans = []
     for bid in resolve_targets(db, args):
         formats = db.get_formats(bid) or {}
+        if any(f.upper() == to_fmt for f in formats):
+            plans.append(
+                {
+                    "book": bid,
+                    "action": "skip",
+                    "detail": f"already has {to_fmt}",
+                }
+            )
+            continue
         source = None
         if getattr(args, "from_format", None):
             want = args.from_format.upper()
@@ -192,8 +204,9 @@ def run_convert(db, args, *, apply: bool, take_backup=None) -> int:
     applied = failed = 0
     for p in plans:
         if p["action"] != "convert":
-            failed += 1
-            p["result"] = "skipped"
+            # Plan-time skip ("already has TARGET"): expected idempotence,
+            # never a failure (the file the book already has is untouched).
+            p["result"] = "already-so"
             continue
         proc = subprocess.run(
             ["ebook-convert", p["src"], p["dst"]],
@@ -206,14 +219,23 @@ def run_convert(db, args, *, apply: bool, take_backup=None) -> int:
             p["detail"] = (proc.stderr or "ebook-convert failed")[:200]
             failed += 1
             continue
-        with WritableCalibreDB(db.db_path) as wdb:
-            with wdb.batch():
-                wdb.add_format(
-                    p["book"],
-                    p["target"],
-                    Path(p["dst"]).stem,
-                    Path(p["dst"]).stat().st_size,
-                )
+        try:
+            with WritableCalibreDB(db.db_path) as wdb:
+                with wdb.batch():
+                    wdb.add_format(
+                        p["book"],
+                        p["target"],
+                        Path(p["dst"]).stem,
+                        Path(p["dst"]).stat().st_size,
+                    )
+        except Exception as e:
+            # A registration failure is a failed row in the report, not
+            # a traceback (the conversion itself succeeded; the file is
+            # there for a re-run).
+            p["result"] = "failed"
+            p["detail"] = f"registration failed: {e}"[:200]
+            failed += 1
+            continue
         p["result"] = "applied"
         applied += 1
     return _print_results(plans, args, applied, failed)

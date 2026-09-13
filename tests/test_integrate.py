@@ -213,6 +213,84 @@ class TestConvertVerb(_IntegrateCase):
         self.assertEqual(code, 2)
         self.assertIn("OUTSIDE the library", err)
 
+    def test_apply_to_an_existing_target_skips_at_plan_time(self):
+        # 3.41.0: the old cut planned the conversion anyway, so --apply
+        # OVERWROTE the EPUB the book already has and then died on the
+        # add_format registration. The plan skips the book, apply never
+        # invokes ebook-convert, and the file is untouched.
+        epub = self.tmpdir / "Auth A" / "Keeper Book (1)" / "Book1.epub"
+        before = epub.read_bytes()
+        code, out, _ = self.run_cli(
+            "run",
+            "convert",
+            "--to",
+            "EPUB",
+            "--ids",
+            "1",
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("already has EPUB", out)
+
+        calls = []
+
+        def fake_ebook_convert(cmd, **kw):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch("subprocess.run", side_effect=fake_ebook_convert),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "convert",
+                "--to",
+                "EPUB",
+                "--ids",
+                "1",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls, [], "ebook-convert must not run for a skip")
+        self.assertIn("Applied 0", out)
+        self.assertEqual(epub.read_bytes(), before)
+
+    def test_registration_failure_is_a_report_row_not_a_traceback(self):
+        def fake_ebook_convert(cmd, **kw):
+            Path(cmd[2]).write_bytes(b"converted bytes" * 10)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch("subprocess.run", side_effect=fake_ebook_convert),
+            mock.patch(
+                "cquarry_cli.integrate.WritableCalibreDB",
+                side_effect=RuntimeError("database is locked"),
+            ),
+        ):
+            code, out, err = self.run_cli(
+                "run",
+                "convert",
+                "--to",
+                "AZW3",
+                "--ids",
+                "1",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("registration failed", out)
+        self.assertNotIn("Traceback", err)
+
 
 class TestMergeVerb(_IntegrateCase):
     def test_dry_run_shows_the_moves(self):
