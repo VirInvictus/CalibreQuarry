@@ -31,6 +31,7 @@ def write_catalog(
     plugin_data: str | None = None,
     author_details: bool = False,
     quiet: bool = False,
+    fmt: str | None = None,
 ) -> None:
     """Write a formatted text catalog, optionally filtered to a virtual library.
 
@@ -39,7 +40,11 @@ def write_catalog(
     ``<name: value>`` segment for books that carry that data.
     ``matching_ids`` (the saved-search sweep's filter) and ``scope_note``
     (a header provenance line) are the --all-saved-searches plumbing.
+    ``fmt="md"`` renders the Markdown shape (headings per author,
+    bulleted books, bold titles); every other value keeps the plain
+    text form.
     """
+    md = fmt == "md"
     # Copy: get_all_books() hands out the shared cache, and the sort below
     # must not reorder it for every later consumer in the session.
     books = list(db.get_all_books())
@@ -101,8 +106,11 @@ def write_catalog(
         lib_uuid = db.get_library_uuid()
         if lib_uuid:
             header += f" — library {lib_uuid}"
-        f.write(header + "\n")
-        f.write("=" * len(header) + "\n\n")
+        if md:
+            f.write(f"# {header}\n\n")
+        else:
+            f.write(header + "\n")
+            f.write("=" * len(header) + "\n\n")
 
         current_author_key = None
         book_count = 0
@@ -114,11 +122,16 @@ def write_catalog(
             if key != current_author_key:
                 if current_author_key is not None:
                     f.write("\n")
-                f.write(f"[{author_display}]\n")
-                f.write("-" * (len(author_display) + 2) + "\n")
+                if md:
+                    f.write(f"## {author_display}\n\n")
+                else:
+                    f.write(f"[{author_display}]\n")
+                    f.write("-" * (len(author_display) + 2) + "\n")
                 current_author_key = key
 
             title = book["title"] or "Unknown Title"
+            if md:
+                title = f"**{title}**"
 
             if show_tags:
                 tag_list = [t.strip() for t in (book["tags"] or []) if t.strip()]
@@ -165,14 +178,19 @@ def write_catalog(
                 if bits:
                     details_str = " {" + "; ".join(bits) + "}"
 
+            bullet = "- " if md else "  * "
             f.write(
-                f"  * {id_str}{title}{series_str}{fmt_str}{meta_str}"
+                f"{bullet}{id_str}{title}{series_str}{fmt_str}{meta_str}"
                 f"{custom_str}{plugin_str}{details_str}\n"
             )
             book_count += 1
 
-        f.write(f"\n{'=' * 40}\n")
-        f.write(f"Total: {book_count} books\n")
+        if md:
+            f.write("\n---\n\n")
+            f.write(f"**Total:** {book_count} books\n")
+        else:
+            f.write(f"\n{'=' * 40}\n")
+            f.write(f"Total: {book_count} books\n")
 
     if not quiet:
         print(f"Catalog written: {color(output, C_TITLE)} ({book_count} books)")
@@ -190,6 +208,7 @@ def write_all_wings(
     plugin_data: str | None = None,
     author_details: bool = False,
     quiet: bool = False,
+    fmt: str | None = None,
 ) -> int:
     """Generate a catalog file for each virtual library wing. Returns 1
     when any wing failed: the failure is dropped (any stale file goes
@@ -218,7 +237,8 @@ def write_all_wings(
             n += 1
             safe_name = f"{base}_{n}"
         used.add(safe_name.lower())
-        output = os.path.join(outdir, f"{safe_name}_Library.txt")
+        ext = ".md" if fmt == "md" else ".txt"
+        output = os.path.join(outdir, f"{safe_name}_Library{ext}")
         if not quiet:
             print(f"\u2192 {color(name, C_HEADER)}")
         rc = write_catalog(
@@ -232,6 +252,7 @@ def write_all_wings(
             plugin_data=plugin_data,
             author_details=author_details,
             quiet=True,
+            fmt=fmt,
         )
         if rc:
             # The wing's catalog failed (an unresolvable expression, an
@@ -269,6 +290,7 @@ def run_all_saved_searches(
     plugin_data: str | None = None,
     author_details: bool = False,
     quiet: bool = False,
+    fmt: str | None = None,
 ) -> int:
     """Generate a catalog file per saved search (the --all-wings analog).
 
@@ -317,7 +339,8 @@ def run_all_saved_searches(
             if not quiet:
                 print("    (no matches, no catalog written)")
             continue
-        output = os.path.join(outdir, f"{safe_name}_SavedSearch.txt")
+        ext = ".md" if fmt == "md" else ".txt"
+        output = os.path.join(outdir, f"{safe_name}_SavedSearch{ext}")
         rc = write_catalog(
             db,
             output,
@@ -330,6 +353,7 @@ def run_all_saved_searches(
             plugin_data=plugin_data,
             author_details=author_details,
             quiet=True,
+            fmt=fmt,
         )
         if rc:
             if os.path.exists(output):

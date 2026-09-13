@@ -269,10 +269,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--format",
-        choices=["json", "csv", "ai"],
+        choices=["json", "csv", "ai", "md"],
         default=None,
         help="Output format. --export defaults to json; --search defaults to a "
-        "plain-text listing unless a format is given here",
+        "plain-text listing unless a format is given here; --catalog and "
+        "the catalog sweeps accept md",
     )
     p.add_argument(
         "--primary-only",
@@ -1047,6 +1048,7 @@ def main(argv: list[str] | None = None) -> int:
                     plugin_data=args.plugin_data,
                     author_details=args.show_author_details,
                     quiet=args.quiet,
+                    fmt=args.format,
                 )
 
             if args.all_wings:
@@ -1060,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
                     show_custom=args.show_custom,
                     author_details=args.show_author_details,
                     quiet=args.quiet,
+                    fmt=args.format,
                 )
 
             if args.all_saved_searches:
@@ -1074,6 +1077,7 @@ def main(argv: list[str] | None = None) -> int:
                     plugin_data=args.plugin_data,
                     author_details=args.show_author_details,
                     quiet=args.quiet,
+                    fmt=args.format,
                 )
 
             if args.stats:

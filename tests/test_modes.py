@@ -587,3 +587,77 @@ class TestHealthDigest(unittest.TestCase):
         self.assertIn("0 invalid uuid(s)", out)
         # The tree audit's library-shape classes stay global by design.
         self.assertIn("filesystem tree", out)
+
+
+class TestCatalogMarkdown(unittest.TestCase):
+    """fmt="md": the catalog's Markdown shape (--format md). Headings
+    per author, bulleted books with bold titles, an hr + bold total;
+    the plain text form is untouched."""
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db", prefix="cquarry_md_")
+        os.close(fd)
+        con = sqlite3.connect(self.db_path)
+        con.executescript(_SCHEMA)
+        con.execute(
+            "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+            "has_cover,last_modified,series_index,path,uuid) VALUES "
+            "(1,'Dune','Dune','Herbert, Frank','2024-01-01','2020-01-01',0,"
+            "'2024-01-01',1.0,'p1','u1')"
+        )
+        con.execute("INSERT INTO authors (id,name,sort) VALUES (1,'Frank Herbert','Herbert, Frank')")
+        con.execute("INSERT INTO books_authors_link (book,author) VALUES (1,1)")
+        con.commit()
+        con.close()
+        self.db = CalibreDB(self.db_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.db_path)
+
+    def test_md_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "catalog.md")
+            write_catalog(self.db, out, fmt="md", quiet=True)
+            text = open(out).read()
+        self.assertIn("# Calibre Library Export", text)
+        self.assertIn("## Frank Herbert", text)
+        self.assertIn("- **Dune**", text)
+        self.assertIn("**Total:** 1 books", text)
+        self.assertNotIn("  * ", text)
+        self.assertNotIn("[Herbert, Frank]", text)
+
+    def test_text_form_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "catalog.txt")
+            write_catalog(self.db, out, quiet=True)
+            text = open(out).read()
+        self.assertIn("[Frank Herbert]", text)
+        self.assertIn("  * Dune", text)
+        self.assertIn("Total: 1 books", text)
+        self.assertNotIn("# Calibre Library Export", text)
+
+    def test_md_via_cli_format_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "catalog.md")
+            out_io, err_io = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_io), contextlib.redirect_stderr(err_io):
+                code = main(
+                    ["--catalog", "--format", "md", "--db", self.db_path, "--output", out]
+                )
+            self.assertEqual(code, 0)
+            self.assertIn("- **Dune**", open(out).read())
+
+    def test_wing_sweep_writes_md_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            con = sqlite3.connect(self.db_path)
+            con.execute(
+                "INSERT INTO preferences (key, val) VALUES ('virtual_libraries', ?)",
+                (json.dumps({"Wing": "title:Dune"}),),
+            )
+            con.commit()
+            con.close()
+            rc = write_all_wings(self.db, tmp, quiet=True, fmt="md")
+            self.assertEqual(rc, 0)
+            self.assertEqual(os.listdir(tmp), ["Wing_Library.md"])
+            self.assertIn("- **Dune**", open(os.path.join(tmp, "Wing_Library.md")).read())
