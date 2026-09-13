@@ -468,7 +468,14 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
     metadata_dirtied (chunked; the reconcile precedent)."""
     ids = db.get_dirtied_books()
     if getattr(args, "ids", None) or getattr(args, "search", None):
-        ids = [i for i in ids if i in set(resolve_targets(db, args))]
+        try:
+            selected = set(resolve_targets(db, args))
+        except ValueError as e:
+            # A bad --ids list or search expression is a usage error,
+            # not a traceback (every other verb wraps resolve_targets).
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+        ids = [i for i in ids if i in selected]
     if not ids:
         print("The OPF queue is empty: nothing to flush.")
         return 0
@@ -486,11 +493,13 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
     if take_backup and (rc := take_backup()):
         return rc
     done = 0
-    # embed_metadata takes space-separated ids and hyphen ranges
-    # (calibredb embed_metadata 1 2 10-15); --library is a DIRECTORY.
+    # embed_metadata takes space-separated ids (its hyphen range is a
+    # COUNT of every book between the endpoints, and the dirtied set is
+    # generally non-contiguous: "5-900" once wrote 896 books the queue
+    # never named); --library is a DIRECTORY.
     library = str(Path(db.db_path).resolve().parent)
     for c in chunks:
-        targets = [str(c[0])] if len(c) == 1 else [f"{c[0]}-{c[-1]}"]
+        targets = [str(i) for i in c]
         proc = subprocess.run(
             ["calibredb", "embed_metadata", "--library", library, *targets],
             capture_output=True,

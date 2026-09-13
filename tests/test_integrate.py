@@ -609,3 +609,122 @@ class TestMatrixCFixes(unittest.TestCase):
         self.assertEqual(code, 0)
         data = json.loads(out)
         self.assertEqual(data["plan"][0]["action"], "convert")
+
+
+class TestFlushIdTargets(unittest.TestCase):
+    """3.41.0 regression: embed_metadata gets SPACE-SEPARATED ids. The
+    old cut joined a chunk's distinct ids into one hyphen range
+    ("5-900"), and calibredb reads a range as EVERY book between the
+    endpoints, so a non-contiguous dirtied set wrote embedded metadata
+    into books the queue never named."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="cquarry_flush_"))
+        self.addCleanup(_rm, self.tmpdir)
+        self.db_path = _build(self.tmpdir)
+        self.backups = Path(tempfile.mkdtemp(prefix="cquarry_flush_bak_"))
+        self.addCleanup(_rm, self.backups)
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with contextlib.redirect_stdout(out):
+                code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def _dirty(self, *ids):
+        import sqlite3 as s3
+
+        con = s3.connect(self.db_path)
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS metadata_dirtied (book INT, "
+            "seq INTEGER PRIMARY KEY AUTOINCREMENT, format TEXT, "
+            "timestamp TIMESTAMP)"
+        )
+        for bid in ids:
+            con.execute("INSERT INTO metadata_dirtied (book) VALUES (?)", (bid,))
+        con.commit()
+        con.close()
+
+    def test_noncontiguous_queue_never_becomes_a_range(self):
+        self._dirty(1, 3)  # book 2 sits between and must NOT be touched
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        self.assertIn("Flushed 2 book(s)", out)
+        cmd = calls[-1]
+        tail = cmd[cmd.index("embed_metadata") + 1 :]
+        ids = [t for t in tail if t not in ("--library",) and not t.startswith("/")]
+        # Every dirtied id named individually; no "1-3" range that would
+        # silently cover the untouched book 2.
+        self.assertIn("1", ids)
+        self.assertIn("3", ids)
+        self.assertNotIn("1-3", ids)
+        self.assertEqual(len(ids), 2, cmd)
+
+    def test_contiguous_queue_stays_individual_ids(self):
+        self._dirty(1, 2, 3)
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, _ = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0)
+        cmd = calls[-1]
+        self.assertIn("1", cmd)
+        self.assertIn("2", cmd)
+        self.assertIn("3", cmd)
+        self.assertNotIn("1-3", cmd)
+
+    def test_bad_ids_list_is_a_usage_error_not_a_traceback(self):
+        code, _, err = self.run_cli(
+            "run", "flush", "--ids", "1,notanid", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("invalid book id", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_bad_search_expression_is_a_usage_error(self):
+        code, _, err = self.run_cli(
+            "run", "flush", "--search", "((", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("could not parse", err)
+        self.assertNotIn("Traceback", err)
