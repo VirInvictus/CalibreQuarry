@@ -35,7 +35,6 @@ read modes never import it.
 """
 
 import json
-import shutil
 from datetime import datetime
 import subprocess
 import sys
@@ -484,15 +483,31 @@ def _make_backup(db_path: str, backup_dir_raw: str) -> Path:
     try:
         backup_dir.mkdir(parents=True, exist_ok=True)
         # Timestamped, like run.py's phase-2 backup: a fixed name let a
-        # second run destroy the only restore point.
+        # second run destroy the only restore point. Taken through the
+        # sqlite backup API like the other doors (run.py, integrate.py):
+        # a copy2 of a database with a hot journal can snapshot a state
+        # its WAL would never replay into.
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         dest = backup_dir / f"metadata-{stamp}.db"
         n = 2
         while dest.exists():
             dest = backup_dir / f"metadata-{stamp}-{n}.db"
             n += 1
-        shutil.copy2(db_path, dest)
+        import sqlite3
+
+        src = sqlite3.connect(db_path)
+        try:
+            dst = sqlite3.connect(dest)
+            try:
+                with dst:
+                    src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
     except OSError as e:
+        raise _UsageError(f"could not write the backup: {e}") from None
+    except sqlite3.Error as e:
         raise _UsageError(f"could not write the backup: {e}") from None
     return dest
 

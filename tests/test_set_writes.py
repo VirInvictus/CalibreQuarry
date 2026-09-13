@@ -390,6 +390,16 @@ class TestApply(_TempDBCase):
         backups = os.listdir(backup_dir)
         self.assertEqual(len(backups), 1)  # timestamped restore point
         self.assertTrue(backups[0].startswith("metadata-"))
+        # 3.41.0: the backup goes through the sqlite backup API like the
+        # other doors, so it is a live database, not a file copy.
+        con = sqlite3.connect(os.path.join(backup_dir, backups[0]))
+        try:
+            self.assertEqual(con.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertIsNotNone(
+                con.execute("SELECT COUNT(*) FROM books").fetchone()
+            )
+        finally:
+            con.close()
 
     def test_apply_reports_already_so(self):
         backup_dir = tempfile.mkdtemp(prefix="cquarry_bak_")
