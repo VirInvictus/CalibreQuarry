@@ -540,7 +540,9 @@ class TestHealthDigest(unittest.TestCase):
             for tag in tags_by_book.get(bid, []):
                 if tag not in tag_ids:
                     tag_ids[tag] = len(tag_ids) + 1
-                    con.execute("INSERT INTO tags (id,name) VALUES (?,?)", (tag_ids[tag], tag))
+                    con.execute(
+                        "INSERT INTO tags (id,name) VALUES (?,?)", (tag_ids[tag], tag)
+                    )
                 con.execute(
                     "INSERT INTO books_tags_link (book,tag) VALUES (?,?)",
                     (bid, tag_ids[tag]),
@@ -564,7 +566,10 @@ class TestHealthDigest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Library health (2 books)", out)
         # Both fixture books carry the sentinel pubdate the builder writes.
-        self.assertIn("metadata quality     : 1 invalid uuid(s), 2 sentinel pubdate(s), 0 bad language value(s)", out)
+        self.assertIn(
+            "metadata quality     : 1 invalid uuid(s), 2 sentinel pubdate(s), 0 bad language value(s)",
+            out,
+        )
         # The fixture creates no book directories, so the tree audit sees them.
         self.assertIn("filesystem tree      : 2 finding(s)", out)
         self.assertIn("Full detail: --audit", out)
@@ -605,7 +610,9 @@ class TestCatalogMarkdown(unittest.TestCase):
             "(1,'Dune','Dune','Herbert, Frank','2024-01-01','2020-01-01',0,"
             "'2024-01-01',1.0,'p1','u1')"
         )
-        con.execute("INSERT INTO authors (id,name,sort) VALUES (1,'Frank Herbert','Herbert, Frank')")
+        con.execute(
+            "INSERT INTO authors (id,name,sort) VALUES (1,'Frank Herbert','Herbert, Frank')"
+        )
         con.execute("INSERT INTO books_authors_link (book,author) VALUES (1,1)")
         con.commit()
         con.close()
@@ -643,7 +650,15 @@ class TestCatalogMarkdown(unittest.TestCase):
             out_io, err_io = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out_io), contextlib.redirect_stderr(err_io):
                 code = main(
-                    ["--catalog", "--format", "md", "--db", self.db_path, "--output", out]
+                    [
+                        "--catalog",
+                        "--format",
+                        "md",
+                        "--db",
+                        self.db_path,
+                        "--output",
+                        out,
+                    ]
                 )
             self.assertEqual(code, 0)
             self.assertIn("- **Dune**", open(out).read())
@@ -660,4 +675,6 @@ class TestCatalogMarkdown(unittest.TestCase):
             rc = write_all_wings(self.db, tmp, quiet=True, fmt="md")
             self.assertEqual(rc, 0)
             self.assertEqual(os.listdir(tmp), ["Wing_Library.md"])
-            self.assertIn("- **Dune**", open(os.path.join(tmp, "Wing_Library.md")).read())
+            self.assertIn(
+                "- **Dune**", open(os.path.join(tmp, "Wing_Library.md")).read()
+            )
