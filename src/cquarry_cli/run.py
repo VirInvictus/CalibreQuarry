@@ -526,21 +526,34 @@ def _backup_db(db_path: str, backup_dir: str) -> str:
 
 
 def _fetch_metadata(isbn: str, opf_path: str) -> str:
-    """fetch-ebook-metadata for one ISBN. Returns ok / no_result / ambiguous."""
+    """fetch-ebook-metadata for one ISBN. Returns ok / no_result / ambiguous.
+
+    -o/--opf is a store flag: the OPF arrives on STDOUT, never at a
+    path. The old cut passed opf_path after -o, a silently-ignored
+    stray positional, so the file never existed, the success gate
+    always failed, and the ok branch, _apply_opf, and the clobber
+    watch were dead code (every import queued a bogus
+    metadata_download decision). The stdout is staged to opf_path,
+    exactly like run_backfill stages its own fetch."""
     try:
         proc = _run(
-            ["fetch-ebook-metadata", "--identifier", f"isbn:{isbn}", "-o", opf_path],
+            ["fetch-ebook-metadata", "--identifier", f"isbn:{isbn}", "-o"],
             timeout=120,
         )
     except subprocess.TimeoutExpired:
         # A hung lookup is a failure, not an ambiguity: there is nothing
         # to disambiguate.
         return "failed"
-    if proc.returncode != 0 or not os.path.exists(opf_path):
+    if proc.returncode != 0 or not proc.stdout.strip():
+        # "multiple" only: the no-result output also says "No matches
+        # found", so the bare word "matches" classified every empty
+        # lookup as ambiguous.
         text = (proc.stdout + proc.stderr).lower()
-        if "multiple" in text or "matches" in text:
+        if "multiple" in text:
             return "ambiguous"
         return "no_result"
+    with open(opf_path, "w", encoding="utf-8") as f:
+        f.write(proc.stdout)
     return "ok"
 
 

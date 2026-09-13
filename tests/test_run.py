@@ -26,6 +26,7 @@ from cquarry_cli.run import (
     _backup_db,
     _bindery_phase1,
     _drive_stamp,
+    _fetch_metadata,
     _inventory,
     _provenance_from_filename,
     _screen_duplicates,
@@ -878,6 +879,132 @@ class TestRunPhase2(RunCase):
         count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
         con.close()
         self.assertEqual(count, 1)  # the second run imported nothing new
+
+    def test_phase2_ok_path_is_live_end_to_end(self):
+        # The 3.41.0 fetch fix's end-to-end half: only the subprocess
+        # seam is mocked, so the staging, the ok branch, _apply_opf, and
+        # the clobber watch all run for real (they were dead code while
+        # _fetch_metadata passed a stray positional after -o).
+        path = self._make_file("Fifth Head of Data.epub")
+        man_path = self._manifest(path)
+        backup = os.path.join(self.temp_dir, "backups")
+
+        def fake_fetch(cmd, **kw):
+            opf = (
+                "<?xml version='1.0'?><package "
+                "xmlns='http://www.idpf.org/2007/opf' "
+                "xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+                "<metadata><dc:title>Real Title</dc:title>"
+                "<dc:creator>Someone Else</dc:creator>"
+                "</metadata></package>"
+            )
+            return mock.Mock(returncode=0, stdout=opf, stderr="")
+
+        with (
+            mock.patch("cquarry_cli.run.calibre_running", return_value=False),
+            mock.patch("cquarry_cli.run.subprocess.run", side_effect=fake_fetch),
+        ):
+            rc = run_phase2(man_path, self.db_path, backup_dir=backup)
+        self.assertEqual(rc, 0)
+        man = manifest.load(man_path)
+        entry = man["files"][0]
+        self.assertEqual(entry["import"]["download_outcome"], "ok")
+        # The ok branch applied the OPF through cquarry writes (no
+        # metadata_download decision queued), and the author clobber
+        # watch recorded the stamped-vs-downloaded drift.
+        kinds = [d["kind"] for d in man["decisions_needed"]]
+        self.assertEqual(kinds, [])
+        con = sqlite3.connect(self.db_path)
+        try:
+            title = con.execute("SELECT title FROM books").fetchone()[0]
+            author = con.execute(
+                "SELECT a.name FROM books_authors_link l "
+                "JOIN authors a ON a.id = l.author"
+            ).fetchall()
+        finally:
+            con.close()
+        self.assertEqual(title, "Real Title")
+        self.assertEqual(author, [("Someone Else",)])
+        self.assertEqual(
+            entry["import"]["clobber_watch"]["post_download"], ["Someone Else"]
+        )
+
+
+class TestFetchMetadataSeam(unittest.TestCase):
+    """3.41.0 regression: the phase-2 fetch stages STDOUT. fetch-ebook-
+    metadata's -o/--opf is a store flag (the OPF arrives on stdout), so
+    the old cut's `-o <path>` made the path a silently-ignored stray
+    positional: the success gate always failed, every import queued a
+    bogus metadata_download decision, and the ok branch, _apply_opf,
+    and the clobber watch were dead code. These tests mock the
+    subprocess seam, not _fetch_metadata, so the real staging runs."""
+
+    _FETCH_OPF = (
+        "<?xml version='1.0'?><package "
+        "xmlns='http://www.idpf.org/2007/opf' "
+        "xmlns:dc='http://purl.org/dc/elements/1.1/' "
+        "xmlns:opf='http://www.idpf.org/2007/opf'>"
+        "<metadata><dc:title>Real Title</dc:title>"
+        "<dc:creator>Ann Leckie</dc:creator>"
+        "<dc:publisher>Orbit</dc:publisher>"
+        "<dc:identifier opf:scheme='ISBN'>9780000000000</dc:identifier>"
+        "</metadata></package>"
+    )
+
+    def test_the_command_has_no_stray_positional_and_stages_stdout(self):
+        opf_path = os.path.join(
+            tempfile.mkdtemp(prefix="cquarry_fetch_"), "staged.opf"
+        )
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout=self._FETCH_OPF, stderr="")
+
+        with mock.patch("cquarry_cli.run.subprocess.run", side_effect=fake_run):
+            outcome = _fetch_metadata("9780000000000", opf_path)
+        self.assertEqual(outcome, "ok")
+        # Exactly the flag and nothing after it: the old cut appended the
+        # path here, and the binary ignored it.
+        self.assertEqual(calls[0][-1], "-o")
+        self.assertEqual(len(calls[0]), 4, calls[0])
+        with open(opf_path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), self._FETCH_OPF)
+
+    def test_no_result_output_is_not_ambiguous(self):
+        import subprocess as sp
+
+        # The no-result log says "No matches found with query", so the
+        # old bare-word "matches" sniff classified every empty lookup as
+        # ambiguous; only "multiple" carries the ambiguity signal.
+        with mock.patch(
+            "cquarry_cli.run.subprocess.run",
+            return_value=mock.Mock(
+                returncode=1, stdout="", stderr="No matches found with query"
+            ),
+        ):
+            outcome = _fetch_metadata("9780000000000", "unused.opf")
+        self.assertEqual(outcome, "no_result")
+
+    def test_multiple_matches_stays_ambiguous(self):
+        with mock.patch(
+            "cquarry_cli.run.subprocess.run",
+            return_value=mock.Mock(
+                returncode=1, stdout="", stderr="Multiple matches for query"
+            ),
+        ):
+            outcome = _fetch_metadata("9780000000000", "unused.opf")
+        self.assertEqual(outcome, "ambiguous")
+
+    def test_a_hung_lookup_is_failed(self):
+        import subprocess as sp
+
+        with mock.patch(
+            "cquarry_cli.run.subprocess.run",
+            side_effect=sp.TimeoutExpired(cmd="fetch", timeout=120),
+        ):
+            outcome = _fetch_metadata("9780000000000", "unused.opf")
+        self.assertEqual(outcome, "failed")
 
 
 class TestRunSign(RunCase):
