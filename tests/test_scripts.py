@@ -1505,5 +1505,6 @@ class TestIsbnCopyrightYear(unittest.TestCase):
         self.assertFalse(audit_isbns._year_disagrees([], 2020))
         self.assertFalse(audit_isbns._year_disagrees([1985], None))
 
+
 if __name__ == "__main__":
     unittest.main()

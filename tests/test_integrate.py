@@ -953,5 +953,6 @@ class TestBackfillHardening(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(self._identifiers(), [])
 
+
 if __name__ == "__main__":
     unittest.main()

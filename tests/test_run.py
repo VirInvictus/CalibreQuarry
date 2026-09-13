@@ -952,9 +952,7 @@ class TestFetchMetadataSeam(unittest.TestCase):
     )
 
     def test_the_command_has_no_stray_positional_and_stages_stdout(self):
-        opf_path = os.path.join(
-            tempfile.mkdtemp(prefix="cquarry_fetch_"), "staged.opf"
-        )
+        opf_path = os.path.join(tempfile.mkdtemp(prefix="cquarry_fetch_"), "staged.opf")
         calls = []
 
         def fake_run(cmd, **kw):
@@ -972,8 +970,6 @@ class TestFetchMetadataSeam(unittest.TestCase):
             self.assertEqual(f.read(), self._FETCH_OPF)
 
     def test_no_result_output_is_not_ambiguous(self):
-        import subprocess as sp
-
         # The no-result log says "No matches found with query", so the
         # old bare-word "matches" sniff classified every empty lookup as
         # ambiguous; only "multiple" carries the ambiguity signal.

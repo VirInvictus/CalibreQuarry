@@ -395,9 +395,7 @@ class TestApply(_TempDBCase):
         con = sqlite3.connect(os.path.join(backup_dir, backups[0]))
         try:
             self.assertEqual(con.execute("PRAGMA integrity_check").fetchone()[0], "ok")
-            self.assertIsNotNone(
-                con.execute("SELECT COUNT(*) FROM books").fetchone()
-            )
+            self.assertIsNotNone(con.execute("SELECT COUNT(*) FROM books").fetchone())
         finally:
             con.close()
 

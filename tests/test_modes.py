@@ -425,7 +425,9 @@ class TestAuditSentinelPubdates(unittest.TestCase):
                 db.close()
             with open(out, newline="", encoding="utf-8") as f:
                 rows = [
-                    r for r in csv.DictReader(f) if r["issue_type"] == "sentinel_pubdate"
+                    r
+                    for r in csv.DictReader(f)
+                    if r["issue_type"] == "sentinel_pubdate"
                 ]
             self.assertEqual([r["id"] for r in rows], ["1", "2"])
             self.assertIn("[0101-01-01]", rows[0]["issues"])
@@ -442,7 +444,9 @@ class TestAuditSentinelPubdates(unittest.TestCase):
                 db.close()
             with open(out, newline="", encoding="utf-8") as f:
                 rows = [
-                    r for r in csv.DictReader(f) if r["issue_type"] == "sentinel_pubdate"
+                    r
+                    for r in csv.DictReader(f)
+                    if r["issue_type"] == "sentinel_pubdate"
                 ]
             self.assertEqual(rows, [])
 

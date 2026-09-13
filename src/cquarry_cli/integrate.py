@@ -674,7 +674,7 @@ def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
     }
     try:
         meta = ET.parse(opf_path).getroot().find("o:metadata", ns)
-    except (OSError, ET.ParseError):
+    except OSError, ET.ParseError:
         plan["result"] = "failed"
         plan["detail"] = "OPF unreadable"
         return False

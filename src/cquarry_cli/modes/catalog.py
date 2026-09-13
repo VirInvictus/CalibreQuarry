@@ -345,8 +345,7 @@ def run_all_saved_searches(
         )
     for name in failed:
         print(
-            f"WARNING: catalog for saved search '{name}' failed; "
-            "no file written.",
+            f"WARNING: catalog for saved search '{name}' failed; no file written.",
             file=sys.stderr,
         )
     return 1 if failed else 0
