@@ -1222,3 +1222,42 @@ note; every integration ships with a dry-run before any write.
   2026-09-12): 51 OPF-085 invalid-UUID warnings plus a thin
   date/language tail across the library. cquarry/CalibreQuarry own any
   future metadata-quality work; bindery's side is closed.
+
+## New findings 2026-09-12 late (six-lens full audit; detail: audit/FULL-AUDIT-2026-09-12.md, Wave 14)
+
+- [ ] **HIGH: run flush --apply writes embedded metadata into books
+      outside the dirtied set.** integrate.py:493 joins distinct ids into
+      a hyphen range ("5-900") which calibredb treats as EVERY book
+      between; get_dirtied_books returns non-contiguous ids. Fix: pass
+      space-separated ids + a non-contiguous regression test.
+- [ ] **HIGH: run phase2's _fetch_metadata can never succeed.**
+      run.py:532 passes -o <path> but -o is a store_true flag writing to
+      stdout; opf_path is a silently-ignored stray positional, so the
+      success gate always fails and the ok branch/_apply_opf/
+      clobber_watch are dead code (the sibling of the seam 3.39.2 fixed).
+      Stage stdout like run_backfill does.
+- [ ] **HIGH: run convert --apply to an existing format overwrites the
+      file then tracebacks** (plan never skips already-has-target;
+      add_format then raises uncaught). Skip at plan time like the merge
+      verb; wrap registration.
+- [ ] **Integration-verb hardening:** --restrict is silently ignored by
+      the run verbs (dispatch order; docs promise refusal); integrate's
+      pgrep guard inverts the recorded timeout semantics (assume-running);
+      backfill failures don't increment failed + malformed OPF
+      tracebacks; --fields isbn takes the first dc:identifier regardless
+      of scheme; flush --ids/--search errors traceback instead of exit 2;
+      catalog sweeps swallow per-file failures leaving stale catalogs at
+      exit 0; set-mode backup should use the sqlite backup like the other
+      doors; three test files orphan their newest suites below __main__
+      guards.
+- [ ] **Blitz candidates:** the routed metadata-quality audit rows
+      (find_invalid_uuids + sentinel-pubdate + bad-language via cquarry
+      predicates, 51 OPF-085 counted - the recorded carrier); TUI adoption
+      of the Phase 19 read surfaces; reading-analytics era cut (pre-
+      library reads dominate the real median); --health one-shot digest;
+      catalog Markdown emitter. Floor bump when cquarry's Wave-13 write
+      fixes ship.
+- [ ] **GitHub presentation (workspace batch):** description truncated at
+      the 350 cap citing a dead file (replacement drafted); topics
+      zero-dependencies/stdlib-only are now false; Releases for
+      v3.37-v3.40; homepage -> PyPI; [project.urls]; a TUI screenshot.
