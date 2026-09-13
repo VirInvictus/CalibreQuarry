@@ -41,7 +41,8 @@ CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
 CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT);
 CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT,
     uncompressed_size INT);
-CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT,
+    val TEXT, UNIQUE(book, type));
 CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
 CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT,
     datatype TEXT, is_multiple BOOL);
@@ -832,3 +833,126 @@ class TestFlushIdTargets(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("could not parse", err)
         self.assertNotIn("Traceback", err)
+
+
+class TestBackfillHardening(unittest.TestCase):
+    """3.41.0: a backfill book that cannot apply is a COUNTED failure
+    (the old cut reported Applied 0, failed 0 and exited 0), a malformed
+    OPF is a report row rather than a traceback, and --fields isbn picks
+    the scheme-tagged identifier instead of the first dc:identifier."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="cquarry_bf_"))
+        self.addCleanup(_rm, self.tmpdir)
+        self.db_path = _build(self.tmpdir)
+        self.backups = Path(tempfile.mkdtemp(prefix="cquarry_bf_bak_"))
+        self.addCleanup(_rm, self.backups)
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with contextlib.redirect_stdout(out):
+                code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def _apply(self, stdout):
+        def fake_fetch(cmd, **kw):
+            return mock.Mock(returncode=0, stdout=stdout, stderr="")
+
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/fetch"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_fetch),
+        ):
+            return self.run_cli(
+                "run",
+                "backfill",
+                "--fields",
+                "isbn",
+                "--ids",
+                "1",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+
+    def _identifiers(self):
+        con = sqlite3.connect(self.db_path)
+        try:
+            return con.execute(
+                "SELECT type, val FROM identifiers WHERE book=1"
+            ).fetchall()
+        finally:
+            con.close()
+
+    def test_malformed_opf_is_a_counted_failure(self):
+        code, out, err = self._apply("this is not xml at all")
+        self.assertEqual(code, 1)
+        self.assertIn("Applied 0, failed/skipped 1", out)
+        self.assertIn("OPF unreadable", out)
+        self.assertNotIn("Traceback", err)
+
+    def test_refused_write_is_a_counted_failure(self):
+        with mock.patch(
+            "cquarry_cli.integrate.WritableCalibreDB",
+            side_effect=RuntimeError("database is locked"),
+        ):
+            code, out, err = self._apply(
+                "<?xml version='1.0'?><package "
+                "xmlns='http://www.idpf.org/2007/opf' "
+                "xmlns:opf='http://www.idpf.org/2007/opf' "
+                "xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+                "<metadata><dc:identifier opf:scheme='ISBN'>"
+                "9780306406157</dc:identifier></metadata></package>"
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("Applied 0, failed/skipped 1", out)
+        self.assertIn("database is locked", out)
+        self.assertNotIn("Traceback", err)
+
+    def test_isbn_prefers_the_scheme_tagged_identifier(self):
+        code, out, _ = self._apply(
+            "<?xml version='1.0'?><package "
+            "xmlns='http://www.idpf.org/2007/opf' "
+            "xmlns:opf='http://www.idpf.org/2007/opf' "
+            "xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+            "<metadata>"
+            "<dc:identifier>GR-999</dc:identifier>"
+            "<dc:identifier opf:scheme='ISBN'>978-0-306-40615-7</dc:identifier>"
+            "</metadata></package>"
+        )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self._identifiers(), [("isbn", "9780306406157")])
+
+    def test_isbn_falls_back_to_an_isbn_shape(self):
+        code, out, _ = self._apply(
+            "<?xml version='1.0'?><package "
+            "xmlns='http://www.idpf.org/2007/opf' "
+            "xmlns:opf='http://www.idpf.org/2007/opf' "
+            "xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+            "<metadata>"
+            "<dc:identifier>GR-999</dc:identifier>"
+            "<dc:identifier>0061020052</dc:identifier>"
+            "</metadata></package>"
+        )
+        self.assertEqual(code, 0, out)
+        # The 10-digit shape normalized through cquarry's to_isbn13,
+        # which recomputes the 13-digit check digit (it does not carry
+        # the ISBN-10 one over).
+        self.assertEqual(self._identifiers(), [("isbn", "9780061020056")])
+
+    def test_no_isbn_shape_writes_nothing(self):
+        code, out, _ = self._apply(
+            "<?xml version='1.0'?><package "
+            "xmlns='http://www.idpf.org/2007/opf' "
+            "xmlns:opf='http://www.idpf.org/2007/opf' "
+            "xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+            "<metadata><dc:identifier>GR-999</dc:identifier>"
+            "</metadata></package>"
+        )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self._identifiers(), [])

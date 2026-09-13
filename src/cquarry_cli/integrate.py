@@ -28,6 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from cquarry.helpers import to_isbn13
 from cquarry.write import WritableCalibreDB
 
 _PGREP_TIMEOUT = 10
@@ -598,6 +599,8 @@ def run_backfill(db, args, *, apply: bool, take_backup=None) -> int:
         # runs, which is what a backfill wants ("Google Images" here was
         # the cover plugin and silently allowed no metadata source at all
         # -- caught by the authorized live drill, 3.39.2-era).
+        # -o alone: the OPF arrives on stdout (the stray "--opf <file>"
+        # this used to append was a positional the binary ignores).
         query = ["fetch-ebook-metadata", "-o"]
         if p["isbn"]:
             query += ["--isbn", p["isbn"]]
@@ -605,11 +608,12 @@ def run_backfill(db, args, *, apply: bool, take_backup=None) -> int:
             query += ["--title", p["title"] or ""]
             if p["authors"]:
                 query += ["--authors", p["authors"][0]]
+        opf = None
         try:
             fd, opf = tempfile.mkstemp(suffix=".opf")
             os.close(fd)
             proc = subprocess.run(
-                [*query, "--opf", opf],
+                query,
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -621,15 +625,44 @@ def run_backfill(db, args, *, apply: bool, take_backup=None) -> int:
                 continue
             with open(opf, "w", encoding="utf-8") as f:
                 f.write(proc.stdout)
-            applied += 1 if _apply_backfill(db, p, opf, args) else 0
+            if _apply_backfill(db, p, opf, args):
+                applied += 1
+            else:
+                failed += 1
+        except subprocess.TimeoutExpired:
+            p["result"] = "failed"
+            p["detail"] = "metadata source timed out"
+            failed += 1
         finally:
-            if os.path.exists(opf):
+            if opf and os.path.exists(opf):
                 os.unlink(opf)
     return _print_results(plans, args, applied, failed)
 
 
+def _opf_isbn(meta, ns) -> str | None:
+    """The fetched record's ISBN: an identifier tagged opf:scheme=ISBN
+    wins; otherwise the first identifier whose value is ISBN-shaped
+    (to_isbn13 accepts 10- and 13-digit forms). The old cut stored the
+    FIRST dc:identifier whatever its scheme, so a Goodreads id could
+    become the isbn."""
+    fallback = None
+    for el in meta.findall("dc:identifier", ns):
+        value = (el.text or "").strip()
+        if not value:
+            continue
+        scheme = (el.get(f"{{{ns['o']}}}scheme") or el.get("scheme") or "").strip()
+        if scheme.lower() == "isbn":
+            return to_isbn13(value)
+        if fallback is None and to_isbn13(value) is not None:
+            fallback = value
+    return to_isbn13(fallback) if fallback else None
+
+
 def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
-    """Apply the requested fields from an OPF through cquarry writes."""
+    """Apply the requested fields from an OPF through cquarry writes.
+    False on any failure: a malformed OPF or a refused write is a failed
+    row in the report, never a traceback (the shape mirrors run.py's
+    _apply_opf)."""
     import xml.etree.ElementTree as ET
 
     # Real fetch-ebook-metadata OPFs declare the dc namespace and use
@@ -639,8 +672,12 @@ def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
         "o": "http://www.idpf.org/2007/opf",
         "dc": "http://purl.org/dc/elements/1.1/",
     }
-    root = ET.parse(opf_path).getroot()
-    meta = root.find("o:metadata", ns)
+    try:
+        meta = ET.parse(opf_path).getroot().find("o:metadata", ns)
+    except (OSError, ET.ParseError):
+        plan["result"] = "failed"
+        plan["detail"] = "OPF unreadable"
+        return False
     if meta is None:
         plan["result"] = "failed"
         plan["detail"] = "OPF without metadata"
@@ -650,22 +687,29 @@ def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
         el = meta.find(f"dc:{tag}", ns)
         return el.text.strip() if el is not None and el.text else None
 
-    with WritableCalibreDB(db.db_path) as wdb:
-        with wdb.batch():
-            if "title" in plan["fields"] and _text("title"):
-                wdb.update_title(plan["book"], _text("title"))
-            if "authors" in plan["fields"]:
-                names = [
-                    c.text.strip()
-                    for c in meta.findall("dc:creator", ns)
-                    if c.text and c.text.strip()
-                ]
-                if names:
-                    wdb.set_authors(plan["book"], names)
-            if "publisher" in plan["fields"] and _text("publisher"):
-                wdb.set_publisher(plan["book"], _text("publisher"))
-            if "isbn" in plan["fields"] and _text("identifier"):
-                wdb.set_identifier(plan["book"], "isbn", _text("identifier"))
+    try:
+        with WritableCalibreDB(db.db_path) as wdb:
+            with wdb.batch():
+                if "title" in plan["fields"] and _text("title"):
+                    wdb.update_title(plan["book"], _text("title"))
+                if "authors" in plan["fields"]:
+                    names = [
+                        c.text.strip()
+                        for c in meta.findall("dc:creator", ns)
+                        if c.text and c.text.strip()
+                    ]
+                    if names:
+                        wdb.set_authors(plan["book"], names)
+                if "publisher" in plan["fields"] and _text("publisher"):
+                    wdb.set_publisher(plan["book"], _text("publisher"))
+                if "isbn" in plan["fields"]:
+                    isbn = _opf_isbn(meta, ns)
+                    if isbn:
+                        wdb.set_identifier(plan["book"], "isbn", isbn)
+    except Exception as e:
+        plan["result"] = "failed"
+        plan["detail"] = str(e)[:200]
+        return False
     plan["result"] = "applied"
     return True
 
