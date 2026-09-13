@@ -456,10 +456,6 @@ class TestPolishCoverFlush(unittest.TestCase):
         self.assertIn("queue is empty", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestCalibredbSeams(unittest.TestCase):
     """3.39.1 regression: --library takes the library DIRECTORY (not the
     .db path) and export's skip-OPF flag is --dont-write-opf. Both were
@@ -956,3 +952,6 @@ class TestBackfillHardening(unittest.TestCase):
         )
         self.assertEqual(code, 0, out)
         self.assertEqual(self._identifiers(), [])
+
+if __name__ == "__main__":
+    unittest.main()

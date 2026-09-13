@@ -1314,10 +1314,6 @@ class TestCheckPdf(unittest.TestCase):
         self.assertIn("low_dpi", kinds)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAuthorSortSanity(unittest.TestCase):
     """Phase 19 B.3: advisory author_sort sweep, hosted locally in the
     script by decision (the cquarry-predicate promotion is a future
@@ -1508,3 +1504,6 @@ class TestIsbnCopyrightYear(unittest.TestCase):
         self.assertTrue(audit_isbns._year_disagrees([1985], 2020))
         self.assertFalse(audit_isbns._year_disagrees([], 2020))
         self.assertFalse(audit_isbns._year_disagrees([1985], None))
+
+if __name__ == "__main__":
+    unittest.main()

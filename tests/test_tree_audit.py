@@ -188,10 +188,6 @@ class TestTreeAudit(_TreeAuditCase):
         self.assertIn(("Ghost Author", "orphan_author_dir"), found)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestRootWhitelist(unittest.TestCase):
     """The 2026-09-12 decision: root dot-entries and the workspace
     doc/tool set are never findings -- a library that doubles as a
@@ -259,3 +255,6 @@ class TestRootWhitelist(unittest.TestCase):
                 "Author B/Ghost Db Book (3)",
             },
         )
+
+if __name__ == "__main__":
+    unittest.main()
