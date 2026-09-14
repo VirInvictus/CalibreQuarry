@@ -1339,3 +1339,4 @@ note; every integration ships with a dry-run before any write.
       exactly where the EPUB lossy strips live. Fix: mirror bindery's
       apply_lossy decisions into the per-file lossy records the seal
       covers.
+- [x] **vir-tui floor >=2.5.0** (2026-09-14, no release cut: upstream 2.4.0/2.5.0 are additive terminal-safety and session-awareness releases; with no uv.lock, every fresh resolution takes the latest satisfying version automatically). *(Mention the floor bump in the next release's patchnotes.)*

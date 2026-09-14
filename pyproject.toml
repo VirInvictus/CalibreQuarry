@@ -23,7 +23,7 @@ authors = [
 ]
 dependencies = [
   "tqdm",
-  "vir-tui>=2.2.0",
+  "vir-tui>=2.5.0",
   "cquarry>=1.21.0",
 ]
 
