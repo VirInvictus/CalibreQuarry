@@ -41,6 +41,7 @@ from cquarry_cli.modes.info import show_columns, show_info
 from cquarry_cli.modes.librarything import run_librarything_export
 from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
+from cquarry_cli.modes.trash import show_trash
 from cquarry_cli.tui import interactive_menu
 from cquarry_cli.setwrite import dispatch_set_write
 from cquarry_cli.writeops import dispatch_write
@@ -159,6 +160,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     group.add_argument(
         "--tags", action="store_true", help="Dump every tag with its book count"
+    )
+    group.add_argument(
+        "--trash",
+        dest="trash",
+        action="store_true",
+        help="List the library's .caltrash entries (what run merge moved "
+        "aside): category, book id, age, files; library-shape, so "
+        "--restrict does not scope it",
     )
     group.add_argument(
         "--book",
@@ -518,6 +527,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --remove-book: actually delete instead of dry-running",
     )
+    w.add_argument(
+        "--rename-entity",
+        dest="rename_entity",
+        nargs=3,
+        metavar=("KIND", "OLD", "NEW"),
+        default=None,
+        help="Rename an authors/series/publishers/tags entity everywhere "
+        "(merges into NEW when that row already exists)",
+    )
+    w.add_argument(
+        "--set-author-sort",
+        dest="set_author_sort",
+        nargs=2,
+        metavar=("BOOK_ID", "SORT"),
+        default=None,
+        help="Override the author_sort string verbatim (a later "
+        "--set-authors recomputes over it)",
+    )
+    w.add_argument(
+        "--set-title-sort",
+        dest="set_title_sort",
+        nargs=2,
+        metavar=("BOOK_ID", "SORT"),
+        default=None,
+        help="Override the title_sort string verbatim (a later "
+        "--set-title recomputes over it)",
+    )
     group.add_argument(
         "--format-stats",
         dest="format_stats",
@@ -752,6 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
             "merge",
             "flush",
             "backfill",
+            "trash",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; phase2: import the signed "
@@ -759,13 +796,29 @@ def build_parser() -> argparse.ArgumentParser:
         "verbs (dry-run by default, --apply executes): convert "
         "(ebook-convert), polish (ebook-polish), cover (set/remove "
         "cover), export (calibredb), merge (duplicate into keeper), "
-        "flush (embed the OPF queue), backfill (metadata source)",
+        "flush (embed the OPF queue), backfill (metadata source), trash "
+        "(list/empty/expire .caltrash)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
         ("--ids", "target set: explicit book ids (ID[,ID...])"),
     ):
         run_p.add_argument(flag, default=None, help=help_text)
+    run_p.add_argument(
+        "--empty",
+        dest="empty",
+        action="store_true",
+        help="trash: with --apply, permanently delete EVERYTHING in "
+        ".caltrash (the dry run only lists what is there)",
+    )
+    run_p.add_argument(
+        "--expire",
+        dest="expire",
+        default=None,
+        metavar="DAYS",
+        help="trash: with --apply, delete entries older than DAYS "
+        "(without the flag: upstream's 14-day rule)",
+    )
     run_p.add_argument(
         "--apply",
         dest="apply",
@@ -1157,6 +1210,10 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.fts_status:
                 run_fts_status(db, quiet=args.quiet)
+                return 0
+
+            if args.trash:
+                show_trash(db, quiet=args.quiet)
                 return 0
 
             if args.wings:

@@ -454,6 +454,53 @@ def action_set_cover(book_id, has_cover, *, quiet=False):
     return _do
 
 
+#: The entity kinds a rename can address (cquarry's own scope: ratings
+#: have no name, languages are out of scope).
+RENAME_ENTITY_KINDS = ("authors", "series", "publishers", "tags")
+
+
+def action_rename_entity(kind, old, new, *, quiet=False):
+    if kind not in RENAME_ENTITY_KINDS:
+        raise _ArgError(
+            f"unknown rename kind {kind!r} (known: {', '.join(RENAME_ENTITY_KINDS)})"
+        )
+
+    def _do(wdb):
+        moved = wdb.rename_entity(kind, old, new)
+        if not quiet:
+            tail = (
+                f"{moved} book(s) affected"
+                if moved
+                else "no book carried it (spelling already current)"
+            )
+            print(f"Renamed {kind} {old!r} -> {new!r}: {tail}.")
+        # A merge (new already existed) moves books too, so the count is
+        # the honest changed signal; 0 means the rename was a no-op.
+        return 0, "applied" if moved else "already-so"
+
+    return _do
+
+
+def action_set_author_sort(book_id, value, *, quiet=False):
+    def _do(wdb):
+        changed = wdb.set_author_sort(book_id, value)
+        if not quiet:
+            print(f"Author sort of book {book_id} set to {value!r}.")
+        return 0, "applied" if changed else "already-so"
+
+    return _do
+
+
+def action_set_title_sort(book_id, value, *, quiet=False):
+    def _do(wdb):
+        changed = wdb.set_title_sort(book_id, value)
+        if not quiet:
+            print(f"Title sort of book {book_id} set to {value!r}.")
+        return 0, "applied" if changed else "already-so"
+
+    return _do
+
+
 def _remove_book_dry_run(db_path: str, book_id: int) -> int:
     """The dry run is a READ: it describes the removal through cquarry's
     read-only CalibreDB and never opens the read-write handle (the sweep
@@ -945,6 +992,42 @@ def _collect_remove_book(args, quiet):
     ]
 
 
+def _collect_rename_entity(args, quiet):
+    if not getattr(args, "rename_entity", None):
+        return []
+    kind, old, new = args.rename_entity
+    return [
+        (
+            f"rename {kind} {old!r} -> {new!r}",
+            action_rename_entity(kind, old, new, quiet=quiet),
+        )
+    ]
+
+
+def _collect_set_author_sort(args, quiet):
+    if not getattr(args, "set_author_sort", None):
+        return []
+    book_id = _require_id(args.set_author_sort[0])
+    return [
+        (
+            f"set author sort of book {book_id}",
+            action_set_author_sort(book_id, args.set_author_sort[1], quiet=quiet),
+        )
+    ]
+
+
+def _collect_set_title_sort(args, quiet):
+    if not getattr(args, "set_title_sort", None):
+        return []
+    book_id = _require_id(args.set_title_sort[0])
+    return [
+        (
+            f"set title sort of book {book_id}",
+            action_set_title_sort(book_id, args.set_title_sort[1], quiet=quiet),
+        )
+    ]
+
+
 _COLLECTORS: list[Callable] = [
     _collect_set_title,
     _collect_set_authors,
@@ -969,6 +1052,9 @@ _COLLECTORS: list[Callable] = [
     _collect_remove_format,
     _collect_set_cover,
     _collect_remove_book,
+    _collect_rename_entity,
+    _collect_set_author_sort,
+    _collect_set_title_sort,
 ]
 
 
@@ -1001,6 +1087,9 @@ SINGLE_BOOK_DESTS: list[str] = [
     "remove_format",
     "set_cover",
     "remove_book",
+    "rename_entity",
+    "set_author_sort",
+    "set_title_sort",
 ]
 
 

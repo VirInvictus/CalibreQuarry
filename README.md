@@ -503,10 +503,10 @@ usage: cquarry [-h] [--version] [--catalog | --all-wings |
                --analytics {author,pace,tags,genres,overlap,reading} |
                --audit | --health | --recent [RECENT] | --series | --export |
                --search QUERY | --fts QUERY | --fts-status | --wings |
-               --tags | --book [BOOK_ID[,BOOK_ID...]] | --entities KIND |
-               --reading-progress | --columns | --info | --exportlt |
-               --export-annotations | --format-stats] [--untagged]
-               [--id BOOK_ID] [--plugin-data NAME] [--db DB]
+               --tags | --trash | --book [BOOK_ID[,BOOK_ID...]] |
+               --entities KIND | --reading-progress | --columns | --info |
+               --exportlt | --export-annotations | --format-stats]
+               [--untagged] [--id BOOK_ID] [--plugin-data NAME] [--db DB]
                [--restrict SEARCH] [--wing WING] [--output OUTPUT]
                [--outdir OUTDIR] [--format {json,csv,ai,md}] [--primary-only]
                [--show-tags] [--show-id] [--genre-depth N]
@@ -524,7 +524,9 @@ usage: cquarry [-h] [--version] [--catalog | --all-wings |
                [--set-languages BOOK_ID LANGS] [--clear-languages BOOK_ID]
                [--add-format BOOK_ID FORMAT NAME SIZE]
                [--remove-format BOOK_ID FORMAT] [--set-cover BOOK_ID YES/NO]
-               [--remove-book BOOK_ID] [--confirm-remove] [--ids ID[,ID...] |
+               [--remove-book BOOK_ID] [--confirm-remove]
+               [--rename-entity KIND OLD NEW] [--set-author-sort BOOK_ID SORT]
+               [--set-title-sort BOOK_ID SORT] [--ids ID[,ID...] |
                --from-search EXPR | --from-untagged | --from-manifest FILE]
                [--batch-add-tag TAG] [--batch-remove-tag TAG]
                [--batch-clear-tags] [--batch-clear-rating]
@@ -583,6 +585,9 @@ options:
                         for re-index, and extraction errors
   --wings               List all virtual library wings
   --tags                Dump every tag with its book count
+  --trash               List the library's .caltrash entries (what run merge
+                        moved aside): category, book id, age, files; library-
+                        shape, so --restrict does not scope it
   --book [BOOK_ID[,BOOK_ID...]]
                         Show the full record for one book or a comma-separated
                         list: identifiers, format files, cover, comments,
@@ -693,6 +698,16 @@ write verbs (Calibre must be closed):
                         remove)
   --confirm-remove      With --remove-book: actually delete instead of dry-
                         running
+  --rename-entity KIND OLD NEW
+                        Rename an authors/series/publishers/tags entity
+                        everywhere (merges into NEW when that row already
+                        exists)
+  --set-author-sort BOOK_ID SORT
+                        Override the author_sort string verbatim (a later
+                        --set-authors recomputes over it)
+  --set-title-sort BOOK_ID SORT
+                        Override the title_sort string verbatim (a later
+                        --set-title recomputes over it)
 
 set writes (dry-run by default; --apply requires --backup-dir and Calibre closed):
   --ids ID[,ID...]      Target set: explicit book ids (set mode)

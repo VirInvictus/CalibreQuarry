@@ -1123,6 +1123,7 @@ INTEGRATE_PHASES = (
     "merge",
     "flush",
     "backfill",
+    "trash",
 )
 
 

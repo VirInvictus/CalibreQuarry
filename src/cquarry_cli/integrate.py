@@ -756,6 +756,106 @@ def _print_results(plans: list[dict], args, applied: int, failed: int) -> int:
     return 1 if failed else 0
 
 
+def run_trash(db_path: str, args, *, apply: bool) -> int:
+    """`run trash`: the .caltrash lifecycle over cquarry 1.20's verbs.
+
+    Dry run (the default) lists every entry with its age and file
+    count; `--empty --apply` deletes the whole trash, `--expire DAYS
+    --apply` deletes entries older than DAYS (no flag: upstream's
+    14-day rule). The apply half opens metadata.db writable to reach
+    the upstream verbs, which is why the closed-Calibre guard applies
+    in dispatch -- but no backup is required, because the verbs are
+    pure filesystem and the database itself never changes."""
+    from cquarry_cli.modes.trash import collect_trash_entries
+
+    empty = bool(getattr(args, "empty", False))
+    raw_days = getattr(args, "expire", None)
+    if empty and raw_days is not None:
+        print(
+            "ERROR: run trash takes --empty or --expire DAYS, not both.",
+            file=sys.stderr,
+        )
+        return 2
+    days: float | None = None
+    if raw_days is not None:
+        try:
+            days = float(raw_days)
+        except ValueError:
+            print(
+                f"ERROR: --expire wants a number of days, got {raw_days!r}.",
+                file=sys.stderr,
+            )
+            return 2
+        if days < 0:
+            print("ERROR: --expire DAYS must not be negative.", file=sys.stderr)
+            return 2
+
+    mode = "empty" if empty else ("expire" if days is not None else "list")
+    library_dir = os.path.dirname(os.path.abspath(db_path))
+    entries = collect_trash_entries(library_dir)
+    if mode == "empty":
+        planned = entries
+    elif mode == "expire":
+        # Upstream's mtime rule, in days: an entry goes when its age is
+        # DAYS or more (0 or less expires everything, honored for parity).
+        planned = [e for e in entries if days <= 0 or e["age_days"] >= days]
+    else:
+        planned = []
+
+    executing = apply and mode != "list"
+    if not executing:
+        if not entries:
+            print(f"No trash under {library_dir} (nothing merged away yet).")
+            return 0
+        planned_ids = {id(e) for e in planned}
+        print(
+            f"Trash: {len(entries)} entries under {library_dir}"
+            + ("." if not planned else f"; {len(planned)} would be deleted:")
+        )
+        for e in entries:
+            marker = " (would delete)" if id(e) in planned_ids else ""
+            print(
+                f"  [{e['category']}] book {e['book_id']}: "
+                f"{len(e['files'])} file(s), {e['age_days']:.1f} days old"
+                f"{marker}"
+            )
+        if not apply and mode != "list":
+            print(
+                f"Dry run: re-run with --apply to delete these {len(planned)} entries."
+            )
+        elif mode == "list":
+            print(
+                "Re-run with --empty or --expire DAYS (and --apply) to "
+                "delete; the dry run is the listing."
+            )
+        return 0
+
+    from cquarry.write import WritableCalibreDB
+
+    with WritableCalibreDB(db_path) as wdb:
+        if mode == "empty":
+            removed = wdb.empty_trash()
+        else:
+            removed = wdb.expire_trash(days * 86400)
+    if getattr(args, "format", None) == "json":
+        print(
+            json.dumps(
+                {
+                    "plan": {
+                        "mode": mode,
+                        "entries": len(entries),
+                        "would_remove": len(planned),
+                    },
+                    "results": {"removed": removed},
+                },
+                indent=1,
+            )
+        )
+    else:
+        print(f"Removed {removed} trash entry(ies).")
+    return 0
+
+
 def dispatch_integrate(args) -> int:
     """The Phase 19 C verb dispatch: usage guards first (exit 2 before
     anything opens), then the shared dry-run/apply lifecycle with the
@@ -809,6 +909,9 @@ def dispatch_integrate(args) -> int:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2
         return 0
+
+    if args.phase == "trash":
+        return run_trash(db_path, args, apply=apply)
 
     with CalibreDB(db_path) as db:
         if args.phase == "merge":

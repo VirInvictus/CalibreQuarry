@@ -507,5 +507,136 @@ class TestBatchedWriteVerbs(_TempDBCase):
         self.assertIn("cannot be combined", err_cap.getvalue())
 
 
+class TestRenameEntityAndSortSetters(_TempDBCase):
+    """3.45.0: the curation verbs over cquarry 1.19's rename_entity and
+    the passthrough sort setters -- the riders shipped two releases
+    before any consumer consumed them."""
+
+    def _seed_tags(self):
+        con = sqlite3.connect(self.db_path)
+        con.executescript(
+            """
+            INSERT INTO tags (id, name) VALUES (1, 'Fic.SciFi'),
+                (2, 'Fic.Science Fiction');
+            INSERT INTO books_tags_link (book, tag) VALUES (1, 1), (2, 1);
+            """
+        )
+        con.commit()
+        con.close()
+
+    def _tags(self):
+        con = sqlite3.connect(self.db_path)
+        rows = con.execute("SELECT name FROM tags ORDER BY id").fetchall()
+        con.close()
+        return [r[0] for r in rows]
+
+    def test_rename_tag_updates_the_row_everywhere(self):
+        self._seed_tags()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--rename-entity",
+                    "tags",
+                    "Fic.SciFi",
+                    "Fic.Speculative",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._tags(), ["Fic.Speculative", "Fic.Science Fiction"])
+        links = (
+            sqlite3.connect(self.db_path)
+            .execute("SELECT COUNT(*) FROM books_tags_link WHERE tag = 1")
+            .fetchone()[0]
+        )
+        self.assertEqual(links, 2)  # every linking book moved with it
+
+    def test_rename_into_an_existing_tag_merges(self):
+        self._seed_tags()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--rename-entity",
+                    "tags",
+                    "Fic.SciFi",
+                    "Fic.Science Fiction",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._tags(), ["Fic.Science Fiction"])
+        links = (
+            sqlite3.connect(self.db_path)
+            .execute("SELECT COUNT(*) FROM books_tags_link")
+            .fetchone()[0]
+        )
+        self.assertEqual(links, 2)  # both books ride the survivor
+
+    def test_unknown_kind_is_a_usage_error(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--rename-entity", "ratings", "4", "5", "--db", self.db_path])
+        self.assertEqual(rc, 2)
+        self.assertIn("unknown rename kind", err.getvalue())
+
+    def test_no_match_rename_is_a_clean_exit_one(self):
+        self._seed_tags()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                ["--rename-entity", "tags", "Nope", "Whatever", "--db", self.db_path]
+            )
+        self.assertEqual(rc, 1)  # cquarry's ValueError: validation, not usage
+        self.assertIn("Nope", err.getvalue())
+
+    def test_sort_setters_store_verbatim(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                ["--set-author-sort", "1", "Leckie, Annmmm", "--db", self.db_path]
+            )
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        sort = con.execute("SELECT author_sort FROM books WHERE id = 1").fetchone()[0]
+        con.close()
+        self.assertEqual(sort, "Leckie, Annmmm")
+
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--set-title-sort", "1", "Fifth Head", "--db", self.db_path])
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        sort = con.execute("SELECT sort FROM books WHERE id = 1").fetchone()[0]
+        con.close()
+        self.assertEqual(sort, "Fifth Head")
+
+    def test_rename_entity_refused_in_set_mode_combination(self):
+        # A source without a --batch-* verb is refused earlier in the
+        # guard chain ("a target source needs..."); this combination
+        # reaches the single-verb-vs-set-mode check itself.
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--rename-entity",
+                    "tags",
+                    "A",
+                    "B",
+                    "--batch-add-tag",
+                    "X",
+                    "--ids",
+                    "1",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("cannot be combined", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

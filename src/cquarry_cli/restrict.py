@@ -76,6 +76,9 @@ _WRITE_FLAG_DESTS = (
     "batch_clear_identifier",
     "batch_set_cover",
     "batch_remove_format",
+    "rename_entity",
+    "set_author_sort",
+    "set_title_sort",
 )
 
 

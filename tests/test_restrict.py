@@ -374,6 +374,22 @@ class TestRestrictModes(_TempDBCase):
         self.assertEqual(code, 2)
         self.assertIn("read modes only", err)
 
+    def test_curation_verbs_refused(self):
+        # rename_entity and the sort setters are write verbs too: the
+        # refusal list must keep step with every new write dest.
+        code, _, err = self.run_cli(
+            "--restrict",
+            "tags:Fic.SciFi",
+            "--rename-entity",
+            "tags",
+            "A",
+            "B",
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("read modes only", err)
+
     def test_set_write_refused(self):
         code, _, err = self.run_cli(
             "--from-untagged",
