@@ -5,6 +5,28 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.45.0 onward, the curation + trash batch)
+
+- **The write verbs keep step with three new dests**: `--rename-entity
+  KIND OLD NEW` (kinds: authors/series/publishers/tags, refused at
+  builder time otherwise; a rename into an existing row MERGES and the
+  moved-book count is the changed signal; a no-match old name is
+  cquarry's ValueError -> exit 1) and `--set-author-sort` /
+  `--set-title-sort BOOK SORT` (verbatim passthroughs). restrict's
+  `_WRITE_FLAG_DESTS` and writeops' `SINGLE_BOOK_DESTS` both carry
+  them; a test pins the restrict refusal so the list cannot rot.
+- **The trash surface is two-sided.** `--trash` is a read mode over
+  pure filesystem inventory (`modes/trash.py:collect_trash_entries`,
+  upstream's `b/<id>/`+`f/<id>/` layout); it opens no write handle and
+  is library-shape, so `--restrict` does not scope it (tree-audit
+  precedent). `run trash --empty|--expire DAYS` owns the lifecycle
+  through cquarry 1.20's verbs: dry-run listing by default, `--apply`
+  executes, `--format json` carries `{plan, results}`. The apply half
+  opens metadata.db writable to reach the upstream methods, so the
+  closed-Calibre guard applies in dispatch_integrate; NO backup is
+  required (the database never changes). `run trash` sits in
+  `INTEGRATE_PHASES`, outside `verbs_need_targets` and `needs_backup`.
+
 ## Programmer-facing contract notes (3.44.0 onward, the truth-and-hardening batch)
 
 - **The frontend tier has exactly one raw-SQL read left, the recorded

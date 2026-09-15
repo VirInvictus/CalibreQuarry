@@ -60,9 +60,11 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
 | **Set title** | `--set-title BOOK_ID TITLE` | Rename a book through cquarry's opt-in write module (trigger-safe; refreshes the sort key and queues an OPF regeneration). Close Calibre first |
 | **Write verbs** | `--set-authors`, `--set-rating`, `--set-comments` / `--clear-comments`, `--set-column` / `--clear-column`, `--remove-book [--confirm-remove]` | Core opt-in write surface via cquarry ≥1.5: authors (author_sort recomputed), ratings (0–5), comments HTML, generic custom columns (enum-validated, non-editable refused) and guarded book removal (dry-run by default) |
+| **Curation verbs** | `--rename-entity KIND OLD NEW`, `--set-author-sort BOOK SORT`, `--set-title-sort BOOK SORT` | Rename a tag/author/series/publisher everywhere (a rename into an existing name merges the two); verbatim sort overrides that a later `--set-authors` / `--set-title` deliberately recomputes over |
 | **Write verbs, expanded** | `--add-tag` / `--remove-tag`, `--set-identifier` / `--clear-identifier`, `--set-series` (+ `--series-index`) / `--clear-series`, `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages`, `--add-format` / `--remove-format`, `--set-cover` | Full coverage of cquarry ≥1.5's write module: tags (orphaned rows pruned), identifier EAV upserts, series assignment with index, publisher, language lists (canonicalized `English` → `eng`), format registration/removal, and the has-cover flag. All queue OPF regeneration via `metadata_dirtied` |
 | **Run verbs (Phase 17)** | `run phase1 DIR`, `run sign --manifest F`, `run phase2 --manifest F --backup-dir D`, `run phase3 --manifest F [--answer-file A]` | The acquisition pathway as commands: phase 1 vets a downloads directory into an `acquisition-manifest/1` manifest (duplicate screen, DRM audit, PDF/DJVU battery via `scripts/check_pdf.py`, bindery's EPUB slice; filename-derived stamps and provenance seeds for the review to correct); `run sign` seals the reviewed manifest (an HMAC over the approved set, the stamps, the provenance, the lossy flags, and the decisions; any later edit refuses to load until re-signed); phase 1 is dry against book files unless `--stamp`/`--apply-lossy`/`--quarantine` are passed (quarantine moves true DRM hits only); phase 2 imports the SIGNED, SEALED manifest as one transaction (`add_book`, `#source`/`#audience` stamped, tags+rating cleared on the imported ids, timestamped backups, metadata downloads whose failures become decisions, resumable); phase 3 refuses a live Calibre and banned answer-file columns like every other write path, and its mechanical-pass trouble fails the verb |
 | **Set writes** | `--ids` / `--from-search` / `--from-untagged` / `--from-manifest` + `--batch-*` verbs, `--apply`, `--backup-dir`, `--format json` | One target set, many verbs, one transaction (Phase 16). Dry-run by default; `--apply` demands a closed Calibre and a backup of `metadata.db` outside the library directory, then commits as ONE `batch()` pass (all-or-nothing; `--commit-per-book` for very large sets). `--commit-per-book` really commits one transaction per book (a failing book rolls back alone; the report and JSON say which). `--batch-clear-rating` is legal ONLY against a valid, sealed batch manifest, and only for ids it imported (the bulk-ratings ban, mechanically enforced); empty-string values are refused; `#reading_status`/`status`/`date_read` are refused by name at every door; reporting counts applied / already-so / failed per verb, with a machine-readable JSON report that names the resolved ids |
+| **Trash** | `--trash` | List the library's `.caltrash` entries (what `run merge` moved aside): category, book id, age, files; library-shape, so `--restrict` does not scope it |
 | **Book detail** | `--book BOOK_ID[,BOOK_ID...]`, `--book --untagged` | Full dossier for one book or a comma-separated list: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; publication date shown alongside the timestamps. `--book --untagged` (no ids) selects every untagged book (the phase-3 curation entry state) via cquarry's `find_untagged()` |
 | **Entities** | `--entities KIND` | List `authors`/`series`/`publishers`/`tags`/`languages`/`ratings` with book counts; authors/series/publishers carry their sort and link columns |
 | **Reading progress** | `--reading-progress` | Every recorded reading position across devices with progress bars, newest first |
@@ -80,7 +82,8 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 `run flush`, and `run backfill` drive the external tools
 (`ebook-convert`, `ebook-polish`, `calibredb`,
 `fetch-ebook-metadata`) over a resolved set and register the outcome
-through cquarry's write module. Every verb is a dry run until
+through cquarry's write module; `run trash` (below) is the pure
+filesystem lifecycle. Every verb is a dry run until
 `--apply`, which demands a closed Calibre and (for the
 metadata-mutating verbs) a `--backup-dir` outside the library. A
 book that already has the requested conversion target is skipped at
@@ -101,6 +104,11 @@ cquarry run merge --keeper 42 --duplicate 43 --apply     --backup-dir ~/backups 
 
 # Regenerate embedded metadata for everything Calibre has queued
 cquarry run flush --db ~/Calibre/metadata.db
+
+# Review what the merges moved aside, then expire what is older than
+# 14 days (the dry run is the listing)
+cquarry run trash --db ~/Calibre/metadata.db
+cquarry run trash --expire 14 --apply --db ~/Calibre/metadata.db
 ```
 
 ### The acquisition run verbs (Phase 17)
@@ -448,7 +456,7 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 ### Automated Test Suite
 
-The whole suite runs without a Calibre library (stdlib `unittest`; 542 tests across 26 files as of 3.44.0):
+The whole suite runs without a Calibre library (stdlib `unittest`; 559 tests across 27 files as of 3.45.0):
 
 - **Modes and renderers** (`tests/test_modes.py`, `tests/test_read_modes.py`, `tests/test_book_json.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, the audit's cover checks, the read-mode renderers, and the machine-readable `--book --format json` dossier, all against a temporary database.
 - **Search and scoping** (`tests/test_restrict.py`): the `--restrict` view (book-row scoping, recounted aggregations, per-book getters, write-verb and run-verb refusals) and its mode-level composition.
