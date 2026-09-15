@@ -974,7 +974,9 @@ _COLLECTORS: list[Callable] = [
 
 # The single-book verb dests, in dispatch priority order. Shared with
 # setwrite.py, which must reject any combination of these with its own
-# set-mode flags before anything executes.
+# set-mode flags before anything executes. add_tag/remove_tag are
+# append-list dests: dispatch_write counts their extra occurrences
+# separately (three tag adds are three mutations).
 SINGLE_BOOK_DESTS: list[str] = [
     "set_title",
     "set_authors",
@@ -983,6 +985,8 @@ SINGLE_BOOK_DESTS: list[str] = [
     "clear_pubdate",
     "set_comments",
     "clear_comments",
+    "add_tag",
+    "remove_tag",
     "set_column",
     "clear_column",
     "set_identifier",

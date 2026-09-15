@@ -448,7 +448,6 @@ def _validate(args) -> None:
             "--from-untagged, or --from-manifest."
         )
     singles = [d for d in writeops.SINGLE_BOOK_DESTS if getattr(args, d, None)]
-    singles += [d for d in ("add_tag", "remove_tag") if getattr(args, d, None)]
     if singles and (sources or _has_verbs(args)):
         raise _UsageError(
             "single-book write verbs cannot be combined with set mode "

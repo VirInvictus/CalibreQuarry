@@ -32,7 +32,7 @@ def write_catalog(
     author_details: bool = False,
     quiet: bool = False,
     fmt: str | None = None,
-) -> None:
+) -> int:
     """Write a formatted text catalog, optionally filtered to a virtual library.
 
     With ``plugin_data`` (a ``books_plugin_data`` name such as

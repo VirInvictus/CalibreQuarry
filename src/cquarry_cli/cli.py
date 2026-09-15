@@ -848,7 +848,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="fields",
         default=None,
         metavar="F[,F...]",
-        help="backfill: comma list of title,authors,publisher,isbn,comments",
+        help="backfill: comma list of title,authors,publisher,isbn",
     )
     # --db in subparser position too (SUPPRESS keeps the main parser's
     # value when the flag is only given before `run`).

@@ -213,8 +213,13 @@ def run_convert(db, args, *, apply: bool, take_backup=None) -> int:
     applied = failed = 0
     for p in plans:
         if p["action"] != "convert":
-            # Plan-time skip ("already has TARGET"): expected idempotence,
-            # never a failure (the file the book already has is untouched).
+            # Plan-time skips ride two shapes: "already has TARGET"
+            # (expected idempotence, never a failure -- the file the book
+            # already has is untouched) and "no source format to convert
+            # from" (an unconvertible book: it can never convert, so it
+            # is not counted applied either). Both land here as
+            # already-so; a run that needs them separated in the report
+            # is a roadmap item, not this pass.
             p["result"] = "already-so"
             continue
         proc = subprocess.run(

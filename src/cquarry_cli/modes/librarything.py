@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-export_librarything.py: emit this library as LibraryThing import CSVs.
+librarything.py: emit the library as LibraryThing import CSVs.
 
 LibraryThing's importer takes a FIXED template: eleven columns, named exactly
 as in their sample file, single quotes and all, and nothing may be added,
@@ -39,16 +39,18 @@ Data hygiene the importer cares about, all handled here:
   * REVIEW is left empty on purpose. The curated descriptions are not sent:
     a LibraryThing review is public, and these were written for this catalogue.
 
-Usage:
-    python3 export_librarything.py                    # to ~/Downloads
-    python3 export_librarything.py --outdir /tmp/lt
-    python3 export_librarything.py --batch-size 1000  # fewer, larger uploads
-    python3 export_librarything.py --no-call-number   # omit LCC codes
+Surface (this module has no standalone CLI; it never did outside the
+package's early history): the exporter runs as ``cquarry --exportlt
+[--outdir DIR]``, with ``--search EXPR`` narrowing the rows, and as the
+TUI's Export > "LibraryThing (CSV)" entry. The function below returns
+the verb's exit code.
 
 Exit codes:
     0 = files written and self-checked
     1 = a self-check failed (nothing is trustworthy; do not upload)
-    2 = setup error (no metadata.db, bad arguments)
+
+(A missing database is the CLI's resolution failure, handled above this
+module; bad arguments are argparse refusals.)
 """
 
 import csv

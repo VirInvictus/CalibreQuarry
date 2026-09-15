@@ -479,7 +479,11 @@ def calibre_running() -> bool:
             == 0
         )
     except OSError:
-        return False
+        # An unrunnable pgrep is "can't tell" too. This gates --apply, so
+        # the safe answer is "assume running" (the fail-closed shape the
+        # integrate verbs document): this branch used to answer False and
+        # let --apply proceed against a possibly-live Calibre.
+        return True
     except subprocess.TimeoutExpired:
         # Can't tell. This gates --apply, so the safe answer is "assume yes":
         # refusing costs a re-run with --force, guessing wrong writes files

@@ -46,6 +46,9 @@ Checks (ERROR = bad data Calibre or tooling can trip on; WARNING = hygiene):
     AMAZON_IS_ISBN10          (W)  an ISBN-10 is filed under amazon / mobi-asin
     ID_TYPE_UNDECLARED        (W)  identifier type outside the canonical set (--strict/taxonomy)
     ORPHAN_CC_LINKS           (W)  custom-column link rows pointing at deleted books
+    AUTHOR_SORT_ORPHAN        (W)  author_sort matching none of the book's authors
+    AUTHOR_SORT_NOT_INVERTED  (W)  author_sort identical to the display name (never inverted)
+    INVALID_ISBN              (W)  stored ISBN failing its check digit
     PUBLISHER_NOT_CONSOLIDATED (W) an alias publisher should be merged into its canonical [opinionated]
     FORMAT_FICTION_PDF        (W)  a fiction book is PDF-only (no EPUB)            [opinionated]
 
