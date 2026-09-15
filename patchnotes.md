@@ -1,5 +1,18 @@
 # CalibreQuarry — Patch Notes
 
+# 3.43.0 (2026-09-15)
+
+### The record-integrity batch: the same-day manifest collision, the Z-Lib provenance ruling, the lossy-consent hole, and the exit-code unification
+
+- **Two same-day batches can no longer destroy each other's manifests** (the final audit's HIGH). Phase 1 saved every batch to a fixed `{date}-batch.json`, so a second batch on the same day silently overwrote the first, destroying the durable record (imported ids, decisions) that phase-2 resume and phase-3 consume. The newcomer now takes `{date}-batch-2.json`, the same exists()-loop the backup paths already used three times. Regression-tested on a real collision.
+- **Provenance seeds `Z-Lib`, the ruling's spelling.** The 2026-09-13 enum ruling renamed the #source value to `Z-Lib` (Brandon's entry spelling), but the seeder still emitted the 3.40-era `Z-Library`: every z-lib file in a 3.42-run manifest failed its phase-2 stamp until hand-corrected (19 files in the 2026-09-14 STEM run). The seeder, the test fixture's enum, and both import skills now track `Z-Lib`; manifests produced by 3.40-3.42 still carry `Z-Library` and need the hand-correction before signing.
+- **Bindery's gate-accepted EPUB repairs land in the manifest's lossy records** (observed the same run). Bindery's phase-1 report carried an `apply_lossy` decision naming gate-accepted repairs, and the manifest still wrote `{flagged: false, repairs: []}`: the seal bound nothing, so signing consented to repairs it never saw. `_mirror_lossy` now walks bindery's repair records: status accept/partial becomes `flagged: true` plus the named repairs and an `applied` flag, in both dry and `--apply-lossy` runs.
+- **The "Calibre is running" refusal is lock-class exit 1 everywhere.** Set mode exited 1 while the five run/integrate doors (phase 2, phase 3, dispatch_integrate) exited 2, and scripts branch on these codes; the recorded discipline ("usage problems exit 2, lock/write errors exit 1") now holds across all of them. dispatch_integrate also runs its usage guards before resolving the library, so `run convert` with a missing `--ids` is a usage error (exit 2) however resolvable the library is. The two 3.41-era guard pins were updated with the reasoning.
+- **`--export` refuses honestly.** `--export --format md` (md became a legal catalog format in 3.42.0) and a bad `--show-custom` printed their refusal and exited 0, reporting success while writing nothing; run_export now returns 2 and 1 respectively, exactly like the search-export path. The implicit `--wing` catalog fallback also passes `--format` through, so `--wing W --format md` renders Markdown instead of silently plain text.
+- **A typo'd TUI scope no longer runs unrestricted silently.** The `_restricted` parse-failure note was printed and then immediately erased by the next terminal reset; it now goes through the blocking notice, so the reader must acknowledge it.
+- **`--restrict ... --tags` obeys the universe.** `--tags` was the last read mode reading a global aggregation through the RestrictedView; tag counts are now recounted from the scoped book rows. Correction recorded against the final audit: its ratings-recount half was a misdiagnosis (the recount's key was and is correct; a test pins it so the suggested "fix" cannot land later).
+- Suite: 525 → 536 tests. Floor note: the vir-tui floor moved to >=2.5.0 on 2026-09-14 (upstream 2.4.0/2.5.0 are additive; every fresh resolution takes it automatically).
+
 # 3.42.0 (2026-09-13)
 
 ### The blitz candidates close: --health, the era split, Markdown catalogs, and the TUI's Phase 19 surfaces

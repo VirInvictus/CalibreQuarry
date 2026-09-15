@@ -1,6 +1,6 @@
 # CalibreQuarry — Roadmap
 
-What's done, what's next. Updated as of v3.26.0.
+What's done, what's next. Updated as of v3.43.0.
 
 ---
 
@@ -1300,10 +1300,10 @@ note; every integration ships with a dry-run before any write.
       placeholder comment in the README, wiki off / discussions on.)
 
 ### Final audit 2026-09-13 (THE FINAL AUDIT: NEW findings, one line each; full detail in audit-final/CalibreQuarry/FINAL-REPORT.md)
-- [ ] **HIGH — NEW: phase-1 manifest saves to a fixed `{date}-batch.json` with no uniqueness guard; two same-day batches silently overwrite the first manifest, destroying the durable batch record phase-2 resume and phase-3 consume (run.py:471-474).** Uniquify like _backup_db (the exists()-loop pattern already in-repo three times).
-- [ ] MED — RestrictedView ratings recount keys on star floats ("4.0") while cquarry rows key half-star int text ("8"): `--restrict … --entities ratings` mis-renders and every by_name merge misses (restrict.py:243-253). Pair with scoping get_tag_counts so `--restrict … --tags` obeys the universe (the last read mode outside the view; contradicts spec 3.4).
-- [ ] MED — TUI `_restricted` parse-failure note prints then is wiped by the following reset_terminal(): a typo'd scope expression silently runs the mode UNRESTRICTED (tui.py:176-187 + five call sites).
-- [ ] MED — Exit-code discipline: `--export --format md` (legal since 3.42.0) and a bad --show-custom exit 0 silently (export.py:185-191); the "Calibre is running" refusal exits 1 from set mode but 2 from all five run/integrate doors (setwrite.py:713 vs run.py:659/878, integrate.py:782); dispatch_integrate resolves the library before its usage guards (missing --ids exits 1 not 2).
+- [x] **HIGH — NEW: phase-1 manifest saves to a fixed `{date}-batch.json` with no uniqueness guard; two same-day batches silently overwrite the first manifest, destroying the durable batch record phase-2 resume and phase-3 consume (run.py:471-474).** Uniquify like _backup_db (the exists()-loop pattern already in-repo three times). *(3.43.0: the newcomer takes `{date}-batch-2.json`; collision regression-tested.)*
+- [x] MED — RestrictedView ratings recount keys on star floats ("4.0") while cquarry rows key half-star int text ("8"): `--restrict … --entities ratings` mis-renders and every by_name merge misses (restrict.py:243-253). Pair with scoping get_tag_counts so `--restrict … --tags` obeys the universe (the last read mode outside the view; contradicts spec 3.4). *(3.43.0: get_tag_counts now recounts from the scoped rows. CORRECTION: the ratings half was a MISDIAGNOSIS — get_all_books rows carry the raw 0-10 int, so str() already matches CAST(rating AS TEXT) and the merge hits; verified against the real library, and the suggested int(round(stars*2)) formula would have keyed "16". The correct key is pinned by test.)*
+- [x] MED — TUI `_restricted` parse-failure note prints then is wiped by the following reset_terminal(): a typo'd scope expression silently runs the mode UNRESTRICTED (tui.py:176-187 + five call sites). *(3.43.0: the notice goes through _notify, which blocks on Enter and survives the reset.)*
+- [x] MED — Exit-code discipline: `--export --format md` (legal since 3.42.0) and a bad --show-custom exit 0 silently (export.py:185-191); the "Calibre is running" refusal exits 1 from set mode but 2 from all five run/integrate doors (setwrite.py:713 vs run.py:659/878, integrate.py:782); dispatch_integrate resolves the library before its usage guards (missing --ids exits 1 not 2). *(3.43.0: run_export returns 2/1 like run_search_export; the Calibre-running refusal is lock-class exit 1 everywhere; integrate's usage guards precede find_db; also the implicit --wing fallback now passes fmt.)*
 - [ ] MED — Two unrecorded raw-SQL reads in the frontend (frontend-only-split class): _precedent_tags (run.py:787-805, a 4-table JOIN belonging in cquarry) and _remove_book_dry_run (writeops.py:457-478); fts.py:85 is the only recorded exception.
 - [ ] MED — Comment/header truth batch: --fields help advertises comments which backfill refuses; validate_metadata header omits 3 of its 14 checks; librarything.py header documents a standalone CLI that does not exist; integrate's skip comment swallows no-source rows as already-so (unconvertible books vanish from the apply report, counters zero); SINGLE_BOOK_DESTS omits add_tag/remove_tag; export/catalog annotated -> None but return load-bearing exit codes; reconcile_file_metadata's pgrep is fail-open while its own comment promises the safe answer (the family now has three OSError semantics).
 - [ ] MED — Publish-path hardening (workspace batch with cquarry + vir-tui, byte-identical conventions): SHA-pin pypa/gh-action-pypi-publish@release/v1 (guards id-token: write), pypi environment has no deployment policy, no tag protection, publish.yml lacks the top-level permissions block, publish path never runs ruff, no concurrency groups.
@@ -1317,7 +1317,7 @@ note; every integration ships with a dry-run before any write.
 
 **CONFIRMED-prior (final-audit verification):** the TUI screenshot TODO (decision-60 placeholder form), the pre-v3.37.0 Release cutoff (deliberately scoped, never recorded as decided), spec-floor recurrence class. SUPERSEDED (verified shipped/fixed): ALL SIXTEEN Wave-14 code findings at their named sites, the entire Wave-14 GITHUB block (verified live), the recon litter items, the lane em-dash findings. Audit-side corrections: the sheet's floors (real >=1.21.0) and test count (real 525) are stale. Slop-reader verdict: genuinely human-voiced ("the 2147483649 integer-overflow constant wearing an ISBN's clothes"); the live em-dash layer is the one systemic defect.
 
-- [ ] **The provenance seeder emits `Z-Library`; the ruled enum value is
+- [x] **The provenance seeder emits `Z-Library`; the ruled enum value is
       `Z-Lib`** (observed 2026-09-14, STEM-batch phase 1): run.py seeds the
       manifest's provenance with the 3.40-era string, but the 2026-09-13
       ruling set the #source enum value to `Z-Lib` (Brandon's entry
@@ -1326,9 +1326,11 @@ note; every integration ships with a dry-run before any write.
       z-lib file in a 3.42-run manifest fails its stamp until the manifest
       is hand-corrected (19 files corrected by hand this run). Fix: the
       seeder tracks the ruling's spelling (`Z-Lib`), or reads the enum
-      from the library instead of a hardcoded literal.
+      from the library instead of a hardcoded literal. *(3.43.0: the
+      seeder, the fixture enum, and both import skills track `Z-Lib`;
+      3.40-3.42 manifests still need the hand-correction.)*
 
-- [ ] **EPUB lossy repair candidates do not record in the manifest's
+- [x] **EPUB lossy repair candidates do not record in the manifest's
       per-file `lossy` field** (observed 2026-09-14, same run): bindery's
       phase-1 JSON carried an `apply_lossy` decision for Security in
       Computing (`stripped_pagination:3`, gate-accepted, consent
@@ -1338,5 +1340,8 @@ note; every integration ships with a dry-run before any write.
       designed flow (sign = consent, then `--apply-lossy`) has a hole
       exactly where the EPUB lossy strips live. Fix: mirror bindery's
       apply_lossy decisions into the per-file lossy records the seal
-      covers.
+      covers. *(3.43.0: `_mirror_lossy` walks bindery's repair records;
+      status accept/partial becomes `flagged: true` plus the named
+      repairs and an `applied` flag, in both dry and `--apply-lossy`
+      runs.)*
 - [x] **vir-tui floor >=2.5.0** (2026-09-14, no release cut: upstream 2.4.0/2.5.0 are additive terminal-safety and session-awareness releases; with no uv.lock, every fresh resolution takes the latest satisfying version automatically). *(Mention the floor bump in the next release's patchnotes.)*

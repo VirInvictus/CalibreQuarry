@@ -5,6 +5,45 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.43.0 onward, the record-integrity batch)
+
+- **The phase-1 manifest filename is unique per batch.**
+  `{date}-batch.json` collides only on the date, so a second same-day
+  batch takes `{date}-batch-2.json` (the `_backup_db` exists()-loop);
+  the fixed name let two batches silently destroy the durable record
+  phase 2 resume and phase 3 consume.
+- **Provenance seeds `Z-Lib`, the renamed enum value.** The 2026-09-13
+  ruling renamed the 3.40-era `Z-Library` #source value to Brandon's
+  spelling; the library's enum carries `Z-Lib` only, so the seeder,
+  the fixture, and the skills all track `Z-Lib` now (3.40-3.42
+  manifests say `Z-Library` and need the hand-correction before
+  signing).
+- **Bindery's gate-accepted EPUB repairs are mirrored into the per-file
+  `lossy` records** (`_mirror_lossy`: repair status accept/partial ->
+  `flagged: true` plus the named repairs and an `applied` flag), which
+  is what the seal binds; before 3.43.0 sign consented to repairs the
+  manifest never carried.
+- **The Calibre-running refusal is lock-class exit 1 everywhere** (set
+  mode, phase 2, phase 3, dispatch_integrate): usage problems exit 2,
+  an open Calibre is not a usage problem. dispatch_integrate runs its
+  usage guards BEFORE `find_db`, so a missing `--ids` is exit 2 however
+  resolvable the library is.
+- **`--export` propagates its refusals** (unknown `--format` 2, bad
+  `--show-custom` 1; run_export returns them like run_search_export),
+  and the implicit `--wing` fallback passes `fmt=args.format`.
+- **The TUI's `_restricted` parse-failure notice goes through
+  `_notify`**, which blocks on Enter: every caller resets the terminal
+  right after the prompt, and a bare print was erased before it could
+  be read (a typo'd scope ran UNRESTRICTED silently).
+- **RestrictedView scopes `get_tag_counts`** (the last read mode
+  reading a global aggregation): recounted from the scoped rows like
+  `get_entities`, uncarried tags absent. NOTE the ratings recount key
+  is `str(b["rating"])` and CORRECT: get_all_books rows carry the raw
+  0-10 int, matching `CAST(rating AS TEXT)` entity names. THE FINAL
+  AUDIT's L2.2 "4.0 key" finding was a misdiagnosis (it assumed star
+  floats); the `int(round(stars*2))` formula it suggested would key
+  "16" for a rating of 8, and test_restrict pins the correct key.
+
 ## Programmer-facing contract notes (3.42.0 onward, the blitz candidates)
 
 - **`--audit` and `--health` share one derivation.**
@@ -203,7 +242,7 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - **`run phase1` seeds `provenance`.** `run._provenance_from_filename`
   maps the filename's site markers onto the #source vocabulary
   (Anna's Archive trailer -> "Anna's Archive"; z-library.sk/1lib.sk ->
-  "Other", pending Brandon's Z-Library enum decision; libgen.* ->
+  "Z-Lib", the renamed enum value of the 2026-09-12/13 ruling; libgen.* ->
   "Library Genesis"; no marker -> None). The value is sealed:
   `manifest._seal_payload` binds provenance alongside stamps and lossy
   flags, so a post-sign provenance edit fails every load until
