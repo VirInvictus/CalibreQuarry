@@ -161,13 +161,16 @@ def _stamps_from_filename(path: str) -> dict[str, Any]:
 #: 2026-09-10 runs: "(z-library.sk, 1lib.sk, z-lib.sk)" site suffixes, the
 #: "-- Anna's Archive" trailer, and libgen.li. The trailer names its source
 #: outright; libgen.* is the enum's "Library Genesis". The Z-Library enum
-#: decision landed 2026-09-12: z-lib naming seeds "Z-Library" -- the value
-#: must exist in the library's #source enum BEFORE phase 2 stamps it
-#: (enum validation refuses unknown values, deliberately loudly). A name
-#: carrying no marker seeds None: absence of evidence is not a source.
+#: decision landed 2026-09-12, and the value was renamed to Brandon's
+#: entry spelling `Z-Lib` on 2026-09-13 (observed in the library 2026-09-14:
+#: the enum no longer carries the old 3.40-era "Z-Library" string), so the
+#: seeder tracks `Z-Lib` -- the value must exist in the library's #source
+#: enum BEFORE phase 2 stamps it (enum validation refuses unknown values,
+#: deliberately loudly). A name carrying no marker seeds None: absence of
+#: evidence is not a source.
 _PROVENANCE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"anna[’']s\s+archive", re.IGNORECASE), "Anna's Archive"),
-    (re.compile(r"\b(?:z[\s_-]?lib(?:rary)?|1lib)\b", re.IGNORECASE), "Z-Library"),
+    (re.compile(r"\b(?:z[\s_-]?lib(?:rary)?|1lib)\b", re.IGNORECASE), "Z-Lib"),
     (re.compile(r"\blibgen\b", re.IGNORECASE), "Library Genesis"),
 )
 
@@ -305,6 +308,36 @@ def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
             ) from e
     finally:
         os.unlink(report)
+
+
+def _mirror_lossy(man: dict[str, Any], bindery_shape: dict[str, Any]) -> None:
+    """Bindery's gate-accepted EPUB repairs become per-file ``lossy``
+    records: the field the seal binds, so the signature consents to (and
+    the batch record retains) exactly the repairs the report listed. The
+    2026-09-14 hole: bindery carried an ``apply_lossy`` decision with
+    gate-accepted repairs, and every lossy record stayed
+    ``{flagged: false, repairs: []}`` -- sign consented to nothing."""
+    if not bindery_shape:
+        return
+    applied = bool(bindery_shape.get("apply_lossy"))
+    by_path = {os.path.abspath(f["path"]): f for f in man["files"]}
+    for book in bindery_shape.get("books", []):
+        repair = book.get("repair") if isinstance(book, dict) else None
+        if not isinstance(repair, dict) or repair.get("status") not in (
+            "accept",
+            "partial",
+        ):
+            continue
+        summary = (repair.get("summary") or "").strip()
+        if not summary:
+            continue
+        entry = by_path.get(os.path.abspath(str(book.get("path") or "")))
+        if entry is None:
+            continue
+        entry["lossy"]["flagged"] = True
+        entry["lossy"]["repairs"].append(
+            {"tool": "bindery", "summary": summary, "applied": applied}
+        )
 
 
 def _quarantine(downloads_dir: str, path: str, reason: str) -> str:
@@ -463,14 +496,24 @@ def run_phase1(
         entry["checks"]["bindery"] = "see report" if bindery_shape else "unavailable"
         if entry["verdict"] == "needs_decision":
             entry["verdict"] = "approved_for_import"
+    _mirror_lossy(man, bindery_shape)
     manifest.approve(
         man,
         [f["path"] for f in man["files"] if f["verdict"] == "approved_for_import"],
     )
 
-    manifest_path = os.path.join(
-        manifest.manifests_dir(library_dir), f"{_now_stamp()}-batch.json"
-    )
+    # The retained manifest is the durable batch record phase 2 resume and
+    # phase 3 consume, so a second same-day batch must never overwrite the
+    # first: the filename collides only in the date, and the exists() loop
+    # numbers the newcomer (the _backup_db pattern; the fixed name let two
+    # batches on one library destroy the first batch's record).
+    manifests = manifest.manifests_dir(library_dir)
+    stamp = _now_stamp()
+    manifest_path = os.path.join(manifests, f"{stamp}-batch.json")
+    n = 2
+    while os.path.exists(manifest_path):
+        manifest_path = os.path.join(manifests, f"{stamp}-batch-{n}.json")
+        n += 1
     manifest.save(man, manifest_path)
 
     if not quiet:

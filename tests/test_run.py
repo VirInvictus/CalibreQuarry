@@ -90,8 +90,10 @@ CREATE TABLE books_custom_column_11_link (book INTEGER, value INTEGER,
 -- #source mirrors the real library: enumeration, normalized storage, the
 -- real enum values (cquarry 1.17's dispatch refuses the text+direct shape
 -- this fixture used to model, which no real Calibre schema creates).
+-- `Z-Lib` is the renamed value (Brandon's spelling, 2026-09-13); the
+-- 3.40-era "Z-Library" string no longer exists in the enum.
 INSERT INTO custom_columns VALUES (10, 'source', 'Source', 'enumeration', 0, 1,
-    '{"enum_values": ["Standard Ebooks", "Library Genesis", "Bought EPUB", "Bought physical", "ripped", "Anna''s Archive", "Free", "Gifted", "Other", "Z-Library"]}');
+    '{"enum_values": ["Standard Ebooks", "Library Genesis", "Bought EPUB", "Bought physical", "ripped", "Anna''s Archive", "Free", "Gifted", "Other", "Z-Lib"]}');
 INSERT INTO custom_columns VALUES (11, 'audience', 'Audience', 'text', 1, 1, '{}');
 """
 
@@ -167,18 +169,18 @@ class TestProvenanceSeeds(unittest.TestCase):
             "Anna's Archive",
         )
 
-    def test_z_library_site_naming_seeds_z_library(self):
-        # The Z-Library enum decision (2026-09-12): z-lib naming seeds the
-        # dedicated "Z-Library" value. The library's #source enum must
-        # carry the value BEFORE phase 2 stamps it -- enum validation
-        # refuses unknown values, deliberately loudly -- and the fixture's
-        # enum now includes it for exactly that reason.
+    def test_z_library_site_naming_seeds_the_z_lib_enum_value(self):
+        # The Z-Library enum decision (2026-09-12) as renamed on
+        # 2026-09-13: z-lib naming seeds `Z-Lib`, Brandon's entry spelling
+        # and the only form the library's #source enum carries now. The
+        # 3.40-era "Z-Library" seed failed every phase-2 stamp until the
+        # manifest was hand-corrected (the 2026-09-14 run).
         self.assertEqual(
             _provenance_from_filename(
                 "How to do things with videogames (Bogost, Ian) "
                 "(z-library.sk, 1lib.sk, z-lib.sk).pdf"
             ),
-            "Z-Library",
+            "Z-Lib",
         )
 
     def test_libgen_names_seed_library_genesis(self):
@@ -317,6 +319,40 @@ class TestRunPhase1(RunCase):
         man = manifest.load(os.path.join(manifests, manifest_path))
         self.assertNotEqual(man["quarantines"][0]["moved_to"], None)
 
+    def test_same_day_batches_never_overwrite_the_first_manifest(self):
+        # THE FINAL AUDIT's HIGH: the fixed {date}-batch.json name let a
+        # second same-day batch silently destroy the first batch's durable
+        # record (imported ids, decisions) that phase 2 resume and phase 3
+        # consume. The newcomer takes a numbered sibling instead.
+        def vet():
+            with (
+                mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+                mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+                mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+                mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+            ):
+                return run_phase1(self.downloads, self.db_path, quiet=True)
+
+        first = self._make_file("Ann Leckie - First Book.epub")
+        self.assertEqual(vet(), 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (first_manifest,) = os.listdir(manifests)
+        with open(os.path.join(manifests, first_manifest), encoding="utf-8") as f:
+            first_record = json.load(f)
+
+        os.unlink(first)
+        second = self._make_file("Ann Leckie - Second Book.epub")
+        self.assertEqual(vet(), 0)
+        self.assertEqual(len(os.listdir(manifests)), 2)
+        second_manifest = first_manifest[: -len("-batch.json")] + "-batch-2.json"
+        self.assertIn(second_manifest, os.listdir(manifests))
+        with open(os.path.join(manifests, second_manifest), encoding="utf-8") as f:
+            second_record = json.load(f)
+        # The first record stands exactly as written; the sibling carries
+        # the second batch's file.
+        self.assertEqual([p["path"] for p in first_record["files"]], [first])
+        self.assertEqual([p["path"] for p in second_record["files"]], [second])
+
     def test_quarantine_collision_gets_a_sibling_not_a_replacement(self):
         # Two same-named DRM files in different subdirs: the second move
         # used to land on the first and destroy it.
@@ -342,6 +378,88 @@ class TestRunPhase1(RunCase):
         self.assertEqual(moved, ["same-2.epub", "same.epub"])
         for name in moved:
             self.assertTrue(os.path.getsize(os.path.join(quarantine_dir, name)) > 0)
+
+    def test_bindery_gate_accepted_repairs_mirror_into_lossy(self):
+        # The 2026-09-14 hole: bindery's apply_lossy decision named books
+        # with gate-accepted repairs, and the manifest still wrote
+        # {flagged: false, repairs: []} -- the seal bound nothing, so
+        # signing consented to repairs it never saw.
+        pending = self._make_file("Security in Computing.epub")
+        partial = self._make_file("half_stripped.epub")
+        untouched = self._make_file("clean_edition.epub")
+        shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": pending,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_pagination:3",
+                    },
+                },
+                {
+                    "path": partial,
+                    "repair": {
+                        "status": "partial",
+                        "summary": "stripped_watermarks:1 dropped_marker:1",
+                    },
+                },
+                {"path": untouched, "repair": None},
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        lossy = manifest.file_by_path(man, pending)["lossy"]
+        self.assertTrue(lossy["flagged"])
+        self.assertEqual(
+            lossy["repairs"],
+            [
+                {
+                    "tool": "bindery",
+                    "summary": "stripped_pagination:3",
+                    "applied": False,
+                }
+            ],
+        )
+        self.assertTrue(manifest.file_by_path(man, partial)["lossy"]["flagged"])
+        self.assertFalse(manifest.file_by_path(man, untouched)["lossy"]["flagged"])
+
+    def test_apply_lossy_run_records_the_repairs_as_applied(self):
+        # --apply-lossy means the strips already happened file-side during
+        # phase 1: the manifest's record must say so, or the batch record
+        # understates what was done to the books.
+        path = self._make_file("stripped_already.epub")
+        shape = {
+            "apply_lossy": True,
+            "books": [
+                {
+                    "path": path,
+                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                }
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        lossy = manifest.file_by_path(man, path)["lossy"]
+        self.assertEqual(lossy["repairs"][0]["applied"], True)
 
     def test_inventory_skips_stamp_backups(self):
         # A rerun used to sweep _stamp_backups into the batch as books.
