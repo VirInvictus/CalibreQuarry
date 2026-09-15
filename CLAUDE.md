@@ -5,6 +5,34 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.44.0 onward, the truth-and-hardening batch)
+
+- **The frontend tier has exactly one raw-SQL read left, the recorded
+  one.** `_precedent_tags` delegates to cquarry 1.22's
+  `CalibreDB.precedent_tags` (the 4-table JOIN lives upstream; results
+  come back alphabetized), and `_remove_book_dry_run` reads through
+  CalibreDB (`get_book` + `get_formats`). `modes/fts.py`'s
+  dirtied-formats sidecar read remains the only recorded exception.
+  Floor: cquarry >= 1.22.0.
+- **The publish path is hardened** (SHA-pinned actions, top-level
+  contents: read, concurrency no-cancel, pinned ruff + suite before
+  build, twine --strict + wheel smoke, and a create-release job minting
+  the Release from the tag): the same shape shipped in cquarry 1.22.0
+  and vir-tui. The pypi-environment deployment-policy idea is RECORDED
+  AS REVERTED: REST-created policies are branch-type only and reject
+  tag deployments outright (cquarry's v1.22.0 publish proved it);
+  tag policies are UI-only today.
+- **The version-sync set is wider than the pin test used to check.**
+  tests/test_version.py now also guards spec.md's `**Version:**`
+  header, the spec Dependencies line's cquarry floor against
+  pyproject's, and roadmap.md's `Updated as of` stamp. A release bump
+  touches: `src/cquarry_cli/__init__.py`, `VERSION`, `pyproject.toml`,
+  the newest patchnotes heading, `spec.md`'s Version header, and
+  `roadmap.md`'s stamp.
+- **GitHub repo surfaces**: an actions-only dependabot keeps the new
+  SHA pins current; a `release-tags-protected` ruleset blocks deletion
+  of `refs/tags/v*`.
+
 ## Programmer-facing contract notes (3.43.0 onward, the record-integrity batch)
 
 - **The phase-1 manifest filename is unique per batch.**
