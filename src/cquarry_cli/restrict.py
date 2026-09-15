@@ -10,10 +10,11 @@ the view, the series rollup recomputes from the scoped rows, and wing
 resolution intersects. Re-deriving any of those here would fork
 cquarry's logic; scoping the inputs does not.
 
-The two aggregation methods that are SQL inside cquarry (entity counts,
-format stats) are recounted from the scoped book rows and merged with
-the real rows' secondary columns, so ``--entities`` and
-``--format-stats`` show restricted counts instead of global ones.
+The three aggregation methods that are SQL inside cquarry (entity counts,
+format stats, tag counts) are recounted from the scoped book rows and
+merged with the real rows' secondary columns where those exist, so
+``--entities``, ``--format-stats``, and ``--tags`` show restricted counts
+instead of global ones.
 """
 
 import argparse
@@ -148,6 +149,19 @@ class RestrictedView(CalibreDB):
         tags = {t for b in self.get_all_books() for t in (b["tags"] or [])}
         return sorted(tags)
 
+    def get_tag_counts(self) -> list[tuple[str, int]]:
+        # Same derivation as get_all_tags, with counts: a global link-row
+        # COUNT becomes per-book counting over the scoped rows, so
+        # --restrict ... --tags obeys the universe instead of printing the
+        # library-wide counts (the last read mode outside the view; spec
+        # 3.4). Tags no scoped book carries do not appear, matching the
+        # get_entities recount.
+        counts: dict[str, int] = {}
+        for b in self.get_all_books():
+            for tag in b["tags"] or []:
+                counts[tag] = counts.get(tag, 0) + 1
+        return sorted(counts.items())
+
     def get_dirtied_books(self) -> list[int]:
         return [i for i in CalibreDB.get_dirtied_books(self) if i in self._ids]
 
@@ -241,6 +255,12 @@ class RestrictedView(CalibreDB):
             elif kind == "languages":
                 names = b["languages"] or []
             elif kind == "ratings":
+                # get_all_books rows carry the RAW 0-10 int (never stars),
+                # which is exactly the text the real rows name
+                # (CAST(rating AS TEXT)): str() merges by name. The star
+                # float is the trap -- a recount keyed on
+                # int(round(stars*2)) would double every value; pinned by
+                # test_restrict.
                 names = [str(b["rating"])] if b["rating"] is not None else []
             else:
                 # Unknown kinds raise through the real method, unchanged.

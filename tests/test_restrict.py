@@ -187,6 +187,30 @@ class TestRestrictView(_TempDBCase):
             self.assertNotIn("Jane Austen", authors)
             self.assertEqual(authors["Frank Herbert"]["link"], "https://example.com/1")
 
+    def test_ratings_recount_keys_the_raw_half_star_int(self):
+        # Pinned against the recorded misdiagnosis (THE FINAL AUDIT L2.2):
+        # get_all_books rows carry the RAW 0-10 int, so str() of it is
+        # exactly the text the real rows name (CAST(rating AS TEXT)) and
+        # the by_name merge already hits -- book 1's rating 8 renders with
+        # its ratings-table id. The star-float formula the finding
+        # suggested (int(round(stars*2))) would key "16" here; if this
+        # test ever fails in that direction, the recount was "fixed" into
+        # the bug.
+        with self.open_view("tags:Fic.SciFi") as view:
+            rows = {r["name"]: r for r in view.get_entities("ratings")}
+        self.assertEqual(set(rows), {"8"})
+        self.assertEqual(rows["8"]["count"], 1)
+        self.assertEqual(rows["8"]["id"], 10)
+
+    def test_tag_counts_obey_the_scope(self):
+        # The one read mode that still read the global link table through
+        # the view: --restrict ... --tags printed library-wide counts
+        # (spec 3.4's contradiction).
+        with self.open_view("tags:Fic.SciFi") as view:
+            counts = dict(view.get_tag_counts())
+        # Fic.Classic belongs to book 3, outside the universe.
+        self.assertEqual(counts, {"Fic.SciFi": 2, "Fic.Cyberpunk": 1})
+
     def test_format_stats_recount(self):
         with self.open_view("id:1") as view:
             stats = view.get_format_stats()
@@ -212,6 +236,15 @@ class TestRestrictModes(_TempDBCase):
         )
         self.assertEqual(code, 0)
         self.assertIn("2 books", out)
+
+    def test_tag_dump_scoped(self):
+        code, out, _ = self.run_cli(
+            "--tags", "--restrict", "tags:Fic.SciFi", "--db", self.db_path
+        )
+        self.assertEqual(code, 0)
+        # Fic.Classic lives on book 3, outside the universe.
+        self.assertIn("Fic.SciFi", out)
+        self.assertNotIn("Fic.Classic", out)
 
     def _tempfile(self, suffix):
         import tempfile as tf
