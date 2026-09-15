@@ -1,10 +1,12 @@
 """The integration verbs: `cquarry run convert/polish/cover/export/merge/
-flush/backfill` (Phase 19 C).
+flush/backfill/trash` (Phase 19 C, plus the 3.45 trash lifecycle).
 
-Every verb drives external programs (ebook-convert, ebook-polish,
-calibredb, fetch-ebook-metadata) and registers the outcome through
-cquarry's write module; no new Python dependencies, by design. The
-house write discipline holds across all of them:
+Most verbs drive external programs (convert/polish: ebook-convert and
+ebook-polish; export/flush: calibredb; backfill: fetch-ebook-metadata)
+and register the outcome through cquarry's write module; cover, merge,
+and trash work purely through cquarry's write APIs and the filesystem.
+No new Python dependencies, by design. The house write discipline holds
+across all of them:
 
 - dry-run by default: the plan (per-book actions) prints, nothing runs;
 - `--apply` demands a closed Calibre (anchored pgrep guard) and, for
@@ -363,7 +365,9 @@ def run_cover(db, args, *, apply: bool, take_backup=None) -> int:
                 else:
                     changed = wdb.remove_cover(p["book"])
         p["result"] = "applied" if changed else "already-so"
-        applied += 1
+        # An already-so row is not an application (run_convert's
+        # counting, not the old blanket +1).
+        applied += 1 if changed else 0
     return _print_results(plans, args, applied, failed)
 
 
@@ -520,11 +524,23 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
         return 2
     chunk = max(1, args.chunk or 50)
     chunks = [ids[i : i + chunk] for i in range(0, len(ids), chunk)]
+    as_json = getattr(args, "format", None) == "json"
     if not apply:
-        print(
-            f"flush plan: {len(ids)} dirtied book(s) in {len(chunks)} "
-            f"chunk(s) of up to {chunk}: embed_metadata each"
-        )
+        plan = {
+            "plan": {
+                "verb": "flush",
+                "ids": ids,
+                "chunks": len(chunks),
+                "chunk_size": chunk,
+            }
+        }
+        if as_json:
+            print(json.dumps(plan, indent=1))
+        else:
+            print(
+                f"flush plan: {len(ids)} dirtied book(s) in {len(chunks)} "
+                f"chunk(s) of up to {chunk}: embed_metadata each"
+            )
         return 0
     if take_backup and (rc := take_backup()):
         return rc
@@ -549,7 +565,10 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
             )
             return 1
         done += len(c)
-    print(f"Flushed {done} book(s): embedded metadata regenerated.")
+    if as_json:
+        print(json.dumps({"results": {"flushed": done}}, indent=1))
+    else:
+        print(f"Flushed {done} book(s): embedded metadata regenerated.")
     return 0
 
 

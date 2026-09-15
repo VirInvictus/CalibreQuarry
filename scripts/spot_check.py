@@ -14,7 +14,8 @@ emitted review bundle, which carries title/author/tag/series plus a blurb
 excerpt per sampled book. Validator-owned checks (tag-in-spec, identifier
 hygiene, coverage) are deliberately not duplicated here.
 
-Read-only against metadata.db (mode=ro). Stdlib only; shells out to exiftool
+Read-only against metadata.db (mode=ro). Stdlib plus vir_tui (the shared terminal
+helpers); shells out to exiftool
 (PDF) and djvused (DJVU) when present, and skips those checks when not. The
 advisory COMMENT_TRUNCATED check reads /usr/share/dict/words on the same terms:
 used when the system has it, silently skipped when it does not.
@@ -39,7 +40,9 @@ Usage:
   python3 spot_check.py --worklist                      # the BAD punch list
 
 Exit code: number of books with hard failures (broken archive, empty spine,
-missing file), capped at 99. Recording returns 1 if the verdicts are malformed
+missing file), capped at 99 (99 means "99 or more failures", never a
+setup problem; setup errors exit 2). Recording returns 1 if the verdicts
+are malformed
 or the ids do not reconcile, and writes nothing.
 """
 
@@ -596,11 +599,7 @@ def main() -> int:
     )
     args = ap.parse_args()
     ui.print_header("spot_check.py - Random spot check")
-    ui.print_header(
-        "spot_check.py - Execution [DRY RUN]"
-        if getattr(args, "dry_run", False)
-        else "spot_check.py - Execution"
-    )
+    ui.print_header("spot_check.py - Execution")
 
     ledger_path = Path(args.ledger).expanduser()
     if args.worklist:

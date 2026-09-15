@@ -86,7 +86,9 @@ Run from the library directory:
 
 Exit codes:
     0 = no disagreement found
-    1 = at least one MISMATCH/VARIANT/AMBIGUOUS finding, or an unreadable file
+    1 = at least one MISMATCH/VARIANT/AMBIGUOUS finding (the advisory
+        YEAR_MISMATCH rows ride this contract too, per the 3.38 B.8
+        rider), or an unreadable file
     2 = setup error (missing DB, bad arguments)
 """
 

@@ -1,4 +1,4 @@
-# CalibreQuarry — Application Specification
+# CalibreQuarry Application Specification
 
 **Version:** 3.44.0  
 **Language:** Python 3.14+  
@@ -9,7 +9,7 @@
 
 ## 1. Mission Statement
 
-CalibreQuarry is a CLI toolkit for Calibre users who treat their libraries as curated collections. It reads `metadata.db` directly in read-only mode — bypassing the overhead of `calibredb`, JSON intermediaries, or external library dependencies.
+CalibreQuarry is a CLI toolkit for Calibre users who treat their libraries as curated collections. It reads `metadata.db` directly in read-only mode, bypassing the overhead of `calibredb`, JSON intermediaries, or external library dependencies.
 
 Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a single command.** The script resolves Calibre's **Virtual Library** (Wing) search expressions natively, ensuring existing library definitions work without re-encoding.
 
@@ -24,10 +24,10 @@ The CalibreQuarry architecture relies on a strict separation of concerns, decoup
 
 The floor is `cquarry >= 1.22.0`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, and 1.21). A test pins the floor against `pyproject.toml`.
 
-- **1.22.0** — `CalibreDB.precedent_tags()`, the phase-3 prompt's tag-by-precedent read (promoted from run.py).
-- **1.21.0** — the metadata-quality predicates `--audit` renders (`find_invalid_uuids`, `find_sentinel_pubdates`, `find_bad_language_codes`), plus the write-path fixes the 3.41 run-verb batch rides on.
-- **1.12-1.14** — the foundations every mode rides: native list hydration for `authors`/`tags`/`languages`/`formats` (never comma-split them), computed row `size`, `analytics.genre_distribution()` behind `--analytics genres`, the set-mode write helpers (`clear_tags`, `add_custom_column_values`, `clear_rating`), and `add_book` as `run phase2`'s creation path. The search-engine features here are engine-level: saved-search interpolation (`search:"Name"`), multi-valued count operators (`tags:#>2`), language canonicalization, and unknown virtual libraries raising instead of matching nothing.
-- **Older floors** — see `patchnotes.md`, which records what each cquarry bump adopted at release time.
+- **1.22.0**: `CalibreDB.precedent_tags()`, the phase-3 prompt's tag-by-precedent read (promoted from run.py).
+- **1.21.0**: the metadata-quality predicates `--audit` renders (`find_invalid_uuids`, `find_sentinel_pubdates`, `find_bad_language_codes`), plus the write-path fixes the 3.41 run-verb batch rides on.
+- **1.12-1.14**: the foundations every mode rides: native list hydration for `authors`/`tags`/`languages`/`formats` (never comma-split them), computed row `size`, `analytics.genre_distribution()` behind `--analytics genres`, the set-mode write helpers (`clear_tags`, `add_custom_column_values`, `clear_rating`), and `add_book` as `run phase2`'s creation path. The search-engine features here are engine-level: saved-search interpolation (`search:"Name"`), multi-valued count operators (`tags:#>2`), language canonicalization, and unknown virtual libraries raising instead of matching nothing.
+- **Older floors**: see `patchnotes.md`, which records what each cquarry bump adopted at release time.
 
 **`cquarry_cli` (Internal Package)**: The frontend modules live in `src/cquarry_cli/`:
 
@@ -62,7 +62,7 @@ The search engine provided by `cquarry` ports Calibre's grammar and matching sem
 Read-only. Never writes. Opens with a `?mode=ro` URI, built by
 `cquarry.helpers.db_uri_ro`, which percent-encodes the path: `?` and `#` are URI
 syntax, so a library directory containing either would otherwise resolve to
-a different file. All data comes from standard Calibre tables — no custom
+a different file. All data comes from standard Calibre tables; no custom
 columns required. Ratings are stored 0–10 internally (10 = 5 stars);
 converted to 0–5 for display.
 
@@ -224,7 +224,7 @@ it are never reported as never indexed. A missing sidecar is the
 
 ## 4. What CalibreQuarry Is Not
 
-- **Not a Calibre replacement.** It reads the database — it does not manage it.
+- **Not a Calibre replacement.** It reads the database; it does not manage it.
 - **Read-only by default; writes are explicit, opt-in verbs only.** Every read mode (`--catalog`, `--stats`, `--search`, `--export`, …) opens `metadata.db` strictly `mode=ro`. The only write paths are the explicit `--set-*` / `--remove-book` verbs and the set-mode `--batch-*` verbs (§3.2), which route through cquarry's separate `WritableCalibreDB` module and require Calibre to be closed. Nothing in the read path can ever mutate the database.
 - **Not a converter.** It does not touch book files themselves.
 - **Not a server.** It has no web interface, and the read surface has no network access. The one network-touching verb is `run backfill` at `--apply` (it drives `fetch-ebook-metadata`, an external calibre tool, per book); everything else runs entirely offline.

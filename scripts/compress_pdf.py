@@ -13,8 +13,10 @@ Workflow
     3. Run ghostscript with the chosen preset to a temp file.
     4. Verify the output: page count matches, file is a valid PDF.
     5. Replace original. Original is preserved as <name>.pre-compress.pdf.
-    6. If the PDF lives in a Calibre library, update books_pages_link.format_size
-       so Calibre doesn't think the cache is stale.
+    6. If the PDF lives in a Calibre library, sync BOTH size records:
+       `data.uncompressed_size` (the file size Calibre notices) and
+       `books_pages_link.format_size` (the Count Pages plugin's cache),
+       so neither goes stale.
 
 Run from anywhere:
     python3 compress_pdf.py path/to/file.pdf

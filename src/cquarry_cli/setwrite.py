@@ -25,8 +25,8 @@ Safety rails mechanically encoded here:
 
 Reporting: per-verb applied/already-so/failed counts plus the per-id
 failure list on stderr; ``--format json`` emits
-``{target, verbs, results[{id, verb, status, detail}], committed,
-dry_run}`` for an AI caller. Exit 0 committed/dry-run, 1 failures or
+``{target, ids, verbs, results[{id, verb, status, detail}],
+committed, dry_run}`` for an AI caller. Exit 0 committed/dry-run, 1 failures or
 lock, 2 usage. ``--quiet`` suppresses the stdout report; failures and
 the exit codes still speak.
 
@@ -74,6 +74,10 @@ def _calibre_running() -> bool:
             == 0
         )
     except subprocess.TimeoutExpired:
+        return True
+    except OSError:
+        # An unrunnable pgrep is "can't tell" too: fail closed like a
+        # timeout, never crash a write door with a traceback.
         return True
 
 

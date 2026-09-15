@@ -1,3 +1,12 @@
+"""The CLI entry: argument parsing, mode dispatch, exit-code mapping.
+
+The frontend contract lives in this file's shape: cquarry derives every
+predicate and stat, the read modes render, the write verbs funnel
+through writeops, and the output guard (``open_output``) refuses any
+report aimed at the database or the library root. Argument problems
+exit 2; lock/write and validation errors exit 1; read-surface parse
+failures exit 1."""
+
 import argparse
 import sys
 
@@ -480,7 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=2,
         metavar=("BOOK_ID", "LANGS"),
         default=None,
-        help='Replace languages ("en, fr" — English names or ISO codes)',
+        help='Replace languages ("en, fr"; English names or ISO codes)',
     )
     w.add_argument(
         "--clear-languages",
@@ -495,7 +504,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=4,
         metavar=("BOOK_ID", "FORMAT", "NAME", "SIZE"),
         default=None,
-        help="Register a format row (metadata only — the file must already "
+        help="Register a format row (metadata only; the file must already "
         "sit in the book's folder as NAME.format)",
     )
     w.add_argument(

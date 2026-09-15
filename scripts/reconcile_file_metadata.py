@@ -53,7 +53,8 @@ Exit codes:
     1 = drift found (dry run), or one or more apply/embed operations failed
     2 = setup error (metadata.db or a required external tool not found)
 
-Stdlib only; shells out to `ebook-meta`, `djvused`, and `exiftool` to read (all
+Stdlib plus vir_tui (the shared terminal helpers); shells out to `ebook-meta`,
+`djvused`, and `exiftool` to read (all
 required), `calibredb` to write EPUB/MOBI/AZW3 on `--apply`, and `qpdf` only
 with `--repair-pdf`. Missing a needed tool exits 2.
 """
@@ -731,11 +732,7 @@ def main() -> int:
         help="print only drift, truncate long field lists",
     )
     args = parser.parse_args()
-    ui.print_header(
-        "reconcile_file_metadata.py - Execution [DRY RUN]"
-        if getattr(args, "dry_run", False)
-        else "reconcile_file_metadata.py - Execution"
-    )
+    ui.print_header("reconcile_file_metadata.py - Execution")
 
     if args.id and parse_id_list(args.id) is None:
         print(

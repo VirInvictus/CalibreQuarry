@@ -161,6 +161,8 @@ def print_staleness(db: CalibreDB, report: dict, titles: dict[int, str]) -> None
         print(color(f"Extraction errors: {total}", C_WARN))
         for bid, fmts in list(report["extraction_errors"].items())[:10]:
             print(f"  #{bid} {titles.get(bid, '?')} [{', '.join(sorted(fmts))}]")
+        if len(report["extraction_errors"]) > 10:
+            print(f"  ... and {len(report['extraction_errors']) - 10} more")
     if never or empty or stale or report["extraction_errors"]:
         return
     if report["sidecar_present"]:

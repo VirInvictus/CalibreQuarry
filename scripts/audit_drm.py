@@ -551,11 +551,7 @@ def main() -> int:
         help="also write a CSV audit (id,status,kind,detail,path)",
     )
     args = parser.parse_args()
-    ui.print_header(
-        "audit_drm.py - Execution [DRY RUN]"
-        if getattr(args, "dry_run", False)
-        else "audit_drm.py - Execution"
-    )
+    ui.print_header("audit_drm.py - Execution")
     csv_path = Path(args.csv).expanduser() if args.csv else None
     if args.directory:
         return run_directory(Path(args.directory).expanduser(), csv_path)

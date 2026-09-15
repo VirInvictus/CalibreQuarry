@@ -144,7 +144,7 @@ def _show_progress(d) -> None:
             except OverflowError, OSError, ValueError:
                 when = f" at epoch {epoch}?"
         who = row.get("device") or row.get("user") or "?"
-        print(f"  {who} ({row.get('format') or '?'}) — {pct}{when}")
+        print(f"  {who} ({row.get('format') or '?'}): {pct}{when}")
 
 
 def _show_extras(d) -> None:
@@ -160,7 +160,7 @@ def _show_extras(d) -> None:
         print(color("Conversion overrides:", C_HEADER))
         for row in overrides:
             print(
-                f"  {row['format']} — manual override "
+                f"  {row['format']}: manual override "
                 f"({row.get('data_size', 0)} bytes of recipe data)"
             )
 

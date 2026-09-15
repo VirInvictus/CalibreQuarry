@@ -111,6 +111,10 @@ def calibre_running() -> bool:
         )
     except subprocess.TimeoutExpired:
         return True
+    except OSError:
+        # An unrunnable pgrep is "can't tell" too: fail closed like a
+        # timeout, never crash a write door with a traceback.
+        return True
 
 
 def _now_stamp() -> str:
@@ -569,7 +573,8 @@ def _backup_db(db_path: str, backup_dir: str) -> str:
 
 
 def _fetch_metadata(isbn: str, opf_path: str) -> str:
-    """fetch-ebook-metadata for one ISBN. Returns ok / no_result / ambiguous.
+    """fetch-ebook-metadata for one ISBN. Returns ok / no_result /
+    ambiguous / failed (the timeout the manifest schema records).
 
     -o/--opf is a store flag: the OPF arrives on STDOUT, never at a
     path. The old cut passed opf_path after -o, a silently-ignored
@@ -775,8 +780,8 @@ def run_phase2(
     manifest.save(man, manifest_path)
 
     # The download segment: per-book, Calibre-open-safe, never a guess.
-    # The guard window closed at commit: if Calibre opened since, do not
-    # race it with calibredb; the downloads defer to phase 3.
+    # The guard window closed at commit: if Calibre opened since, defer
+    # the downloads to phase 3 rather than write beside a live Calibre.
     from cquarry.db import CalibreDB
 
     live_after_commit = calibre_running()

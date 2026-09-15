@@ -414,29 +414,28 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         )
 
         fts_rows = [i for i in issues if i["issue_type"] == "fts_coverage"]
-        if not quiet:
-            if staleness["sidecar_present"]:
-                counts = Counter(r["issues"].split(" [")[0] for r in fts_rows)
-                if counts:
-                    print(
-                        "\n"
-                        + color(
-                            f"FTS coverage: {len(fts_rows)} finding(s)",
-                            C_WARN,
-                        )
-                    )
-                    for cls, count in counts.most_common():
-                        print(f"  {cls}: {count}")
-            else:
-                never = len(staleness["never_indexed"])
+        if staleness["sidecar_present"]:
+            counts = Counter(r["issues"].split(" [")[0] for r in fts_rows)
+            if counts:
                 print(
                     "\n"
                     + color(
-                        f"FTS sidecar absent ({never} text-capable "
-                        "format(s) never indexed; run --fts-status)",
+                        f"FTS coverage: {len(fts_rows)} finding(s)",
                         C_WARN,
                     )
                 )
+                for cls, count in counts.most_common():
+                    print(f"  {cls}: {count}")
+        else:
+            never = len(staleness["never_indexed"])
+            print(
+                "\n"
+                + color(
+                    f"FTS sidecar absent ({never} text-capable "
+                    "format(s) never indexed; run --fts-status)",
+                    C_WARN,
+                )
+            )
 
         print(f"\nFull report: {color(out_path, C_TITLE)}")
 

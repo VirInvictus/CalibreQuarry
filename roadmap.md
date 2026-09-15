@@ -1,4 +1,4 @@
-# CalibreQuarry — Roadmap
+# CalibreQuarry Roadmap
 
 What's done, what's next. Updated as of v3.44.0.
 

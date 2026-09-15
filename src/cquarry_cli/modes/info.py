@@ -59,7 +59,7 @@ def show_info(db: CalibreDB, *, quiet: bool = False) -> None:
         names = [str(m[0] if isinstance(m, (list, tuple)) else m) for m in members]
         preview = ", ".join(names[:_LIST_PREVIEW])
         more = f" … +{len(names) - _LIST_PREVIEW}" if len(names) > _LIST_PREVIEW else ""
-        print(f"  @{name}: {len(names)} members — {preview}{more}")
+        print(f"  @{name}: {len(names)} members; {preview}{more}")
 
     # Grouped search terms (GroupName:query expansion)
     grouped = db.get_grouped_search_terms()
@@ -72,7 +72,7 @@ def show_info(db: CalibreDB, *, quiet: bool = False) -> None:
     print(color(f"\nNews feeds ({len(feeds)}):", C_HEADER))
     for feed in feeds:
         script = feed.get("script") or ""
-        script_note = f" — {script}" if script else ""
+        script_note = f" ({script})" if script else ""
         print(f"  {feed.get('title') or feed.get('id')}{script_note}")
     if not feeds:
         print(color("  (none registered)", C_DIM))
@@ -81,7 +81,7 @@ def show_info(db: CalibreDB, *, quiet: bool = False) -> None:
     overrides = db.get_conversion_profiles()
     print(color(f"\nConversion overrides ({len(overrides)}):", C_HEADER))
     for row in overrides[:_LIST_PREVIEW]:
-        print(f"  book {row['book']} — {row['format']}")
+        print(f"  book {row['book']} ({row['format']})")
     if len(overrides) > _LIST_PREVIEW:
         print(color(f"  … +{len(overrides) - _LIST_PREVIEW} more", C_DIM))
     if not overrides:
@@ -149,6 +149,6 @@ def show_columns(db: CalibreDB, *, quiet: bool = False) -> None:
     if not quiet:
         print()
         print(
-            f"  {len(cols)} columns; search them as #label — "
+            f"  {len(cols)} columns; search them as #label: "
             "write with --set-column ID #label value"
         )

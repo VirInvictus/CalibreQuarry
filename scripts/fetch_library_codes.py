@@ -294,6 +294,9 @@ def calibre_running() -> bool:
         # Can't tell. This gates --apply, so the safe answer is "assume yes":
         # refusing costs a re-run, guessing wrong writes to a live database.
         return True
+    except OSError:
+        # An unrunnable pgrep is "can't tell" too: fail closed.
+        return True
 
 
 def backup_db(db_path: str) -> str:
@@ -472,11 +475,7 @@ def main() -> int:
     )
     ap.add_argument("--quiet", action="store_true", help="suppress per-book lines")
     args = ap.parse_args()
-    ui.print_header(
-        "fetch_library_codes.py - Execution [DRY RUN]"
-        if getattr(args, "dry_run", False)
-        else "fetch_library_codes.py - Execution"
-    )
+    ui.print_header("fetch_library_codes.py - Execution")
 
     if args.delay < 1.0:
         print(

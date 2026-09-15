@@ -272,7 +272,7 @@ def _print_report(records: list[dict[str, object]], skipped: list[str]) -> None:
             pages = f", {h['pages']} pages" if h.get("pages") else ""
             print(
                 f"           {RED}vs library #{h['id']}{RESET}: {h['title']}"
-                f" — {' & '.join(h['authors'])} ({fmts}{size}{pages})"
+                f": {' & '.join(h['authors'])} ({fmts}{size}{pages})"
             )
             print(
                 f"{DIM}             compare size/pages and quality before judging.{RESET}"

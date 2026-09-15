@@ -1,3 +1,10 @@
+"""The curses TUI: the menu over the CLI's read modes and write ops.
+
+Rendering goes through vir_tui's primitives (``tui_select``,
+``run_with_capture``); writes call writeops' ``op_*`` executors, and
+a database that goes away mid-session degrades to the re-prompt, not
+a traceback."""
+
 import os
 import sqlite3
 import sys

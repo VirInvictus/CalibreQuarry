@@ -94,9 +94,7 @@ def write_catalog(
     # The output guard refuses the database itself (the sweep's P0) and
     # stages through a temp file, so a failed catalog never truncates.
     with open_output(output, db.db_path) as (f, out_path):
-        header = (
-            f"Calibre Library Export \u2014 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        )
+        header = f"Calibre Library Export: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         if wing:
             header += f" [{wing}]"
         if scope_note:
@@ -105,7 +103,7 @@ def write_catalog(
         # catalog can always be traced back to its source library (cquarry 1.3).
         lib_uuid = db.get_library_uuid()
         if lib_uuid:
-            header += f" — library {lib_uuid}"
+            header += f" (library {lib_uuid})"
         if md:
             f.write(f"# {header}\n\n")
         else:

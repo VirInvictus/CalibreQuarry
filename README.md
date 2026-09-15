@@ -17,7 +17,7 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 > **Architecture Note:** CalibreQuarry acts as the frontend interface for the [cquarry](https://github.com/VirInvictus/cquarry) shared library. The database connection logic and the Calibre search grammar engine were extracted into the `cquarry` package so that other tools in the ecosystem (like Hermitage and Carrel-calibre-web) can guarantee identical behavior and query resolution.
 
-Reads `metadata.db` directly — no `calibredb` dependency, no JSON intermediaries.
+Reads `metadata.db` directly: no `calibredb` dependency, no JSON intermediaries.
 
 
 > **Note:** The core read/search surface is mature and stable, and is known to be fully functional on the primary development environment: **Fedora Linux 44 (Workstation Edition)**, using **Calibre 9.8** on **Python 3.14**. While it is pure Python and should be cross-platform, this specific setup is the only officially tested environment. Development is active again around the cquarry ecosystem (write verbs, batch curation, the pre-import screen); `roadmap.md` carries the current phases.
@@ -63,7 +63,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Write verbs, expanded** | `--add-tag` / `--remove-tag`, `--set-identifier` / `--clear-identifier`, `--set-series` (+ `--series-index`) / `--clear-series`, `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages`, `--add-format` / `--remove-format`, `--set-cover` | Full coverage of cquarry ≥1.5's write module: tags (orphaned rows pruned), identifier EAV upserts, series assignment with index, publisher, language lists (canonicalized `English` → `eng`), format registration/removal, and the has-cover flag. All queue OPF regeneration via `metadata_dirtied` |
 | **Run verbs (Phase 17)** | `run phase1 DIR`, `run sign --manifest F`, `run phase2 --manifest F --backup-dir D`, `run phase3 --manifest F [--answer-file A]` | The acquisition pathway as commands: phase 1 vets a downloads directory into an `acquisition-manifest/1` manifest (duplicate screen, DRM audit, PDF/DJVU battery via `scripts/check_pdf.py`, bindery's EPUB slice; filename-derived stamps and provenance seeds for the review to correct); `run sign` seals the reviewed manifest (an HMAC over the approved set, the stamps, the provenance, the lossy flags, and the decisions; any later edit refuses to load until re-signed); phase 1 is dry against book files unless `--stamp`/`--apply-lossy`/`--quarantine` are passed (quarantine moves true DRM hits only); phase 2 imports the SIGNED, SEALED manifest as one transaction (`add_book`, `#source`/`#audience` stamped, tags+rating cleared on the imported ids, timestamped backups, metadata downloads whose failures become decisions, resumable); phase 3 refuses a live Calibre and banned answer-file columns like every other write path, and its mechanical-pass trouble fails the verb |
 | **Set writes** | `--ids` / `--from-search` / `--from-untagged` / `--from-manifest` + `--batch-*` verbs, `--apply`, `--backup-dir`, `--format json` | One target set, many verbs, one transaction (Phase 16). Dry-run by default; `--apply` demands a closed Calibre and a backup of `metadata.db` outside the library directory, then commits as ONE `batch()` pass (all-or-nothing; `--commit-per-book` for very large sets). `--commit-per-book` really commits one transaction per book (a failing book rolls back alone; the report and JSON say which). `--batch-clear-rating` is legal ONLY against a valid, sealed batch manifest, and only for ids it imported (the bulk-ratings ban, mechanically enforced); empty-string values are refused; `#reading_status`/`status`/`date_read` are refused by name at every door; reporting counts applied / already-so / failed per verb, with a machine-readable JSON report that names the resolved ids |
-| **Book detail** | `--book BOOK_ID[,BOOK_ID...]`, `--book --untagged` | Full dossier for one book or a comma-separated list: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; publication date shown alongside the timestamps. `--book --untagged` (no ids) selects every untagged book — the phase-3 curation entry state — via cquarry's `find_untagged()` |
+| **Book detail** | `--book BOOK_ID[,BOOK_ID...]`, `--book --untagged` | Full dossier for one book or a comma-separated list: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; publication date shown alongside the timestamps. `--book --untagged` (no ids) selects every untagged book (the phase-3 curation entry state) via cquarry's `find_untagged()` |
 | **Entities** | `--entities KIND` | List `authors`/`series`/`publishers`/`tags`/`languages`/`ratings` with book counts; authors/series/publishers carry their sort and link columns |
 | **Reading progress** | `--reading-progress` | Every recorded reading position across devices with progress bars, newest first |
 | **Custom columns** | `--columns` | Custom-column schema: label, search location, datatype, editability, enum values |
@@ -226,7 +226,7 @@ cquarry --all-saved-searches --outdir ~/docs/catalogs --db ~/Calibre/metadata.db
 # Export full library to JSON (or CSV, or an AI-readable flat format)
 cquarry --export --db ~/Calibre/metadata.db --format json --output library.json
 
-# Search with a Calibre expression — prints to the terminal by default
+# Search with a Calibre expression; prints to the terminal by default
 cquarry --search 'series:Mistborn and rating:>=4' --db ~/Calibre/metadata.db
 
 # Same search as JSON, written to a file
@@ -329,7 +329,7 @@ This exports `librarything_main.csv` and `librarything_read.csv` (split into chu
 ### Catalog (`--catalog`)
 
 ```
-Calibre Library Export — 2026-03-27 19:38 [The Tabletop]
+Calibre Library Export: 2026-03-27 19:38 [The Tabletop]
 ========================================================
 
 [Avery Alder]
@@ -421,7 +421,7 @@ Custom columns are referred to by **two different names**, which is easy to trip
 
 | Where | Which name | Example |
 |-------|-----------|---------|
-| `--show-custom` | the column's **display name** (what you see in Calibre) or its `#label` — both resolve since cquarry 1.9 | `--show-custom "Status"` or `--show-custom "#reading_status"` |
+| `--show-custom` | the column's **display name** (what you see in Calibre) or its `#label`; both resolve since cquarry 1.9 | `--show-custom "Status"` or `--show-custom "#reading_status"` |
 | `--search` (the `#` prefix) | the column's **lookup name** (label), prefixed with `#` | `--search '#reading_status:Read'` |
 
 These two names are often different (display "Status", lookup `reading_status`). In Calibre, the lookup name is the one shown in *Preferences → Add your own columns* under "Lookup name"; the `#` search prefix always uses that one. Since cquarry 1.9 the two are bridged: `--show-custom` resolves the display name, the bare label, or the `#label` form (an exact display name wins if a bare key is ambiguous), and a "not found" error lists every column as `name (#label)`.
@@ -473,7 +473,7 @@ Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same co
 
 **The shell mangles my query.** Wrap the whole expression in single quotes and use double quotes inside: `cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'`. Without single quotes, your shell treats `OR`/`AND`/parentheses as separate arguments.
 
-**"Custom column not found" (`--show-custom`).** Any of the three forms works since cquarry 1.9 — display name (`Status`), bare label (`reading_status`), or `#label` (`#reading_status`) — and the error lists every column as `name (#label)`. The `#` search grammar has always spoken `#label`. See [Custom columns](#custom-columns).
+**"Custom column not found" (`--show-custom`).** Any of the three forms works since cquarry 1.9 (display name `Status`, bare label `reading_status`, or `#label` `#reading_status`), and the error lists every column as `name (#label)`. The `#` search grammar has always spoken `#label`. See [Custom columns](#custom-columns).
 
 **A `#custom` search matches too many rows.** Custom searches are substring matches, so `#reading_status:Read` also catches `Reading` and `To Read`. Use `=` for an exact value: `#reading_status:=Read`.
 
@@ -483,11 +483,11 @@ Run them with `PYTHONPATH=src python -m unittest discover -s tests` (the same co
 
 ## How it reads the database
 
-CalibreQuarry (cquarry-cli) opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, `identifiers`, `comments`, and `preferences`. Custom columns are not required, but are read on demand for `--show-custom` and `#column` searches.
+CalibreQuarry opens `metadata.db` in read-only mode (`?mode=ro`). It never writes to the database. All data comes from standard Calibre tables: `books`, `authors`, `tags`, `series`, `ratings`, `data`, `publishers`, `languages`, `identifiers`, `comments`, and `preferences`. Custom columns are not required, but are read on demand for `--show-custom` and `#column` searches.
 
-If Calibre is running and holds a lock on the database, CalibreQuarry (cquarry-cli) copies it (along with any WAL/SHM journal files) to a temporary snapshot and reads from that. A notice is printed to stderr; the temp files are cleaned up on exit.
+If Calibre is running and holds a lock on the database, CalibreQuarry copies it (along with any WAL/SHM journal files) to a temporary snapshot and reads from that. A notice is printed to stderr; the temp files are cleaned up on exit.
 
-Calibre stores ratings on a 0–10 scale internally (where 10 = 5 stars). CalibreQuarry (cquarry-cli) converts to the standard 0-5 star display automatically.
+Calibre stores ratings on a 0–10 scale internally (where 10 = 5 stars). CalibreQuarry converts to the standard 0-5 star display automatically.
 
 ## Replacing shell-based catalog pipelines
 
@@ -682,12 +682,12 @@ write verbs (Calibre must be closed):
   --clear-publisher BOOK_ID
                         Remove the publisher
   --set-languages BOOK_ID LANGS
-                        Replace languages ("en, fr" — English names or ISO
+                        Replace languages ("en, fr"; English names or ISO
                         codes)
   --clear-languages BOOK_ID
                         Remove all languages from the book
   --add-format BOOK_ID FORMAT NAME SIZE
-                        Register a format row (metadata only — the file must
+                        Register a format row (metadata only; the file must
                         already sit in the book's folder as NAME.format)
   --remove-format BOOK_ID FORMAT
                         Drop a format row (leaves the file on disk untouched)
@@ -777,7 +777,7 @@ set writes (dry-run by default; --apply requires --backup-dir and Calibre closed
 
 The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are stdlib-only Python (plus tqdm for progress bars); some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
 
-### `compress_pdf.py` — shrink oversize PDFs (writes)
+### `compress_pdf.py`: shrink oversize PDFs (writes)
 
 Re-encodes a bloated PDF (think 1 GB TTRPG sourcebooks) through Ghostscript with a quality preset, but only after verifying the result: it aborts if the page count changes or the output isn't smaller, and it keeps the original as `<name>.pre-compress.pdf`. If the file lives in a Calibre library, it syncs the new size back to the database (core `data.uncompressed_size`, plus the Count Pages plugin's `books_pages_link.format_size` if present) so Calibre doesn't see a stale size. A busy or locked database is handled gracefully: the PDF is still replaced and you are told to re-run with Calibre closed.
 
@@ -795,11 +795,11 @@ python3 scripts/compress_pdf.py book.pdf --out-dir ~/out # write a copy elsewher
 
 Exit codes: `0` compressed/verified (or clean inspect), `1` aborted (no shrink, page-count mismatch), `2` setup error (Ghostscript missing, unreadable file).
 
-### `audit_drm.py` — flag DRM-locked files across every format (read-only)
+### `audit_drm.py`: flag DRM-locked files across every format (read-only)
 
 Scans ebook files for DRM, which the metadata and structural audits never inspect. A DRM-locked file can pass `epubcheck`, report its page count, and even import, yet silently refuse to let its embedded metadata be rewritten (the case that prompted this tool was a PDF carrying a residual Adobe ADEPT `EBX_HANDLER` dictionary that `qpdf` and `pdfinfo` both called "not encrypted" while `exiftool` choked on it).
 
-The hard part is not detecting encryption; it is not crying wolf. Two benign things look like DRM to a crude check and are explicitly cleared:
+Detection is deliberately conservative: two benign things look like DRM to a crude check and are explicitly cleared.
 
 - **font obfuscation**: an EPUB may carry `META-INF/encryption.xml` that scrambles only its embedded fonts (the IDPF or Adobe font-mangling algorithms). That is not DRM. Obfuscated fonts are sometimes named `fonts/00001.dat` with no font extension, so an entry is cleared when it uses a font-scrambling algorithm *or* targets a font resource.
 - **permission flags**: a PDF may be "encrypted" with the Standard handler and an empty user password: it opens with no password and is only flagged against printing/copying. That is not a lock.
@@ -814,7 +814,7 @@ python3 audit_drm.py --csv drm.csv    # also write a CSV audit (id,status,kind,d
 
 Exit codes: `0` clean (no DRM; font obfuscation and permission flags are not DRM), `1` DRM found or a scan error, `2` setup error.
 
-### `audit_isbns.py` — check stored ISBNs against the books themselves (read-only)
+### `audit_isbns.py`: check stored ISBNs against the books themselves (read-only)
 
 Every other audit here asks whether the catalogue is internally consistent. This one asks what nothing in the Calibre ecosystem asks: does the ISBN recorded against a book actually identify *that* book? Calibre downloads metadata but never re-examines what it stored, so a wrong ISBN is invisible forever, and it matters because an ISBN is what other systems key on. Hand a catalogue to a library service and the ISBN, not the title, decides which book you get.
 
@@ -826,7 +826,7 @@ For books no bibliographic database has heard of (small-press RPGs, indie ebooks
 
 The hard part is not finding printed ISBNs; it is not crying wolf. Three benign things look like a mismatch and are classified apart:
 
-- **citations**: books quote other books' ISBNs constantly, and one citation is indistinguishable from a self-identification if you only count numbers. *The Atrocity Archives* names *The New Hacker's Dictionary*'s ISBN in a glossary entry; *Metamagical Themas* lists one among Hofstadter's self-referential joke titles; *C++ Primer Plus* advertises six other Sams books. So a number counts as the book's own only when copyright-page furniture sits near it (a copyright line, a rights reservation, a binding, a printing statement, a CIP block) — positive evidence, rather than an attempt to enumerate every way a citation can look. This gates only the *negative* direction: a book printing the same ISBN you store is conclusive regardless of context, since a citation coinciding with your own stored value does not happen.
+- **citations**: books quote other books' ISBNs constantly, and one citation is indistinguishable from a self-identification if you only count numbers. *The Atrocity Archives* names *The New Hacker's Dictionary*'s ISBN in a glossary entry; *Metamagical Themas* lists one among Hofstadter's self-referential joke titles; *C++ Primer Plus* advertises six other Sams books. So a number counts as the book's own only when copyright-page furniture sits near it (a copyright line, a rights reservation, a binding, a printing statement, a CIP block): positive evidence, rather than an attempt to enumerate every way a citation can look. This gates only the *negative* direction: a book printing the same ISBN you store is conclusive regardless of context, since a citation coinciding with your own stored value does not happen.
 - **bibliographies**: a book that cites other books prints their ISBNs (*The Art of UNIX Programming* prints 49). Above `--max-printed` distinct ISBNs a file is read as a citing work and its numbers are not treated as evidence about itself.
 - **bundles and series**: a boxed set prints each component's ISBN and a series volume may print its siblings'. Several printed ISBNs with no match is reported `AMBIGUOUS`; a human picks, the tool does not guess.
 - **format variants**: print and ebook editions differ only in the last digits. When the printed and stored numbers share a registrant prefix the finding is `VARIANT` (same publisher, probably another binding) rather than `MISMATCH` (a different publisher block, where a genuinely wrong ISBN sits).
@@ -880,13 +880,13 @@ python3 scripts/audit_cover_aspect.py . --low 0.45 --high 0.95 --quiet
 
 Exit codes: `0` all inside the bands, `1` findings (advisory), `2` setup error.
 
-### `validate_metadata.py` — lint database integrity (read-only)
+### `validate_metadata.py`: lint database integrity (read-only)
 
 A linter for `metadata.db` with two layers. It is the database-side companion to `audit_drm.py`, and it is strictly `mode=ro`.
 
 **Integrity layer (always on, zero config).** Taxonomy-agnostic, schema-level problems the UI and `--audit` leave alone: books with no language, one ISBN attached to two books, placeholder (`0101-01-01`) or unparseable publication dates, junk identifier types (`url`, `uri`, `guid`, `isbn13`, ...), an ISBN-10 misfiled under `amazon`/`mobi-asin` (checksum-verified, so genuine ASINs are left alone), and custom-column link rows orphaned by deleted books. Safe to point at any library; needs no configuration.
 
-**Opinionated layer (on when a taxonomy is loaded).** A `taxonomy.json` describes your tag tree, publisher consolidations, and identifier vocabulary, and these checks enforce it: every tag in use must be declared (`TAG_IN_SPEC`), alias publishers must be merged into their canonical (`PUBLISHER_NOT_CONSOLIDATED`), and fiction should not be PDF-only (`FORMAT_FICTION_PDF`). Loading a taxonomy also makes the identifier-type vocabulary authoritative (the `--strict` behavior turns on automatically). A comprehensive, ready-to-adapt template ships as **`scripts/taxonomy.example.json`** (three roots — `Fic` / `NonFic` / `Gaming` — with a deep, single-tag-per-book hierarchy; a branch is a valid tag on its own only when its `bare_allowed` is `true`). A fuller real-world reference in YAML, **`docs/taxonomy.example.yaml`**, is also included; it is the richer schema used by a separate library-side linter and is provided for reference (the stdlib tools here read the JSON form).
+**Opinionated layer (on when a taxonomy is loaded).** A `taxonomy.json` describes your tag tree, publisher consolidations, and identifier vocabulary, and these checks enforce it: every tag in use must be declared (`TAG_IN_SPEC`), alias publishers must be merged into their canonical (`PUBLISHER_NOT_CONSOLIDATED`), and fiction should not be PDF-only (`FORMAT_FICTION_PDF`). Loading a taxonomy also makes the identifier-type vocabulary authoritative (the `--strict` behavior turns on automatically). A comprehensive, ready-to-adapt template ships as **`scripts/taxonomy.example.json`** (three roots: `Fic` / `NonFic` / `Gaming`, with a deep, single-tag-per-book hierarchy; a branch is a valid tag on its own only when its `bare_allowed` is `true`). A fuller real-world reference in YAML, **`docs/taxonomy.example.yaml`**, is also included; it is the richer schema used by a separate library-side linter and is provided for reference (the stdlib tools here read the JSON form).
 
 Errors are bad data Calibre or tooling can trip on; warnings are hygiene.
 
@@ -976,7 +976,7 @@ The same check also renders inside `cquarry --audit` (the
 shared `get_conversion_profiles`; this script remains the standalone,
 pipeable form.
 
-### `reconcile_file_metadata.py` — sync DB metadata into book files (writes with `--apply`)
+### `reconcile_file_metadata.py`: sync DB metadata into book files (writes with `--apply`)
 
 Calibre's `metadata.db` is where you curate titles, authors, series, tags, publishers, dates, identifiers, and blurbs; the copy embedded *inside* each EPUB/MOBI/AZW3/PDF/DJVU is what travels with the book when it leaves the library. Those drift apart whenever you edit metadata in Calibre without re-exporting the file. This script finds that drift and, with `--apply`, closes it. The flow is always database to file; it never reads file metadata back into the database.
 
@@ -1011,7 +1011,7 @@ Run again with --apply to embed the database metadata into the drifted files.
 
 Exit codes: `0` no drift (or `--apply` finished cleanly), `1` drift found (dry run) or an apply/embed step failed, `2` setup error (no `metadata.db`, or a missing external tool).
 
-### `fetch_library_codes.py` — derive LCC/DDC codes from the Library of Congress (writes with `--apply`)
+### `fetch_library_codes.py`: derive LCC/DDC codes from the Library of Congress (writes with `--apply`)
 
 Fills in Library of Congress Classification (and optionally Dewey) codes for books that already carry an ISBN, by querying the Library of Congress SRU catalogue at `lx2.loc.gov:210` and storing what comes back as Calibre identifiers (`lcc`, and with `--write-ddc` also `ddc`). Storing them as identifiers rather than as a column value keeps one canonical home for the data: a composite custom column with the template `{identifiers:select(lcc)}` displays the value without a second copy, and `reconcile_file_metadata.py` carries identifiers into embedded file metadata.
 
@@ -1029,7 +1029,7 @@ python3 scripts/fetch_library_codes.py --apply --write-ddc   # also store ddc
 python3 scripts/fetch_library_codes.py --apply --all-codes   # one pass, both codes
 ```
 
-Books that already have the requested code are skipped unless you pass `--refresh`, so the tool is naturally incremental: run it again after an import and it only queries the new books (`--all-codes` selects books missing *either* code). LCC and DDC arrive in the same SRU response, so `--all-codes` stores both in one pass and the old two-pass dance (an LCC `--apply`, then a `--apply --write-ddc` behind it) is retired — two concurrent writers on `metadata.db` were exactly the lock-contention incident that motivated it. `--apply` backs up `metadata.db` to the sibling `.backups` directory first and refuses to run while Calibre is open; the write itself goes through cquarry's `WritableCalibreDB` (so touched books land in the `metadata_dirtied` OPF-resync queue and `last_modified` moves) with retry/backoff over a busy database. Every book that ends the pass without an LCC is written to the misses worklist (`--misses-file`, default `fetch_library_codes_misses.txt` in the current directory) as `id<TAB>isbn<TAB>ddc<TAB>title`, so the manual-research pass starts from a file instead of terminal scrollback. Sample output:
+Books that already have the requested code are skipped unless you pass `--refresh`, so the tool is naturally incremental: run it again after an import and it only queries the new books (`--all-codes` selects books missing *either* code). LCC and DDC arrive in the same SRU response, so `--all-codes` stores both in one pass and the old two-pass dance (an LCC `--apply`, then a `--apply --write-ddc` behind it) is retired: two concurrent writers on `metadata.db` were exactly the lock-contention incident that motivated it. `--apply` backs up `metadata.db` to the sibling `.backups` directory first and refuses to run while Calibre is open; the write itself goes through cquarry's `WritableCalibreDB` (so touched books land in the `metadata_dirtied` OPF-resync queue and `last_modified` moves) with retry/backoff over a busy database. Every book that ends the pass without an LCC is written to the misses worklist (`--misses-file`, default `fetch_library_codes_misses.txt` in the current directory) as `id<TAB>isbn<TAB>ddc<TAB>title`, so the manual-research pass starts from a file instead of terminal scrollback. Sample output:
 
 ```
 DRY RUN: 12 book(s) with an ISBN and no LCC
@@ -1048,7 +1048,7 @@ hit rate by tag branch:
 
 Exit codes: `0` completed, `1` aborted after repeated network failure or a write error, `2` setup error (no `metadata.db`, Calibre running under `--apply`, or bad arguments).
 
-### `spot_check.py` — randomized quality audit, with a judgement mode (read-only)
+### `spot_check.py`: randomized quality audit, with a judgement mode (read-only)
 
 Samples N random books and checks what pattern sweeps miss: metadata field quality (title corruption, junk author entries, mojibake, stub descriptions) and the actual file contents (EPUB archive integrity, spine completeness, text volume; PDF header and page count; DJVU page count). Random sampling is the point. Every record has equal odds of inspection, so the result estimates whole-library quality instead of re-confirming whatever curation already looked at. The exit code is the number of books with hard failures.
 
@@ -1078,7 +1078,7 @@ Exit codes: `0` clean, N = number of books with hard failures (capped at 99), `1
 
 ## Support
 
-If CalibreQuarry (cquarry-cli)'s useful to you and you'd like to chip in:
+If CalibreQuarry is useful to you and you'd like to chip in:
 
 - liberapay · [liberapay.com/bdkl](https://liberapay.com/bdkl/)
 - bitcoin

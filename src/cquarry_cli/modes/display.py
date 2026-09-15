@@ -171,5 +171,5 @@ def show_reading_progress(db: CalibreDB, *, quiet: bool = False) -> None:
             when = f"[{epoch}?] " if epoch else ""
         who = row.get("device") or row.get("user") or "?"
         fmt = row.get("format") or "?"
-        name = f"{author} — {title}" if author else title
+        name = f"{author}: {title}" if author else title
         print(f"  {when}{pct} |{bar:<20}| {name}  ({who}, {fmt})")

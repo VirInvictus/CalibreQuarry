@@ -31,11 +31,13 @@ the issues column):
 - ``failed_folder``: a directory that raised on scan (permissions), so
   the silence of the other classes stays trustworthy.
 
-False-positive tolerances, on purpose: ``metadata.opf``, any ``*.opf``
-(Calibre's legacy per-book metadata habit), ``cover.jpg/jpeg/png``,
-and the ``data/`` directory are never extras; on-disk name comparison
+False-positive tolerances, on purpose: ``metadata.opf`` and any
+``*.opf`` (Calibre's legacy per-book metadata habit) are never extras,
+and the ``data/`` directory is exempt wholesale; on-disk name comparison
 is case-insensitive, so an extension cased differently from the data
-row is not reported as a missing-plus-extra pair. At the library root,
+row is not reported as a missing-plus-extra pair. A stray ``cover``
+image is an ``extra_cover_file`` finding only for a book whose
+``has_cover`` flag is false. At the library root,
 dot-entries and the workspace doc/tool set (``_ROOT_WORKSPACE``: the
 README/CLAUDE/roadmap family, the taxonomy files, validate_library.py)
 are never reported -- a library that doubles as a working checkout
