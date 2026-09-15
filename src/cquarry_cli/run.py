@@ -698,8 +698,12 @@ def run_phase2(
         )
         return 2
     if calibre_running():
+        # Lock-class refusal (exit 1, like setwrite and integrate): the
+        # door used to exit 2 here while set mode exited 1, and scripts
+        # branch on the split. Usage problems exit 2; an open Calibre is
+        # not a usage problem.
         print("ERROR: Calibre is running; close it before phase 2.", file=sys.stderr)
-        return 2
+        return 1
     if not backup_dir:
         print(
             "ERROR: phase 2 requires --backup-dir (outside the library).",
@@ -917,8 +921,10 @@ def run_phase3(
     # live Calibre. It sits before the answer gates so a refused run
     # never prompts.
     if calibre_running():
+        # Lock-class refusal (exit 1), matching phase 2, setwrite, and
+        # integrate.
         print("ERROR: Calibre is running; close it before phase 3.", file=sys.stderr)
-        return 2
+        return 1
 
     if answer_file:
         try:

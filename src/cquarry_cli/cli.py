@@ -1131,10 +1131,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.export:
                 fmt = args.format or "json"
                 output = args.output or f"library.{fmt}"
-                run_export(
+                return run_export(
                     db, output, fmt, show_custom=args.show_custom, quiet=args.quiet
                 )
-                return 0
 
             if args.search is not None:
                 # No --output: stream to stdout. --format selects a structured
@@ -1236,6 +1235,7 @@ def main(argv: list[str] | None = None) -> int:
                     plugin_data=args.plugin_data,
                     author_details=args.show_author_details,
                     quiet=args.quiet,
+                    fmt=args.format,
                 )
 
             parser.print_help()

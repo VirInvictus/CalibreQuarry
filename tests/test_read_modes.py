@@ -328,6 +328,68 @@ class TestReadSurfaceExitCodes(_TempDBCase):
             rc = main(["--catalog", "--wing", "NoSuchWing", "--db", self.db_path])
         self.assertEqual(rc, 2)
 
+    def test_unknown_export_format_exits_two(self):
+        # md is a legal --format for catalogs (3.42.0), but --export only
+        # serializes json/csv/ai. The refusal used to print "Unknown
+        # format" and exit 0, reporting success while writing nothing.
+        out = self.db_path + ".export.json"
+        rc, _, err = self._capture(
+            main,
+            ["--export", "--format", "md", "--output", out, "--db", self.db_path],
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("Unknown format", err)
+        self.assertFalse(os.path.exists(out))
+
+    def test_bad_show_custom_exits_one(self):
+        # The sibling silent exit-0: an unknown column was reported and
+        # then discarded with a success code (run_search_export's shape).
+        out = self.db_path + ".export.json"
+        rc, _, err = self._capture(
+            main,
+            [
+                "--export",
+                "--show-custom",
+                "#nope",
+                "--output",
+                out,
+                "--db",
+                self.db_path,
+            ],
+        )
+        self.assertEqual(rc, 1)
+        self.assertFalse(os.path.exists(out))
+
+    def test_implicit_wing_catalog_honors_format_md(self):
+        # The no-mode fallback used to call write_catalog without fmt, so
+        # `--wing W --format md` silently rendered plain text while the
+        # documented `--catalog --wing W --format md` rendered Markdown.
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "INSERT INTO preferences (key,val) VALUES ('virtual_libraries',?)",
+            (json.dumps({"Wing": "tags:Fic.SciFi"}),),
+        )
+        con.commit()
+        con.close()
+        out = self.db_path + ".wing.md"
+        self.addCleanup(lambda: os.path.exists(out) and os.unlink(out))
+        rc, _, _ = self._capture(
+            main,
+            [
+                "--wing",
+                "Wing",
+                "--format",
+                "md",
+                "--output",
+                out,
+                "--db",
+                self.db_path,
+            ],
+        )
+        self.assertEqual(rc, 0)
+        with open(out, encoding="utf-8") as f:
+            self.assertEqual(f.read(2), "# ")
+
     def test_exportlt_self_check_fails_the_verb(self):
         with mock.patch(
             "cquarry_cli.cli.run_librarything_export", return_value=1

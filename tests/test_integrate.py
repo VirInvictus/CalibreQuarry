@@ -736,6 +736,42 @@ class TestCalibreGuard(unittest.TestCase):
             self.assertTrue(integrate._calibre_running())
 
 
+class TestDispatchDiscipline(_IntegrateCase):
+    """3.43.0: usage guards run BEFORE the library resolves (dispatch_run's
+    rule), and the Calibre-running refusal is lock-class exit 1 everywhere
+    (the five run/integrate doors used to exit 2 while setwrite exited 1)."""
+
+    def test_missing_target_is_usage_even_when_the_library_is_missing(self):
+        code, _, err = self.run_cli(
+            "run",
+            "convert",
+            "--to",
+            "EPUB",
+            "--db",
+            str(self.tmpdir / "nope" / "metadata.db"),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("--search EXPR or --ids", err)
+
+    def test_calibre_running_refusal_is_exit_one(self):
+        with mock.patch("cquarry_cli.integrate._calibre_running", return_value=True):
+            code, _, err = self.run_cli(
+                "run",
+                "convert",
+                "--to",
+                "EPUB",
+                "--ids",
+                "1",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("Calibre is running", err)
+
+
 class TestFlushIdTargets(unittest.TestCase):
     """3.41.0 regression: embed_metadata gets SPACE-SEPARATED ids. The
     old cut joined a chunk's distinct ids into one hyphen range

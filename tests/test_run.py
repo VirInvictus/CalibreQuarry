@@ -779,7 +779,10 @@ class TestRunPhase2(RunCase):
             rc = run_phase2(
                 signed, self.db_path, backup_dir=os.path.join(self.temp_dir, "b")
             )
-        self.assertEqual(rc, 2)
+        # Lock-class refusal (exit 1): the run doors used to exit 2 here
+        # while set mode exited 1; unified to the recorded discipline
+        # (usage problems exit 2, an open Calibre is not a usage problem).
+        self.assertEqual(rc, 1)
         with mock.patch("cquarry_cli.run.calibre_running", return_value=False):
             rc = run_phase2(signed, self.db_path, backup_dir=None)
         self.assertEqual(rc, 2)
@@ -1310,7 +1313,8 @@ class TestRunPhase3(RunCase):
             mock.patch("cquarry_cli.run._run") as run_mock,
         ):
             rc = run_phase3(man_path, self.db_path, answer_file=answers)
-        self.assertEqual(rc, 2)
+        # Lock-class refusal (exit 1), unified with phase 2/setwrite.
+        self.assertEqual(rc, 1)
         run_mock.assert_not_called()  # nothing mechanical, nothing written
         con = sqlite3.connect(self.db_path)
         untagged = con.execute(

@@ -759,13 +759,15 @@ def dispatch_integrate(args) -> int:
     from cquarry_cli.cli import find_db
     from cquarry.db import CalibreDB
 
-    db_path = find_db(getattr(args, "db", None))
     apply = bool(getattr(args, "apply", False))
     verbs_need_targets = {"convert", "polish", "cover", "export", "backfill"}
     # backfill mutates metadata.db at --apply too (matrix-C finding:
     # it was the one write verb escaping the backup requirement).
     needs_backup = {"convert", "polish", "cover", "merge", "flush", "backfill"}
 
+    # Usage guards BEFORE find_db (dispatch_run's rule): a missing --ids
+    # is a usage error (exit 2) however resolvable the library is, and a
+    # missing library must not turn it into an environment exit 1.
     if args.phase in verbs_need_targets and not (
         getattr(args, "search", None) or getattr(args, "ids", None)
     ):
@@ -774,12 +776,17 @@ def dispatch_integrate(args) -> int:
     if args.phase == "merge" and not (args.keeper and args.duplicate):
         print("ERROR: run merge needs --keeper ID and --duplicate ID.", file=sys.stderr)
         return 2
+
+    db_path = find_db(getattr(args, "db", None))
     if apply:
         if _calibre_running():
+            # Lock-class refusal (exit 1), the shape setwrite and the
+            # phase-2/3 doors follow: usage problems exit 2, an open
+            # Calibre is an environment condition, not a usage problem.
             print(
                 "ERROR: Calibre is running; close it before --apply.", file=sys.stderr
             )
-            return 2
+            return 1
         if args.phase in needs_backup and not getattr(args, "backup_dir", None):
             print(
                 f"ERROR: run {args.phase} --apply requires --backup-dir "

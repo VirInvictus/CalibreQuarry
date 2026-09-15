@@ -179,16 +179,16 @@ def run_export(
     show_custom: str | None = None,
     author_details: bool = False,
     quiet: bool = False,
-) -> None:
+) -> int:
     """Export full library to JSON, CSV, or AI-readable format."""
     books = db.get_all_books()
     custom_data = _load_custom(db, show_custom)
     if custom_data is None:
-        return
+        return 1
 
     if fmt not in ("json", "csv", "ai"):
         print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
-        return
+        return 2
 
     with open_output(output, db.db_path) as (stream, out_path):
         _serialize(books, stream, fmt, custom_data, show_custom, author_details)
@@ -199,6 +199,7 @@ def run_export(
             f"Exported {len(books)} books to: {dest}",
             file=sys.stdout if out_path else sys.stderr,
         )
+    return 0
 
 
 def run_search_export(
@@ -211,7 +212,7 @@ def run_search_export(
     plugin_data: str | None = None,
     author_details: bool = False,
     quiet: bool = False,
-) -> None:
+) -> int:
     """Evaluate a search query and write matching books.
 
     Writes to ``output`` if given, otherwise to stdout. With ``fmt`` (json/csv/
@@ -225,8 +226,9 @@ def run_search_export(
     try:
         matching_ids = db.search(query)
     except ParseException as e:
-        # The parse failure is the one failure this mode can have; it
-        # exits 1 like everywhere else, never a silent 0.
+        # A parse failure exits 1 like everywhere else, never a silent 0
+        # (an unknown --format exits 2 and a bad --show-custom exits 1:
+        # usage versus load, same split run_export follows).
         print(f"ERROR: could not parse the search query: {e}", file=sys.stderr)
         return 1
 
