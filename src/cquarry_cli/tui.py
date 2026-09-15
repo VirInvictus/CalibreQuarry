@@ -172,7 +172,10 @@ def _restricted(db: CalibreDB) -> CalibreDB:
     restriction in the CLI: blank keeps the whole library; an expression
     resolves once through the CLI's RestrictedView. A parse failure
     notifies and stays unrestricted (the CLI exits 1; the menu session
-    has nowhere to exit to)."""
+    has nowhere to exit to). The notice goes through _notify, not a bare
+    print: every caller resets the terminal right after this returns, and
+    the reset erased the note before it could be read, so a typo'd scope
+    ran the mode UNRESTRICTED silently."""
     expr = ask("Restrict to a search expression (blank = whole library)", "")
     if not expr.strip():
         return db
@@ -183,7 +186,7 @@ def _restricted(db: CalibreDB) -> CalibreDB:
     try:
         return RestrictedView(db, set(db.search(expr)))
     except (ParseException, ValueError) as e:
-        print(f"Could not parse the expression ({e}); using the whole library.")
+        _notify(f"Could not parse the expression ({e}); using the whole library.")
         return db
 
 

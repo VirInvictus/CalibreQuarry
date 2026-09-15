@@ -212,11 +212,15 @@ class TestRestrictedPrompt(unittest.TestCase):
         self.assertEqual(view.restrict_ids, frozenset({1}))
         self.assertIs(view.origin, self.db)
 
-    def test_a_parse_failure_stays_unrestricted(self):
+    def test_a_parse_failure_notifies_through_the_blocking_notice(self):
+        # The note used to be a bare print, which the caller's following
+        # reset_terminal() erased before it could be read: a typo'd scope
+        # ran the mode UNRESTRICTED silently. _notify blocks on Enter, so
+        # the notice survives the reset.
         with (
             mock.patch.object(tui, "ask", return_value="((nope"),
-            mock.patch.object(tui, "print") as print_mock,
+            mock.patch.object(tui, "_notify") as notify_mock,
         ):
             view = tui._restricted(self.db)
         self.assertIs(view, self.db)
-        self.assertTrue(print_mock.called)
+        self.assertTrue(notify_mock.called)
