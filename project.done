@@ -1,0 +1,56 @@
+# project.done
+
+Completed: 2026-09-15 (THE FINAL BLITZ lane, commits 3b6ca9a..HEAD of the
+blitz range; releases v3.43.0, v3.44.0, v3.45.0 on PyPI, plus cquarry
+v1.22.0 shipped upstream under cross-repo grant #117).
+
+## What shipped
+
+- 3.43.0, the record-integrity batch: the phase-1 manifest filename is
+  unique per batch (the final audit's HIGH), provenance seeds `Z-Lib`
+  (the renamed enum value), bindery's gate-accepted EPUB repairs mirror
+  into the sealed lossy records, the Calibre-running refusal is
+  lock-class exit 1 everywhere, `--export` propagates its refusals,
+  the TUI scope-typo notice survives the terminal reset, and
+  `--restrict ... --tags` obeys the universe (with the audit's L2.2
+  ratings-key claim recorded as a misdiagnosis and the correct key
+  pinned by a test).
+- cquarry 1.22.0 (upstream, #117): `CalibreDB.precedent_tags()` (the
+  promoted 4-table JOIN) plus the publish-path hardening; CalibreQuarry
+  3.44.0 consumed it and bumped the floor.
+- 3.44.0, the truth-and-hardening batch: the frontend's last
+  unrecorded raw-SQL reads retired, the seven lying headers/comments
+  truthed, the publish path SHA-pinned and least-privileged (with a
+  tag-protection ruleset and actions-only dependabot), the spec floor
+  collapsed to floor-plus-bumps, the README test section says 559
+  tests/27 files (from 373), and the version-sync test now guards the
+  spec header, the spec floor, and the roadmap stamp.
+- 3.45.0, the gated features + cleanup: `--rename-entity`,
+  `--set-author-sort`, `--set-title-sort`, the `--trash` listing and
+  `run trash --empty|--expire` lifecycle, the live em-dash layer
+  eliminated, every comment LOW and polish LOW executed, scripts exec
+  bits normalized, and PEP 639 license metadata.
+- Eight gates asked and answered (all Recommended options taken);
+  Brandon's push grant is standing for this lane; the Release cutoff is
+  recorded as intentional (Releases exist v3.37.0+); the dead dev
+  dependency group is deleted; REPORT-12-Sept.md moved to docs/; the
+  stale venvs and the retired .claude/settings.local.json are removed
+  locally.
+
+## Reopen conditions (the recorded future work)
+
+- Roadmap box "New work noticed in the final blitz": the dest-list
+  constants module, the `_backup_db` triplication, the per-mode
+  `--format` corners, bindery's unmirrored `manual_watermark_repair`
+  decisions, the lossy double-manifest wrinkle, and the UI-only pypi
+  tag policy (Settings > Environments > pypi > Deployment branches and
+  tags > allow `v*.*.*`; REST policies reject tag deployments).
+- The audit-block residuals: the release-cutoff is decided (recorded),
+  the feature backlog (L4 ranks 5-11: find_duplicate_books swap,
+  `--health --format json`, tag-tree rollups, `run fts-index`,
+  addition_timeline year granularity, identifierless advisory, TUI set
+  writes) remains roadmap-boxed, and the TUI screenshot TODO needs a
+  live curses capture (Brandon's hands or a driven terminal).
+- cquarry's own final-audit block (landed there 2026-09-15) is
+  cquarry's lane; its no-force-push ruleset on main is the piece its
+  box still names.
