@@ -9,7 +9,7 @@
 #
 version: 1
 last_updated: '2026-06-07'
-library_path: /home/bdkl/docs/Calibre Library
+library_path: /path/to/your Calibre Library
 roots:
   Fic:
     bare_allowed: false

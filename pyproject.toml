@@ -42,11 +42,6 @@ packages = ["src/cquarry_cli"]
 [tool.ruff.lint]
 ignore = ["PLW1510", "BLE001", "DTZ011", "SIM118", "S110", "C401", "DTZ005", "SIM115"]
 
-[dependency-groups]
-dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-]
 
 
 

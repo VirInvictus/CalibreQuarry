@@ -1,8 +1,8 @@
 # CalibreQuarry — Application Specification
 
-**Version:** 3.42.0  
+**Version:** 3.43.0  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry` (>= 1.21.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.22.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -20,7 +20,14 @@ Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a s
 ### 2.1 Decoupled Shared Library Architecture
 The CalibreQuarry architecture relies on a strict separation of concerns, decoupling the CLI/TUI frontend from the database and search logic. 
 
-**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem. Requires cquarry >= 1.14.0: `get_all_books()` hydrates `authors`/`tags`/`languages`/`formats` as native lists (never comma-split them), rows carry a computed `size`, saved searches interpolate via `search:"Name"`, multi-valued count operators (`tags:#>2`) and language canonicalization are engine-level, unknown virtual libraries raise instead of matching nothing, the `--set-*`/`--remove-book` write verbs run on `WritableCalibreDB` (`set_pubdate`, `batch()`), `analytics.genre_distribution()` powers `--analytics genres`, the set-mode verbs consume the 1.13 write helpers (`clear_tags`, `add_custom_column_values`, `clear_rating`), and the `run phase2` import consumes 1.14's `add_book` creation path. 1.21.0 adds the metadata-quality predicates (`find_invalid_uuids`, `find_sentinel_pubdates`, `find_bad_language_codes`) that `--audit` renders, plus the write-path fixes the 3.41 run-verb batch rides on.
+**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem.
+
+The floor is `cquarry >= 1.22.0`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, and 1.21). A test pins the floor against `pyproject.toml`.
+
+- **1.22.0** — `CalibreDB.precedent_tags()`, the phase-3 prompt's tag-by-precedent read (promoted from run.py).
+- **1.21.0** — the metadata-quality predicates `--audit` renders (`find_invalid_uuids`, `find_sentinel_pubdates`, `find_bad_language_codes`), plus the write-path fixes the 3.41 run-verb batch rides on.
+- **1.12-1.14** — the foundations every mode rides: native list hydration for `authors`/`tags`/`languages`/`formats` (never comma-split them), computed row `size`, `analytics.genre_distribution()` behind `--analytics genres`, the set-mode write helpers (`clear_tags`, `add_custom_column_values`, `clear_rating`), and `add_book` as `run phase2`'s creation path. The search-engine features here are engine-level: saved-search interpolation (`search:"Name"`), multi-valued count operators (`tags:#>2`), language canonicalization, and unknown virtual libraries raising instead of matching nothing.
+- **Older floors** — see `patchnotes.md`, which records what each cquarry bump adopted at release time.
 
 **`cquarry_cli` (Internal Package)**: The frontend modules live in `src/cquarry_cli/`:
 
@@ -115,7 +122,7 @@ The path is saved to config on first successful resolution.
 | `--show-id` | Prefix books with Calibre ID (for scripting) |
 | `--show-custom COL` | Load and display a Calibre custom column |
 | `--primary-only` | Collapse multi-author entries to first author |
-| `--format {json,csv,ai}` | Output format for `--export` (default json) and `--search` (default: text listing) |
+| `--format {text,json,csv,ai,md}` | Output format for `--export` (json/csv/ai; default json) and `--search` (json/csv/ai; default: text listing); `md` renders the Markdown catalog shape for `--catalog`, `--wing`, and the sweeps |
 | `--plugin-data NAME` | Append a `books_plugin_data` value (e.g. `goodreads_id`, `wordcount`) to catalog/search book lines |
 | `--output PATH` | Write to a file instead of stdout |
 | `--quiet` | Suppress decorative output |
@@ -220,7 +227,7 @@ it are never reported as never indexed. A missing sidecar is the
 - **Not a Calibre replacement.** It reads the database — it does not manage it.
 - **Read-only by default; writes are explicit, opt-in verbs only.** Every read mode (`--catalog`, `--stats`, `--search`, `--export`, …) opens `metadata.db` strictly `mode=ro`. The only write paths are the explicit `--set-*` / `--remove-book` verbs and the set-mode `--batch-*` verbs (§3.2), which route through cquarry's separate `WritableCalibreDB` module and require Calibre to be closed. Nothing in the read path can ever mutate the database.
 - **Not a converter.** It does not touch book files themselves.
-- **Not a server.** It has no web interface and no network access.
+- **Not a server.** It has no web interface, and the read surface has no network access. The one network-touching verb is `run backfill` at `--apply` (it drives `fetch-ebook-metadata`, an external calibre tool, per book); everything else runs entirely offline.
 
 These guarantees apply to the `cquarry_cli` package only. The companion scripts in §5 are explicitly outside this contract.
 

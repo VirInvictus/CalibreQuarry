@@ -1002,13 +1002,13 @@ two phase-1 seams and the output-path guard first, the manifest HMAC second,
 phase 3's rails third; the facility run that Phase 17's own postscript calls
 for should follow, not precede, those fixes.*
 
-## Phase 19: the upstream comparison, FTS search, scoping, the tree audit, and the utility integrations (proposed 2026-09-12, from REPORT-12-Sept.md)
+## Phase 19: the upstream comparison, FTS search, scoping, the tree audit, and the utility integrations (proposed 2026-09-12, from docs/REPORT-12-Sept.md)
 
 Two research passes compared this repo against everything upstream
 Calibre exposes for library management (calibredb's 24 commands, the
 GUI's library views and view layer, FTS, annotations, devices,
 conversion, the polish tool) and against the full audit/quality problem
-space. Full evidence and upstream pointers live in REPORT-12-Sept.md.
+space. Full evidence and upstream pointers live in docs/REPORT-12-Sept.md (moved from the repo root, 2026-09-15).
 Cross-repo routing: B3/B5/B6 route to cquarry predicates and bindery
 analyzers, recorded there as well. Nothing here re-opens Phases 16-18.
 

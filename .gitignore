@@ -7,6 +7,15 @@ dist/
 build/
 .venv/
 
+# Tool dirs the tools ignore themselves (defense-in-depth: a fresh clone
+# on another machine should not show untracked noise the first time any
+# tool runs)
+venv/
+.venv_ci/
+.pytest_cache/
+.ruff_cache/
+.claude/
+
 # Editor files
 *.swp
 *.swo

@@ -4,11 +4,11 @@
 
 <p align="center">
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.14%2B-blue" alt="Python 3.14+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://github.com/VirInvictus/CalibreQuarry/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/stats.png" alt="CalibreQuarry (cquarry-cli) --stats output: hierarchical tag taxonomy, series with book counts, publishers, languages, and recent additions">
+  <img src="https://raw.githubusercontent.com/VirInvictus/CalibreQuarry/main/docs/screenshots/stats.png" alt="CalibreQuarry (cquarry-cli) --stats output: hierarchical tag taxonomy, series with book counts, publishers, languages, and recent additions">
   <!-- TODO screenshot: the curses TUI (the interactive menu) deserves a
        shot beside this one; capturing it needs a live terminal. -->
 </p>
