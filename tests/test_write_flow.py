@@ -18,6 +18,7 @@ from unittest import mock
 
 from cquarry.db import CalibreDB
 
+from cquarry_cli import writeops
 from cquarry_cli.cli import main
 from cquarry_cli.writeops import run_write
 from cquarry_cli.modes.audit import run_audit
@@ -198,6 +199,26 @@ class TestRemoveBookDryRunReadOnly(_TempDBCase):
         still = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
         con.close()
         self.assertEqual(still, 2)  # nothing removed
+
+    def test_dry_run_names_title_and_formats(self):
+        # The dry run's reads go through cquarry's read-only CalibreDB
+        # (its raw sqlite3 reads retired in the L2.6 pass), and the
+        # destructive-op line is recast with a colon, not a dash.
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = writeops._remove_book_dry_run(self.db_path, 1)
+        self.assertEqual(rc, 0)
+        text = out.getvalue()
+        self.assertIn("DRY RUN: would permanently remove book 1", text)
+        self.assertIn("'Old Title'", text)
+        self.assertIn("formats: none", text)
+
+    def test_dry_run_of_an_unknown_id_says_so(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = writeops._remove_book_dry_run(self.db_path, 99)
+        self.assertEqual(rc, 0)
+        self.assertIn("'<unknown>'", out.getvalue())
 
 
 class TestForbiddenColumnChokepoint(_TempDBCase):

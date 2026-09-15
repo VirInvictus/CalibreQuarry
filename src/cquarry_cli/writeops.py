@@ -455,23 +455,21 @@ def action_set_cover(book_id, has_cover, *, quiet=False):
 
 
 def _remove_book_dry_run(db_path: str, book_id: int) -> int:
-    """The dry run is a READ: it describes the removal through a
-    read-only connection and never opens the read-write handle (the
-    sweep caught the dry run holding the write lock to print)."""
-    import sqlite3 as _sqlite3
+    """The dry run is a READ: it describes the removal through cquarry's
+    read-only CalibreDB and never opens the read-write handle (the sweep
+    caught the dry run holding the write lock to print; the L2.6 pass
+    also retired the raw sqlite3 reads here, the write tier's last)."""
+    from cquarry.db import CalibreDB
 
-    con = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    db = CalibreDB(db_path)
     try:
-        row = con.execute("SELECT title FROM books WHERE id = ?", (book_id,)).fetchone()
-        title = row[0] if row else "<unknown>"
-        fmts = [
-            r[0]
-            for r in con.execute("SELECT format FROM data WHERE book = ?", (book_id,))
-        ]
+        book = db.get_book(book_id)
+        title = book["title"] if book else "<unknown>"
+        fmts = list(db.get_formats(book_id))
     finally:
-        con.close()
+        db.close()
     print(
-        f"DRY RUN — would permanently remove book {book_id} "
+        f"DRY RUN: would permanently remove book {book_id} "
         f"({title!r}, formats: {', '.join(fmts) or 'none'})."
     )
     print("Re-run with --confirm-remove to delete.")

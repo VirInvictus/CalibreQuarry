@@ -832,24 +832,19 @@ def run_phase2(
 
 
 def _precedent_tags(db_path: str, authors: list[str]) -> list[str]:
-    """Tags shared by the same author's other books (tag-by-precedent)."""
-    if not authors:
-        return []
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
+    """Tags shared by the same author's other books (tag-by-precedent).
+
+    The four-table JOIN is cquarry's since 1.22 (CalibreDB.precedent_tags;
+    the frontend-only split owns every SQL read, and this was the last
+    unrecorded raw-SQL read in the tier). This wrapper only opens the
+    read-only connection."""
+    from cquarry.db import CalibreDB
+
+    db = CalibreDB(db_path)
     try:
-        marks = ",".join("?" * len(authors))
-        rows = con.execute(
-            f"SELECT DISTINCT t.name FROM books_tags_link l "
-            f"JOIN tags t ON t.id = l.tag "
-            f"JOIN books_authors_link al ON al.book = l.book "
-            f"JOIN authors a ON a.id = al.author "
-            f"WHERE a.name COLLATE NOCASE IN ({marks}) LIMIT 12",
-            authors,
-        ).fetchall()
-        return [r["name"] for r in rows]
+        return db.precedent_tags(authors)
     finally:
-        con.close()
+        db.close()
 
 
 def _prompt_answers(db_path: str, dossiers: list[dict]) -> dict[int, dict]:

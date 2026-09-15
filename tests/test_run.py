@@ -28,6 +28,7 @@ from cquarry_cli.run import (
     _drive_stamp,
     _fetch_metadata,
     _inventory,
+    _precedent_tags,
     _provenance_from_filename,
     _screen_duplicates,
     _stamps_from_filename,
@@ -738,6 +739,41 @@ class TestPhase1Seams(RunCase):
         ):
             self.assertEqual(_bindery_phase1(self.downloads, apply_lossy=False), {})
         run_mock.assert_not_called()
+
+
+class TestPrecedentTags(RunCase):
+    """The phase-3 prompt's tag-by-precedent read: the four-table JOIN
+    was promoted to cquarry 1.22 (CalibreDB.precedent_tags, THE FINAL
+    AUDIT L2.6); this pins the read end to end through the wrapper."""
+
+    def test_precedent_tags_read_through_cquarry(self):
+        con = sqlite3.connect(self.db_path)
+        # The books INSERT fires books_insert_trg, which calls Calibre's
+        # title_sort()/uuid4() UDFs; the raw connection needs them too.
+        from cquarry.write import register_udfs
+
+        register_udfs(con)
+        con.executescript(
+            """
+            INSERT INTO books (id,title) VALUES (10,'Existing'),
+                (11,'New Import');
+            INSERT INTO authors (id,name) VALUES (10,'Ann Leckie');
+            INSERT INTO books_authors_link (book,author) VALUES (10,10),
+                (11,10);
+            INSERT INTO tags (id,name) VALUES (1,'Fic.SciFi'),(2,'Redwall');
+            INSERT INTO books_tags_link (book,tag) VALUES (10,1),(10,2);
+            """
+        )
+        con.commit()
+        con.close()
+        # Alphabetical: the promoted read orders for stability (the raw
+        # JOIN relied on SQLite's arbitrary DISTINCT order).
+        self.assertEqual(
+            _precedent_tags(self.db_path, ["Ann Leckie"]),
+            ["Fic.SciFi", "Redwall"],
+        )
+        self.assertEqual(_precedent_tags(self.db_path, []), [])
+        self.assertEqual(_precedent_tags(self.db_path, ["Nobody, Alice"]), [])
 
 
 class TestRunPhase2(RunCase):
