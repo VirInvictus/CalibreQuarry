@@ -201,7 +201,7 @@ def run_fts_search(
         )
 
     if fmt is not None and fmt != "json":
-        print(f"ERROR: --fts supports --format json only.", file=sys.stderr)
+        print("ERROR: --fts supports --format json only.", file=sys.stderr)
         return 2
 
     if fmt == "json":

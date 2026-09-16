@@ -7,12 +7,10 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from pathlib import Path
 
-from cquarry.db import CalibreDB
 
-from cquarry_cli import tui as tui_mod
 from cquarry_cli.modes.audit import show_health
 from cquarry_cli.modes.export import run_search_export
 from cquarry_cli.tui import _menu_sections
