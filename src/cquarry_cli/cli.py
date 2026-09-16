@@ -118,7 +118,15 @@ def build_parser() -> argparse.ArgumentParser:
         dest="health",
         action="store_true",
         help="One-shot health digest: the audit's finding counts in a "
-        "short form (composes with --restrict; always exit 0)",
+        "short form (composes with --restrict and --format json; always "
+        "exit 0 unless --fail-on-findings)",
+    )
+    p.add_argument(
+        "--fail-on-findings",
+        dest="fail_on_findings",
+        action="store_true",
+        help="With --health: exit 1 when the digest found anything "
+        "(default stays 0; the flag turns the dashboard into a gate)",
     )
     group.add_argument(
         "--recent",
@@ -1169,7 +1177,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
 
             if args.health:
-                return show_health(db, quiet=args.quiet)
+                if args.format is not None and args.format != "json":
+                    print(
+                        "ERROR: --health supports --format json only.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                return show_health(
+                    db,
+                    quiet=args.quiet,
+                    fmt=args.format,
+                    fail_on_findings=args.fail_on_findings,
+                )
 
             if args.audit:
                 output = args.output or "audit.csv"
@@ -1258,7 +1277,7 @@ def main(argv: list[str] | None = None) -> int:
                     # Phase 17: machine-readable dossiers (phase 3's input).
                     ok = show_book_json(db, ids, quiet=args.quiet)
                     return 0 if ok else 1
-                if args.format in ("csv", "ai"):
+                if args.format in ("csv", "ai", "md"):
                     print(
                         "ERROR: --book supports --format json only.",
                         file=sys.stderr,

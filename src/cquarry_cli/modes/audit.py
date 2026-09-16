@@ -440,19 +440,71 @@ def run_audit(db: CalibreDB, output: str, *, quiet: bool = False) -> None:
         print(f"\nFull report: {color(out_path, C_TITLE)}")
 
 
-def show_health(db: CalibreDB, *, quiet: bool = False) -> int:
+def show_health(
+    db: CalibreDB,
+    *,
+    quiet: bool = False,
+    fmt: str | None = None,
+    fail_on_findings: bool = False,
+) -> int:
     """The one-shot health digest: every audit class's row count in a
-    short form, always exit 0 (a dashboard, not --audit's CSV). Book-
-    level classes follow the active --restrict view; library-shape
-    classes stay global, exactly as in --audit, because both renderers
-    consume the same collect_issues derivation."""
+    short form, always exit 0 by default (a dashboard, not --audit's
+    CSV). Book-level classes follow the active --restrict view;
+    library-shape classes stay global, exactly as in --audit, because
+    both renderers consume the same collect_issues derivation.
+
+    ``fmt="json"`` serializes the counts dict instead of the prose
+    dashboard, an annotations-dirtied line rides beside the OPF one
+    (cquarry 1.23's get_annotations_dirtied_books), and
+    ``fail_on_findings`` flips the exit to 1 when anything was found
+    (opt-in: scripts that gate on the exit code ask for it)."""
     books = db.get_all_books()
     issues, extras = collect_issues(db)
     staleness = extras["staleness"]
     dirtied = extras["dirtied"]
+    try:
+        annotations_dirtied = len(db.get_annotations_dirtied_books())
+    except Exception:
+        # the sidecar-backed queue is optional; absent == empty
+        annotations_dirtied = 0
 
+    by_type: Counter = Counter(i["issue_type"] for i in issues)
+    book_rows = [i for i in issues if i["issue_type"] == "book"]
+    problem_counts: Counter = Counter()
+    for row in book_rows:
+        for problem in row["issues"].split(", "):
+            problem_counts[problem] += 1
+
+    findings = len(issues)
+
+    if fmt == "json":
+        payload = {
+            "library_uuid": db.get_library_uuid(),
+            "books": len(books),
+            "issue_count": findings,
+            "book_issues": len(book_rows),
+            "problem_counts": dict(problem_counts),
+            "duplicate_groups": by_type["duplicate"],
+            "series_gaps": by_type["series_gap"],
+            "conversion_overrides": by_type["conversion_override"],
+            "metadata_quality": {
+                "invalid_uuids": len(extras["uuid_rows"]),
+                "sentinel_pubdates": len(extras["sentinel_rows"]),
+                "bad_language_values": len(extras["language_rows"]),
+            },
+            "filesystem_tree_findings": by_type["tree"],
+            "fts_coverage_findings": by_type["fts_coverage"],
+            "fts_sidecar_present": staleness["sidecar_present"],
+            "pending_opf_sync": len(dirtied),
+            "pending_annotations_sync": annotations_dirtied,
+        }
+        import json as _json
+
+        print(_json.dumps(payload, indent=2))
+        return 1 if (fail_on_findings and findings) else 0
     if quiet:
-        return 0
+        # quiet scripts still gate on the exit code when asked
+        return 1 if (fail_on_findings and findings) else 0
 
     by_type: Counter = Counter(i["issue_type"] for i in issues)
     book_rows = [i for i in issues if i["issue_type"] == "book"]
@@ -494,5 +546,6 @@ def show_health(db: CalibreDB, *, quiet: bool = False) -> int:
             "format(s) never indexed)"
         )
     print(f"  pending OPF sync     : {len(dirtied)} book(s)")
+    print(f"  pending annotations  : {annotations_dirtied} book(s)")
     print("  Full detail: --audit (CSV); tree/metadata rows carry their own views.")
-    return 0
+    return 1 if (fail_on_findings and findings) else 0

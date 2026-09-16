@@ -1,5 +1,16 @@
 # CalibreQuarry Patch Notes
 
+# 3.46.0 (2026-09-16)
+
+### The L4 headliners land -- Markdown search results, a machine-readable health digest, a TUI that finally covers the whole read surface, and honest format refusals
+
+- **`--search QUERY --format md`** (L4 rank 1): the Markdown catalog emitter over any query's match set -- headings per author, bulleted bold titles, the library UUID provenance header, and the query recorded in a scope note. Composes with `--restrict` free (the view is already the database), and `--output` names the file as anywhere else; the default output is `search_results.md`. Delegates to `write_catalog`, so the emitter cannot drift from the catalogs.
+- **`--health --format json`** (L4 rank 6, first half): the digest's counts as a machine-readable payload -- issue counts, problem tallies, metadata-quality rows, tree/FTS findings, pending OPF sync, and the annotations-dirtied count riding beside the OPF line (cquarry's `get_annotations_dirtied_books`, unconsumed since 1.23). **`--fail-on-findings`** is the second half: opt-in, flips the digest's exit from the standing 0 to 1 when anything was found, turning the dashboard into a gate. Quiet mode still gates on the exit, so scripts get both.
+- **Per-mode `--format` corners refuse instead of ignoring** (roadmap 1351): `--book --format md` used to render plain text silently; `--fts --format csv/ai/md` did the same; `--health --format <not-json>` ignored the flag entirely. All three now exit 2 naming the one format the mode supports.
+- **The TUI menu covers Format Stats and the Trash Listing** (roadmap 1312's residue plus the 3.45.0 gap): the README's "menu covers every read mode" claim is true again, and the 3.45.0 trash surface has a menu door.
+- **The stale series-clear pin updated**: `test_set_series_with_index_then_clear` still expected `series_index = NULL` after a clear -- the exact IntegrityError the cquarry 1.23.1 fix closed on real schemas (`REAL NOT NULL DEFAULT 1.0`). The test now pins the fixed semantics (clear resets to 1.0, the link row gone).
+- Docs truth: the spec's script table gains `check_pdf.py`, `comments_census.py`, and `db_util.py`; CLAUDE.md's contract-note headers return to chronological order.
+
 # 3.45.0 (2026-09-15)
 
 ### The curation verbs land over the 1.19.0 riders, the trash gets a surface, and the live prose layer cleans up

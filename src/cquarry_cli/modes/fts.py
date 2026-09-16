@@ -200,6 +200,10 @@ def run_fts_search(
             }
         )
 
+    if fmt is not None and fmt != "json":
+        print(f"ERROR: --fts supports --format json only.", file=sys.stderr)
+        return 2
+
     if fmt == "json":
         with open_output(output, db.db_path) as (stream, out_path):
             json.dump(rows, stream, indent=2, ensure_ascii=False)

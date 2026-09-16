@@ -5,6 +5,7 @@ import sys
 from cquarry.db import CalibreDB
 from cquarry.helpers import calibre_rating_to_stars
 
+from cquarry_cli.modes.catalog import write_catalog
 from cquarry_cli.output import open_output
 
 _CSV_FIELDS = [
@@ -251,8 +252,22 @@ def run_search_export(
             if row.get("val")
         }
 
+    if fmt == "md":
+        # The Markdown shape is the catalog emitter over the match set:
+        # headings per author, bulleted bold titles (L4 rank 1).
+        return write_catalog(
+            db,
+            output or "search_results.md",
+            matching_ids=matching_ids,
+            fmt="md",
+            quiet=quiet,
+            scope_note=f"search: {query}",
+        )
+
     if fmt is not None and fmt not in ("json", "csv", "ai"):
-        print(f"Unknown format: {fmt}. Use 'json', 'csv', or 'ai'.", file=sys.stderr)
+        print(
+            f"Unknown format: {fmt}. Use 'json', 'csv', 'ai', or 'md'.", file=sys.stderr
+        )
         return 2
 
     with open_output(output, db.db_path) as (stream, out_path):

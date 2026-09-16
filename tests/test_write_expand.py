@@ -173,12 +173,15 @@ class TestSeriesPublisherVerbs(_TempDBCase):
         self.assertEqual(
             self._scalar("SELECT series_index FROM books WHERE id=1"), (2.5,)
         )
-        # Clearing nulls the link, the index, and prunes the orphaned series.
+        # Clearing removes the link and prunes the orphaned series. The
+        # index resets to 1.0, never NULL: real libraries carry
+        # `REAL NOT NULL DEFAULT 1.0` (cquarry 1.23.1), and the old
+        # NULL write was the IntegrityError the fix closed.
         rc, _, _ = self._run(["--clear-series", "1"])
         self.assertEqual(rc, 0)
         self.assertEqual(self._rows("SELECT 1 FROM books_series_link WHERE book=1"), [])
         self.assertEqual(
-            self._scalar("SELECT series_index FROM books WHERE id=1"), (None,)
+            self._scalar("SELECT series_index FROM books WHERE id=1"), (1.0,)
         )
         self.assertEqual(self._rows("SELECT 1 FROM series"), [])
 

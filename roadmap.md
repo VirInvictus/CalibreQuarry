@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.45.0.
+What's done, what's next. Updated as of v3.46.0.
 
 ---
 

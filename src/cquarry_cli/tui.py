@@ -38,6 +38,7 @@ from cquarry_cli.modes.analytics import (
     show_wing_overlap,
 )
 from cquarry_cli.modes.audit import run_audit, show_health
+from cquarry_cli.modes.trash import show_trash
 from cquarry_cli.modes.catalog import (
     run_all_saved_searches,
     write_all_wings,
@@ -121,6 +122,8 @@ def _menu_sections() -> list:
                 "Content Search (FTS)",
                 "Saved Search Catalogs",
                 "Library Health",
+                "Format Stats",
+                "Trash Listing",
             ],
         ),
         (
@@ -716,6 +719,23 @@ def _menu_session() -> int:
                     run_with_capture(
                         "Library Health", lambda v=restricted: show_health(v)
                     )
+                elif result == (0, 8):
+                    reset_terminal()
+
+                    def _format_stats(v=db):
+                        stats = v.get_format_stats()
+                        total = sum(s["bytes"] for s in stats.values())
+                        count_total = sum(s["count"] for s in stats.values())
+                        print(f"{'Format':<10}{'Books':>8}{'Bytes':>16}")
+                        for fmt, s in sorted(stats.items()):
+                            print(f"{fmt:<10}{s['count']:>8}{s['bytes']:>16,}")
+                        print("-" * 34)
+                        print(f"{'TOTAL':<10}{count_total:>8}{total:>16,}")
+
+                    run_with_capture("Format Stats", _format_stats)
+                elif result == (0, 9):
+                    reset_terminal()
+                    run_with_capture("Trash Listing", lambda v=db: show_trash(v))
                 elif result == (1, 5):
                     restricted = _restricted(db)
                     reset_terminal()
