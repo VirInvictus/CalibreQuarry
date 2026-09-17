@@ -1354,3 +1354,43 @@ note; every integration ships with a dry-run before any write.
 - [ ] **The pypi-environment tag policy is UI-only**: Settings -> Environments -> pypi -> Deployment branches and tags -> allow `v*.*.*` (REST policies are branch-type only and reject tag deployments outright; see the 1.22.0/3.44.0 errata and the cquarry erratum).
 
 - [x] **vir-tui floor >=2.5.0** (2026-09-14, no release cut: upstream 2.4.0/2.5.0 are additive terminal-safety and session-awareness releases; with no uv.lock, every fresh resolution takes the latest satisfying version automatically). *(Mention the floor bump in the next release's patchnotes.)*
+
+- [ ] **screen_duplicate: volume-token scrubbing collapses multi-volume sets
+      into within-batch duplicates** (observed 2026-09-16, classics wave,
+      Moral Letters to Lucilius vols 1-3): the normalizer scrubs standalone
+      volume tokens, so "Moral letters to Lucilius. Volume 1/2/3" normalize
+      to the same title + first author, and each volume refused its
+      siblings inside the batch — three distinct books, all three marked
+      `duplicate_refused` and none approved. The human review caught it
+      (the Blood of Liscor census rule generalized: a single-file re-screen
+      of one refused volume shows its true library hits), and the phase-1
+      skill now documents the manual flip, but the screener itself could
+      carry the distinction: within-batch matches that differ ONLY by
+      volume tokens are a "multi-volume set" advisory (group, approve all,
+      note the set), while same-normalized-title same-ISBN remains a true
+      duplicate. Candidate for the screen's report shape.
+
+- [ ] **Metadata download stamps `pubdate` with the download run's clock
+      (microsecond timestamps), not the edition date** (observed 2026-09-16,
+      classics wave: 42 of 47 books carried pubdates like
+      `2010-05-25 01:49:00.233821+00:00` — the 01:49–01:59 band is the
+      download run itself). Calibre's downloader wrote `now()`-shaped
+      values where the source had a bare date. Phase 3 had to normalize all
+      42 via `set_pubdate(date-only)`; until then reconcile flagged
+      file-side date-only embeds as perpetual pubdate drift. Candidate
+      fixes: normalize to date-only in the phase-2 DB pass, or make the
+      reconcile pubdate compare ignore sub-day time components.
+- [ ] **reconcile: verify-after-embed for EPUB pubdate (the exiftool
+      `-m` lesson again)** (observed 2026-09-16, #9177 Discourses and
+      Selected Writings): `calibredb embed_metadata` reported success but
+      the file kept its original EPUB3 `dc:date` (2010-10-25) — the book
+      has dual date elements and the embed does not move the one ebook-meta
+      reads back. Reconcile now reports this one book as eternally drifted.
+      A one-line post-embed read-back per written field would convert
+      silent no-ops into reported residuals.
+- [ ] **fetch_library_codes: title/author SRU fallback for ISBN misses**
+      (observed 2026-09-16): the ISBN-driven pass hit 6 of 23 nonfiction
+      books; hand-written LoC SRU `bath.title=` + `bath.author=` queries
+      recovered 15 of the 17 misses at work level (only the German Analysis
+      3 and the Chinese Kodaira have no LoC record at all). The tool could
+      do this fallback itself and tag work-level hits as such.
