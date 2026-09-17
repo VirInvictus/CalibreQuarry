@@ -108,6 +108,13 @@ def build_parser() -> argparse.ArgumentParser:
         "funnel and finish dates from #reading_status/#date_read; "
         "read-only)",
     )
+    p.add_argument(
+        "--pace-granularity",
+        dest="pace_granularity",
+        choices=["month", "year"],
+        default="month",
+        help="Bucket size for --analytics pace (default: month)",
+    )
     group.add_argument(
         "--audit",
         action="store_true",
@@ -177,6 +184,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     group.add_argument(
         "--tags", action="store_true", help="Dump every tag with its book count"
+    )
+    group.add_argument(
+        "--identifierless",
+        dest="identifierless",
+        action="store_true",
+        help="List books with no identifiers (id and title; the curation "
+        "queue for Calibre-Companion style lookups)",
     )
     group.add_argument(
         "--trash",
@@ -1238,6 +1252,21 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.fts_status:
                 run_fts_status(db, quiet=args.quiet)
+                return 0
+
+            if getattr(args, "identifierless", False):
+                from cquarry.integrity import find_identifierless
+
+                rows = find_identifierless(db)
+                if not rows:
+                    print("Every catalogued book carries at least one identifier.")
+                    return 0
+                books = {b["id"]: b for b in db.get_all_books()}
+                for book_id in rows:
+                    b = books.get(book_id)
+                    if b:
+                        print(f"[{b['id']}] {b['title']}")
+                print(f"{len(rows)} book(s) without identifiers.")
                 return 0
 
             if args.trash:

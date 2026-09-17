@@ -50,9 +50,11 @@ def show_author_stats(db: CalibreDB, *, quiet: bool = False) -> None:
         print()
 
 
-def show_pace_stats(db: CalibreDB, *, quiet: bool = False) -> None:
+def show_pace_stats(
+    db: CalibreDB, *, quiet: bool = False, granularity: str = "month"
+) -> None:
     """Show books added per month/year trend, rendered over cquarry.analytics."""
-    pace = addition_timeline(db)
+    pace = addition_timeline(db, granularity=granularity)
 
     if not quiet:
         print("=== Reading Pace Statistics ===\n")
@@ -69,8 +71,12 @@ def show_pace_stats(db: CalibreDB, *, quiet: bool = False) -> None:
 
 
 def show_tag_tree(db: CalibreDB, *, quiet: bool = False) -> None:
-    """Display the full hierarchical tag taxonomy as a tree."""
+    """Display the full hierarchical tag taxonomy as a tree, every node
+    annotated with its rolled-up book count (a node's count is the sum of
+    the counts of the leaf tags beneath it; cquarry.helpers.tag_rollup's
+    arithmetic, rendered here)."""
     tags = db.get_all_tags()
+    counts = dict(db.get_tag_counts())
 
     if not quiet:
         print("=== Tag Taxonomy Tree ===\n")
@@ -78,12 +84,32 @@ def show_tag_tree(db: CalibreDB, *, quiet: bool = False) -> None:
     # cquarry's shared builder: one taxonomy parser for the whole ecosystem.
     tree = tags_to_tree(tags)
 
-    def _print_tree(node, indent=0):
-        for key in sorted(node.keys()):
-            print("  " * indent + "\u2514\u2500 " + key)
-            _print_tree(node[key], indent + 1)
+    def _rollup(node, prefix=()):
+        rolled = {}
+        for key, child in node.items():
+            path = (*prefix, key)
+            if child:
+                rolled[key] = _rollup(child, path)
+            else:
+                rolled[key] = counts.get(".".join(path), 0)
+        return rolled
 
-    _print_tree(tree, indent=1)
+    def _sum(rolled):
+        total = 0
+        for key, child in rolled.items():
+            total += child if isinstance(child, dict) else child
+        return total
+
+    def _print_tree(rolled, indent=0):
+        for key in sorted(rolled.keys()):
+            child = rolled[key]
+            if isinstance(child, dict):
+                print("  " * indent + "\u2514\u2500 " + key + f" ({_sum(child)})")
+                _print_tree(child, indent + 1)
+            else:
+                print("  " * indent + "\u2514\u2500 " + key + f" ({child})")
+
+    _print_tree(_rollup(tree), indent=1)
 
 
 def show_genre_breakdown(db: CalibreDB, *, depth: int = 1, quiet: bool = False) -> None:

@@ -1,5 +1,5 @@
 import csv
-from collections import Counter, defaultdict
+from collections import Counter
 
 from cquarry.db import CalibreDB
 from cquarry.helpers import (
@@ -8,7 +8,6 @@ from cquarry.helpers import (
     C_TITLE,
     C_WARN,
     color,
-    normalize_author_display,
 )
 from cquarry.integrity import (
     find_authorless,
@@ -20,6 +19,7 @@ from cquarry.integrity import (
     find_low_res_covers,
     find_missing_cover_files,
     find_sentinel_pubdates,
+    find_duplicate_books,
     find_series_gaps,
     find_untagged,
     find_unrated,
@@ -51,8 +51,6 @@ def collect_issues(db: CalibreDB) -> tuple[list[dict[str, str]], dict]:
     coverless = set(find_coverless(db))
     missing_covers = set(find_missing_cover_files(db))
     low_res = find_low_res_covers(db)
-
-    title_author_groups = defaultdict(list)
 
     for b in books:
         problems: list[str] = []
@@ -88,23 +86,21 @@ def collect_issues(db: CalibreDB) -> tuple[list[dict[str, str]], dict]:
             )
 
         # Group for duplicate detection
-        if b["title"] and b["authors"]:
-            primary_author = normalize_author_display(b["authors"], primary_only=True)
-            key = (b["title"].strip().lower(), primary_author.strip().lower())
-            title_author_groups[key].append(str(b["id"]))
 
-    for key, ids in title_author_groups.items():
-        if len(ids) > 1:
-            title, author = key
-            issues.append(
-                {
-                    "id": ", ".join(ids),
-                    "title": title,
-                    "author": author,
-                    "issue_type": "duplicate",
-                    "issues": "duplicate_books",
-                }
-            )
+    # Duplicate detection is the engine's predicate now (cquarry 1.8's
+    # find_duplicate_books: same (title.lower(), primary author.lower())
+    # grouping, ids sorted numerically -- the hand-rolled accumulation
+    # this replaces emitted them in book-iteration order).
+    for (title, author), book_ids in find_duplicate_books(db).items():
+        issues.append(
+            {
+                "id": ", ".join(str(i) for i in book_ids),
+                "title": title,
+                "author": author,
+                "issue_type": "duplicate",
+                "issues": "duplicate_books",
+            }
+        )
 
     series_gaps = find_series_gaps(db)
     for s in all_series:
