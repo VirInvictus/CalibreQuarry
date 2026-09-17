@@ -1,5 +1,15 @@
 # CalibreQuarry Patch Notes
 
+# 3.47.0 (2026-09-16)
+
+### The engine predicates adopted: identifierless listing, tag-tree rollups, pace year buckets, engine-driven duplicates
+
+- **`--identifierless`**: books carrying no identifiers at all, listed as `[id] title` through cquarry's `find_identifierless` (L4 rank 11's curation queue for Calibre-Companion-style lookups); a fully identified library reports clean.
+- **Tag-tree rolled-up counts**: every node of `--tags --tree`'s taxonomy now shows its rolled-up book count -- a node's total is the sum of the leaf tags beneath it (cquarry's `tag_rollup` arithmetic, rendered in the tree).
+- **`--analytics pace --pace-granularity year`** (L4 rank 10): the addition timeline buckets by year instead of month.
+- **Duplicate detection is the engine's predicate now**: the audit's hand-rolled (title, primary author) grouping is replaced by cquarry 1.8's `find_duplicate_books` -- same key shape, but the ids inside a duplicate row are sorted numerically where book-iteration order used to decide (the one visible CSV difference).
+- The stale series-clear pin updated to the cquarry 1.23.1 fixed semantics: a cleared series resets `series_index` to 1.0, never NULL on real schemas.
+
 # 3.46.0 (2026-09-16)
 
 ### The L4 headliners land -- Markdown search results, a machine-readable health digest, a TUI that finally covers the whole read surface, and honest format refusals
