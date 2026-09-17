@@ -23,6 +23,8 @@ read modes never import this module (nor ``cquarry.write``).
 import sys
 from collections.abc import Callable
 
+from cquarry_cli.dests import SINGLE_BOOK_DESTS
+
 
 def parse_book_id(raw) -> int | None:
     """Coerce a CLI/TUI book id to int, or print an error and return None."""
@@ -1058,39 +1060,9 @@ _COLLECTORS: list[Callable] = [
 ]
 
 
-# The single-book verb dests, in dispatch priority order. Shared with
-# setwrite.py, which must reject any combination of these with its own
-# set-mode flags before anything executes. add_tag/remove_tag are
-# append-list dests: dispatch_write counts their extra occurrences
-# separately (three tag adds are three mutations).
-SINGLE_BOOK_DESTS: list[str] = [
-    "set_title",
-    "set_authors",
-    "set_rating",
-    "set_pubdate",
-    "clear_pubdate",
-    "set_comments",
-    "clear_comments",
-    "add_tag",
-    "remove_tag",
-    "set_column",
-    "clear_column",
-    "set_identifier",
-    "clear_identifier",
-    "set_series",
-    "clear_series",
-    "set_publisher",
-    "clear_publisher",
-    "set_languages",
-    "clear_languages",
-    "add_format",
-    "remove_format",
-    "set_cover",
-    "remove_book",
-    "rename_entity",
-    "set_author_sort",
-    "set_title_sort",
-]
+# The single-book verb dests live in dests.py (the one shared source for
+# every parallel dest list); re-exported here because setwrite's
+# combination guard and the tests read them as writeops.SINGLE_BOOK_DESTS.
 
 
 def dispatch_write(args, db_path: str) -> int | None:

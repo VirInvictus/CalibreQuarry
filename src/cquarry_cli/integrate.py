@@ -32,6 +32,7 @@ from pathlib import Path
 
 from cquarry.helpers import to_isbn13
 from cquarry.write import WritableCalibreDB
+from cquarry_cli.backups import make_backup
 
 _PGREP_TIMEOUT = 10
 
@@ -66,39 +67,6 @@ def _calibre_running() -> bool:
     except OSError:
         return True
     return proc.returncode == 0
-
-
-def _backup_db(db_path: str, backup_dir: str) -> str:
-    """Timestamped sqlite-API backup outside the library (the run.py
-    precedent; a second run never destroys an earlier restore point)."""
-    import sqlite3
-    from datetime import datetime
-
-    resolved = Path(backup_dir).expanduser().resolve()
-    lib_dir = Path(db_path).resolve().parent
-    if resolved == lib_dir or resolved.is_relative_to(lib_dir):
-        raise ValueError(
-            f"--backup-dir ({resolved}) must sit OUTSIDE the library directory"
-        )
-    os.makedirs(resolved, exist_ok=True)
-    stem = Path(db_path).stem
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = resolved / f"{stem}-{stamp}.db"
-    n = 2
-    while dest.exists():
-        dest = resolved / f"{stem}-{stamp}-{n}.db"
-        n += 1
-    src = sqlite3.connect(db_path)
-    try:
-        dst = sqlite3.connect(dest)
-        try:
-            with dst:
-                src.backup(dst)
-        finally:
-            dst.close()
-    finally:
-        src.close()
-    return str(dest)
 
 
 def resolve_targets(db, args) -> list[int]:
@@ -923,7 +891,7 @@ def dispatch_integrate(args) -> int:
         """Called by the verbs AFTER plan validation, so an invocation
         that aborts on usage never writes a backup nobody needs."""
         try:
-            _backup_db(db_path, args.backup_dir)
+            make_backup(db_path, args.backup_dir)
         except ValueError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2

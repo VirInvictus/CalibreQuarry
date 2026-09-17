@@ -1,5 +1,18 @@
 # CalibreQuarry Patch Notes
 
+# 3.48.0 (2026-09-17)
+
+### The wave-2 refactor and consent batch: one dest-list source, one backup helper, and the lossy consent moves into the manifest
+
+- **The parallel write-dest lists have one source** (roadmap "new work noticed", L2.14): `src/cquarry_cli/dests.py` now holds `SINGLE_BOOK_DESTS` (writeops), set mode's target sources and `--batch-*` verbs (setwrite), and the restrict-refusal aggregate `WRITE_FLAG_DESTS` (restrict). The three consumers import their slices, and tests/test_dests.py pins every member against build_parser(), so a dest that exists only in a list (or only in the parser) cannot rot.
+- **One backup helper: `backups.make_backup`** replaces the triplicated `_backup_db`/`_make_backup` (run phase 2, the integrate verbs, set mode's `--apply`). The recorded error-mapping decision: a `--backup-dir` inside the library is a usage problem (exit 2) at every door, so the shared helper raises the stdlib-neutral ValueError and each dispatcher keeps its own usage path; unwritable destinations and sqlite failures raise ValueError too (set mode already wrapped them into its usage path; run/integrate previously propagated a traceback). Same timestamped sqlite-API backup, same on-disk shape.
+- **bindery's `manual_watermark_repair` decisions mirror into the manifest's `decisions_needed`** as `manual_repair` entries (`_mirror_bindery_decisions`, the sibling of 3.43.0's `_mirror_lossy`): books bindery refuses to auto-strip used to vanish from the durable record entirely.
+- **The lossy-pending double-manifest wrinkle is closed**: a dry phase 1 now emits a `lossy_consent` decision per lossy-flagged file, and the reviewer resolves it in the manifest (set the decision's `"resolution"` to `"apply"`, re-sign). Phase 2 then drives `bindery run phase1 --apply-lossy` itself before the import batch, flips the lossy records to applied, and consumes the decisions, so consent no longer requires the phase-1 re-run that minted a second manifest and orphaned the first. Consent is all-or-nothing (a partial resolution refuses before anything runs); a failed strip fails the verb with the library unwritten; an unresolved lossy_consent still blocks like any open decision.
+- **Docs truth**: CLAUDE.md's contract-note sections are back in chronological order (newest first; 3.38/3.39 came in from the basement) with a 3.48.0 section on top, and the spec's script table gains `check_pdf.py`, `comments_census.py`, and `db_util.py`. Note: the 3.46.0 entry claimed this docs item; the work actually lands here.
+- **Flag-coverage backfill**: `--show-tags`, `--show-id`, `--primary-only`, `--plugin-data`, `--show-author-details`, `--set-comments`, and `--clear-comments` had zero tests; tests/test_flag_coverage.py pins all seven against the real render and write paths (including the comments table's id column and the metadata_dirtied queue).
+- **The tag tree renders real libraries again**: 3.47.0's rolled-up counts re-derived the arithmetic inline and crashed on depth-3 subtrees (a dict child recursed as an addend; the real library's Fic → Classic → African tripped it in run_tests.sh, the suite's fixtures stopped at depth two) and dropped a parent's own direct books wherever it also had children. The renderer now consumes cquarry's `tag_rollup` directly (the engine derives, the frontend renders), so every node shows its true subtree total, and a regression test pins the real shape.
+- Suite: 575 → 601 tests.
+
 # 3.47.0 (2026-09-16)
 
 ### The engine predicates adopted: identifierless listing, tag-tree rollups, pace year buckets, engine-driven duplicates

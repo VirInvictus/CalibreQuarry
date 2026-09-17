@@ -20,66 +20,13 @@ instead of global ones.
 import argparse
 
 from cquarry.db import CalibreDB
+from cquarry_cli.dests import WRITE_FLAG_DESTS
 
 
-# The write-verb dests (single-book, set-mode target sources, and every
-# --batch-* verb). --restrict is a read-surface scoping modifier: write
-# targets are chosen by --ids/--from-search, not by scoping, so the
-# combination is refused rather than silently ignored. Keep in step with
-# build_parser()'s write/set groups.
-_WRITE_FLAG_DESTS = (
-    "set_title",
-    "set_authors",
-    "set_rating",
-    "set_pubdate",
-    "clear_pubdate",
-    "set_comments",
-    "clear_comments",
-    "set_column",
-    "clear_column",
-    "add_tag",
-    "remove_tag",
-    "set_identifier",
-    "clear_identifier",
-    "set_series",
-    "clear_series",
-    "set_publisher",
-    "clear_publisher",
-    "set_languages",
-    "clear_languages",
-    "add_format",
-    "remove_format",
-    "set_cover",
-    "remove_book",
-    "set_ids",
-    "from_search",
-    "from_untagged",
-    "from_manifest",
-    "batch_add_tag",
-    "batch_remove_tag",
-    "batch_clear_tags",
-    "batch_clear_rating",
-    "batch_set_column",
-    "batch_clear_column",
-    "batch_add_column_value",
-    "batch_set_title",
-    "batch_set_authors",
-    "batch_set_pubdate",
-    "batch_clear_pubdate",
-    "batch_set_publisher",
-    "batch_clear_publisher",
-    "batch_set_languages",
-    "batch_clear_languages",
-    "batch_set_series",
-    "batch_clear_series",
-    "batch_set_identifier",
-    "batch_clear_identifier",
-    "batch_set_cover",
-    "batch_remove_format",
-    "rename_entity",
-    "set_author_sort",
-    "set_title_sort",
-)
+# The write-verb dests (single-book verbs, set-mode target sources, and
+# every --batch-* verb): the refusal gate reads the shared aggregate from
+# dests.py, the one source every parallel dest list is cut from.
+_WRITE_FLAG_DESTS = WRITE_FLAG_DESTS
 
 
 def restrict_refusal(args: argparse.Namespace) -> str | None:

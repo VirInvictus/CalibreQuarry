@@ -5,6 +5,40 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.48.0 onward, the wave-2 refactor + consent batch)
+
+- **The write-verb dest lists have one source: `dests.py`.**
+  `SINGLE_BOOK_DESTS`, set mode's target sources (`SET_MODE_SOURCES`),
+  and the `--batch-*` verbs (`BATCH_VALUE_DESTS` counted by presence,
+  `BATCH_BOOL_DESTS` by truthiness) live there; `WRITE_FLAG_DESTS` is
+  the restrict-refusal aggregate over all four. writeops re-exports the
+  single-book list (setwrite's combination guard and the tests read it
+  as `writeops.SINGLE_BOOK_DESTS`); tests/test_dests.py pins every
+  member against build_parser(), so a dest that exists only in a list
+  (or only in the parser) cannot rot.
+- **One backup helper: `backups.make_backup`** (run phase 2, the
+  integrate verbs, and set mode's `--apply` all call it). The recorded
+  error-mapping decision: a `--backup-dir` inside the library is a
+  USAGE problem (exit 2), so the shared helper raises the
+  stdlib-neutral `ValueError` and each dispatcher keeps its own
+  usage-path mapping; unwritable destinations and sqlite failures raise
+  `ValueError` too (setwrite already wrapped them into its usage path;
+  run/integrate previously propagated a traceback).
+- **bindery's `manual_watermark_repair` decisions mirror into
+  `decisions_needed` as `manual_repair`** (`_mirror_bindery_decisions`,
+  the sibling of 3.43.0's `_mirror_lossy`): books bindery refuses to
+  auto-strip used to vanish from the durable record entirely.
+- **A dry phase 1 emits a `lossy_consent` decision per lossy-flagged
+  file, and the resolution lives in the manifest.** The reviewer sets
+  the decision's `"resolution"` to `"apply"` and re-signs; phase 2 then
+  drives `bindery run phase1 --apply-lossy` itself (before the import
+  batch opens), flips the lossy records to applied, and consumes the
+  decisions. Consent is all-or-nothing: a partial resolution refuses
+  before anything runs, a failed strip fails the verb with the library
+  unwritten, and an unresolved lossy_consent still blocks like any open
+  decision. The old path (re-run phase 1 with `--apply-lossy`) still
+  works; it just no longer orphans the dry manifest.
+
 ## Programmer-facing contract notes (3.45.0 onward, the curation + trash batch)
 
 - **The write verbs keep step with three new dests**: `--rename-entity
@@ -175,6 +209,51 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   file runs, caught by the same repair as 0dc4789); appended classes
   go at file end.
 
+## Programmer-facing contract notes (3.39.0 onward, Phase 19 C)
+
+- **The integration verbs live in `src/cquarry_cli/integrate.py`** and
+  dispatch through `run`'s subparser (`INTEGRATE_PHASES` in run.py).
+  They are write-path code: read modes never import them. The shared
+  lifecycle is `dispatch_integrate`: usage guards (exit 2 before the
+  library opens), read-only target resolution (`--search`/`--ids`,
+  unknown ids abort), then dry-run plans or the guarded `--apply`
+  (anchored pgrep, timestamped `_backup_db` outside the library for
+  convert/polish/cover/merge/flush; export touches nothing and needs
+  no backup).
+- **External programs are subprocess seams**: ebook-convert,
+  ebook-polish, calibredb, fetch-ebook-metadata. Every seam tolerates
+  the binary being missing as a setup refusal (exit 2), never a
+  traceback. `run backfill` is the only verb that touches the network,
+  and only at `--apply` (fetch-ebook-metadata).
+- **run merge sends the duplicate to the trash**
+  (`remove_book(..., delete_files="trash")`, cquarry 1.20's
+  `.caltrash/b/<id>/`); `run flush` is the only verb that consumes a
+  queue rather than a target list, and an empty queue is exit 0.
+- **`run` accepts `--db` after the subcommand** (argparse SUPPRESS so
+  the pre-`run` form still wins); the facility-run doc has been
+  suggesting that shape all along.
+
+## Programmer-facing contract notes (3.38.0 onward, Phase 19 B)
+
+- **The audit-depth classes host their logic deliberately.** B.3
+  (author-sort sanity), B.5 (cover aspect bands), and B.6 (FTS
+  coverage rows) were routed "to cquarry" by the deep dive, but
+  cquarry never boxed them; per the lane decision they are implemented
+  locally (validate_metadata check, scripts/audit_cover_aspect.py,
+  modes/fts.py staleness helper reused by modes/audit.py) and the
+  cquarry-predicate promotion remains a recorded future option. Do not
+  assume a `find_bad_author_sorts`/`find_distorted_covers` predicate
+  exists.
+- **audit_isbns' year_mismatch is advisory and additive:** it rides
+  the per-result records and the exit-1 findings contract but never
+  alters the ISBN verdicts. The acceptable multi-author author_sort
+  shape is the `" & "` join of per-author sorts in book order
+  (Calibre's own form).
+- **check_pdf's new findings (text_layer_partial, low_dpi) are
+  advisory:** the structural total (header, qpdf_errors) and the
+  exit contract run.py's seam honors are unchanged, so phase-1
+  manifests keep their shape.
+
 ## Programmer-facing contract notes (3.37.0 onward, Phase 19 A)
 
 - **`--restrict` is a scoping view, not per-mode filters.**
@@ -230,19 +309,34 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   peek, 2026-09-12). If categories ever appear, the right home is the
   cquarry search engine, not this frontend.
 
-## Programmer-facing contract notes (cquarry >= 1.7)
-- `db.get_all_books()` rows expose `authors`, `tags`, `languages`, and `formats` as native `list[str]`. Never `.split(",")` them; comma-containing author/tag names are preserved by the link-table hydration. `normalize_author_display()` accepts both the legacy joined string and the list form.
-- Every book row also carries `size` (total `data.uncompressed_size` bytes, may be None) and, since cquarry >= 1.3/1.4, `pages` (native `books_pages_link`), `author_sorts`, and `author_links`.
-- `search()` raises `ParseException` for unknown virtual libraries or saved searches; only `resolve_vl()` / `resolve_saved_search()` raise `ValueError` (with an available-names message).
-- Raw comments payloads are HTML; run them through `cquarry.helpers.strip_html()` before terminal output.
-- **Write verbs** (`--set-*`, `--add-tag`, `--remove-tag`, `--clear-*`, `--remove-book`) are opt-in and funnel through `run_write()` in `src/cquarry_cli/writeops.py`, dispatched by `cli.py` for flags and called directly by `tui.py` for menu flows; it owns the WritableCalibreDB lifecycle and the error-to-exit-code mapping (argument problems exit 2, lock/write errors exit 1). Action builders return `(exit_code, status)` tuples, status `"applied"` or `"already-so"` from cquarry's `changed` returns, and the batch summary reports real outcomes instead of a blanket ok. Read modes never import `cquarry.write` or `writeops`; keep it that way.
-- **Dependency policy.** `cquarry` and `vir-tui` ride PyPI floors (see `pyproject.toml`; bump a floor deliberately when adopting new features of that library), never git deps, and `uv.lock` stays out of the repo so installs resolve the floors fresh. CI pre-installs cquarry from git `@main` so main is tested against the library's head.
+### Programmer-facing contract notes (3.35.0 onward)
 
-## Programmer-facing contract notes (3.24.0 onward)
-
-- **Detail/audit/analytics modes render; cquarry derives.** `--book` is a renderer over cquarry 1.8's `get_book_dossier()` (batch forms compose it in a loop; `--book --untagged` sources ids from `cquarry.integrity.find_untagged`); `--audit`'s per-book predicates come from `cquarry.integrity`; `--analytics`/`--stats` consume `cquarry.analytics`. Do not re-derive a predicate or a stat inline in this repo: promote it to cquarry (the frontend-only split, now enforced by usage). The one deliberate exception: `--audit`'s duplicate grouping stays inline because the CSV joins ids in scan order and `find_duplicate_books()` sorts numerically.
-- **`--analytics genres` is a pure renderer over cquarry >= 1.12's `analytics.genre_distribution()`.** That function owns the rollup semantics (genre = first dot-path segment; a book counts once per node even when its tags share an ancestor; shares are fractions of the whole library, so multi-root books push the sum over 1.0; `"untagged"` last). The renderer slices to `--genre-depth N` (default 1 = roots only; deeper levels indent under their parents with the last path segment as the label) and does formatting only: %, bars, the sums-over-100% caveat. Every rendered level stays a share of the whole library, not of its parent.
-- **Set mode (Phase 16, `src/cquarry_cli/setwrite.py`)**: one target source (`--ids`, `--from-search`, `--from-untagged`, `--from-manifest`; hand-supplied ids are validated read-only and unknown ids abort exit 2 before anything opens writable) feeds id-less `--batch-*` verbs. `dispatch_set_write` runs BEFORE `dispatch_write` in `cli.py` so a single-book/set combination is refused before anything executes. Dry-run by default; `--apply` demands a closed Calibre (`pgrep ^calibre` guard, the `fetch_library_codes.py` precedent) and a `--backup-dir` outside the library directory (the `stamp_pdf.py` precedent), then ONE `batch()` transaction; any per-(book, verb) failure rolls the whole pass back (exit 1, `committed: false`). `--batch-clear-rating` is manifest-only, mechanically enforced; column verbs refuse `#reading_status`/`status`/`date_read`; there is deliberately no `--batch-remove-book` and no set-mode rating SET. Verb actions reuse the writeops action builders quieted; new set verbs should do the same rather than opening connections inline.
+- **The filename-stamp convention is "Author - Title" (decided, not
+  open).** `_FILENAME_STAMP` is the seed parser and `_drive_stamp` the
+  writer; the observed corpus (libgen.li names) confirms the direction.
+  Calibre's filename fallback reads the OPPOSITE order and stamp_pdf's
+  `_derive_from_filename` preview deliberately mirrors Calibre (it
+  previews what an unstamped import would guess); do not "align" either
+  to run.py's reading.
+- **`run phase1` seeds `provenance`.** `run._provenance_from_filename`
+  maps the filename's site markers onto the #source vocabulary
+  (Anna's Archive trailer -> "Anna's Archive"; z-library.sk/1lib.sk ->
+  "Z-Lib", the renamed enum value of the 2026-09-12/13 ruling; libgen.* ->
+  "Library Genesis"; no marker -> None). The value is sealed:
+  `manifest._seal_payload` binds provenance alongside stamps and lossy
+  flags, so a post-sign provenance edit fails every load until
+  re-signing. Phase 2's cc6 stamping is unchanged (it always consumed
+  `entry["provenance"]`; it was the phase-1 half that was dead).
+- **check_pdf's qpdf class reads the exit code alone** (qpdf's
+  documented contract: 0 clean, 3 warnings, 2 errors). qpdf writes
+  warnings to stderr; never reintroduce a stdout marker gate, and never
+  count `qpdf_warnings` findings in the structural total.
+- **`--audit` renders conversion overrides (3.36.0).** The
+  `conversion_override` rows and the summary block consume cquarry's
+  `get_conversion_profiles` (the predicate's library home; never
+  re-derive it inline), while `scripts/audit_conversion_overrides.py`
+  remains the standalone, pipeable form (exit 1 on findings). The mode
+  keeps `--audit`'s exit-0 reporting contract.
 
 ### Programmer-facing contract notes (3.33.0 onward)
 
@@ -279,35 +373,6 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   apply via `run._apply_opf`); phase 3 enforces the closed-Calibre guard
   and the banned answer-file fields, and mechanical-pass trouble
   (bindery/reconcile rc 2) fails the verb and lands in the batch record.
-
-### Programmer-facing contract notes (3.35.0 onward)
-
-- **The filename-stamp convention is "Author - Title" (decided, not
-  open).** `_FILENAME_STAMP` is the seed parser and `_drive_stamp` the
-  writer; the observed corpus (libgen.li names) confirms the direction.
-  Calibre's filename fallback reads the OPPOSITE order and stamp_pdf's
-  `_derive_from_filename` preview deliberately mirrors Calibre (it
-  previews what an unstamped import would guess); do not "align" either
-  to run.py's reading.
-- **`run phase1` seeds `provenance`.** `run._provenance_from_filename`
-  maps the filename's site markers onto the #source vocabulary
-  (Anna's Archive trailer -> "Anna's Archive"; z-library.sk/1lib.sk ->
-  "Z-Lib", the renamed enum value of the 2026-09-12/13 ruling; libgen.* ->
-  "Library Genesis"; no marker -> None). The value is sealed:
-  `manifest._seal_payload` binds provenance alongside stamps and lossy
-  flags, so a post-sign provenance edit fails every load until
-  re-signing. Phase 2's cc6 stamping is unchanged (it always consumed
-  `entry["provenance"]`; it was the phase-1 half that was dead).
-- **check_pdf's qpdf class reads the exit code alone** (qpdf's
-  documented contract: 0 clean, 3 warnings, 2 errors). qpdf writes
-  warnings to stderr; never reintroduce a stdout marker gate, and never
-  count `qpdf_warnings` findings in the structural total.
-- **`--audit` renders conversion overrides (3.36.0).** The
-  `conversion_override` rows and the summary block consume cquarry's
-  `get_conversion_profiles` (the predicate's library home; never
-  re-derive it inline), while `scripts/audit_conversion_overrides.py`
-  remains the standalone, pipeable form (exit 1 on findings). The mode
-  keeps `--audit`'s exit-0 reporting contract.
 
 ### Programmer-facing contract notes (3.32.0 onward)
 
@@ -347,6 +412,20 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   `sqlite3.Error` mid-session degrades to the re-prompt. Keep the
   construction inside those boundaries.
 
+## Programmer-facing contract notes (3.24.0 onward)
+
+- **Detail/audit/analytics modes render; cquarry derives.** `--book` is a renderer over cquarry 1.8's `get_book_dossier()` (batch forms compose it in a loop; `--book --untagged` sources ids from `cquarry.integrity.find_untagged`); `--audit`'s per-book predicates come from `cquarry.integrity`; `--analytics`/`--stats` consume `cquarry.analytics`. Do not re-derive a predicate or a stat inline in this repo: promote it to cquarry (the frontend-only split, now enforced by usage). The one deliberate exception: `--audit`'s duplicate grouping stays inline because the CSV joins ids in scan order and `find_duplicate_books()` sorts numerically.
+- **`--analytics genres` is a pure renderer over cquarry >= 1.12's `analytics.genre_distribution()`.** That function owns the rollup semantics (genre = first dot-path segment; a book counts once per node even when its tags share an ancestor; shares are fractions of the whole library, so multi-root books push the sum over 1.0; `"untagged"` last). The renderer slices to `--genre-depth N` (default 1 = roots only; deeper levels indent under their parents with the last path segment as the label) and does formatting only: %, bars, the sums-over-100% caveat. Every rendered level stays a share of the whole library, not of its parent.
+- **Set mode (Phase 16, `src/cquarry_cli/setwrite.py`)**: one target source (`--ids`, `--from-search`, `--from-untagged`, `--from-manifest`; hand-supplied ids are validated read-only and unknown ids abort exit 2 before anything opens writable) feeds id-less `--batch-*` verbs. `dispatch_set_write` runs BEFORE `dispatch_write` in `cli.py` so a single-book/set combination is refused before anything executes. Dry-run by default; `--apply` demands a closed Calibre (`pgrep ^calibre` guard, the `fetch_library_codes.py` precedent) and a `--backup-dir` outside the library directory (the `stamp_pdf.py` precedent), then ONE `batch()` transaction; any per-(book, verb) failure rolls the whole pass back (exit 1, `committed: false`). `--batch-clear-rating` is manifest-only, mechanically enforced; column verbs refuse `#reading_status`/`status`/`date_read`; there is deliberately no `--batch-remove-book` and no set-mode rating SET. Verb actions reuse the writeops action builders quieted; new set verbs should do the same rather than opening connections inline.
+
+## Programmer-facing contract notes (cquarry >= 1.7)
+- `db.get_all_books()` rows expose `authors`, `tags`, `languages`, and `formats` as native `list[str]`. Never `.split(",")` them; comma-containing author/tag names are preserved by the link-table hydration. `normalize_author_display()` accepts both the legacy joined string and the list form.
+- Every book row also carries `size` (total `data.uncompressed_size` bytes, may be None) and, since cquarry >= 1.3/1.4, `pages` (native `books_pages_link`), `author_sorts`, and `author_links`.
+- `search()` raises `ParseException` for unknown virtual libraries or saved searches; only `resolve_vl()` / `resolve_saved_search()` raise `ValueError` (with an available-names message).
+- Raw comments payloads are HTML; run them through `cquarry.helpers.strip_html()` before terminal output.
+- **Write verbs** (`--set-*`, `--add-tag`, `--remove-tag`, `--clear-*`, `--remove-book`) are opt-in and funnel through `run_write()` in `src/cquarry_cli/writeops.py`, dispatched by `cli.py` for flags and called directly by `tui.py` for menu flows; it owns the WritableCalibreDB lifecycle and the error-to-exit-code mapping (argument problems exit 2, lock/write errors exit 1). Action builders return `(exit_code, status)` tuples, status `"applied"` or `"already-so"` from cquarry's `changed` returns, and the batch summary reports real outcomes instead of a blanket ok. Read modes never import `cquarry.write` or `writeops`; keep it that way.
+- **Dependency policy.** `cquarry` and `vir-tui` ride PyPI floors (see `pyproject.toml`; bump a floor deliberately when adopting new features of that library), never git deps, and `uv.lock` stays out of the repo so installs resolve the floors fresh. CI pre-installs cquarry from git `@main` so main is tested against the library's head.
+
 ## Hard constraints
 - **Frontend Only.** The core database logic and search evaluation are delegated to the external `cquarry` shared library. Do not add database reads or search parsing logic here; contribute them to `cquarry` instead.
 - **Minimal Dependencies.** Only `cquarry`, `vir-tui`, and `tqdm`. No `calibredb` required.
@@ -366,48 +445,3 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 ## Conventions
 - Single source of truth for version is `src/cquarry_cli/__init__.py`; `tests/test_version.py` pins it equal to the root `VERSION` file, `pyproject.toml`, and the newest `patchnotes.md` heading.
 - Run tests with `./run_tests.sh`. Test the CLI, not just the functions.
-
-## Programmer-facing contract notes (3.38.0 onward, Phase 19 B)
-
-- **The audit-depth classes host their logic deliberately.** B.3
-  (author-sort sanity), B.5 (cover aspect bands), and B.6 (FTS
-  coverage rows) were routed "to cquarry" by the deep dive, but
-  cquarry never boxed them; per the lane decision they are implemented
-  locally (validate_metadata check, scripts/audit_cover_aspect.py,
-  modes/fts.py staleness helper reused by modes/audit.py) and the
-  cquarry-predicate promotion remains a recorded future option. Do not
-  assume a `find_bad_author_sorts`/`find_distorted_covers` predicate
-  exists.
-- **audit_isbns' year_mismatch is advisory and additive:** it rides
-  the per-result records and the exit-1 findings contract but never
-  alters the ISBN verdicts. The acceptable multi-author author_sort
-  shape is the `" & "` join of per-author sorts in book order
-  (Calibre's own form).
-- **check_pdf's new findings (text_layer_partial, low_dpi) are
-  advisory:** the structural total (header, qpdf_errors) and the
-  exit contract run.py's seam honors are unchanged, so phase-1
-  manifests keep their shape.
-
-## Programmer-facing contract notes (3.39.0 onward, Phase 19 C)
-
-- **The integration verbs live in `src/cquarry_cli/integrate.py`** and
-  dispatch through `run`'s subparser (`INTEGRATE_PHASES` in run.py).
-  They are write-path code: read modes never import them. The shared
-  lifecycle is `dispatch_integrate`: usage guards (exit 2 before the
-  library opens), read-only target resolution (`--search`/`--ids`,
-  unknown ids abort), then dry-run plans or the guarded `--apply`
-  (anchored pgrep, timestamped `_backup_db` outside the library for
-  convert/polish/cover/merge/flush; export touches nothing and needs
-  no backup).
-- **External programs are subprocess seams**: ebook-convert,
-  ebook-polish, calibredb, fetch-ebook-metadata. Every seam tolerates
-  the binary being missing as a setup refusal (exit 2), never a
-  traceback. `run backfill` is the only verb that touches the network,
-  and only at `--apply` (fetch-ebook-metadata).
-- **run merge sends the duplicate to the trash**
-  (`remove_book(..., delete_files="trash")`, cquarry 1.20's
-  `.caltrash/b/<id>/`); `run flush` is the only verb that consumes a
-  queue rather than a target list, and an empty queue is exit 0.
-- **`run` accepts `--db` after the subcommand** (argparse SUPPRESS so
-  the pre-`run` form still wins); the facility-run doc has been
-  suggesting that shape all along.

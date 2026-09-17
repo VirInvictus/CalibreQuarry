@@ -87,6 +87,51 @@ class TagTreeRollupTests(_TempDBCase):
         self.assertIn("Fic (1)", out.getvalue())
         self.assertIn("SciFi (1)", out.getvalue())
 
+    def _add_tagged_book(self, book_id, tag):
+        import sqlite3
+
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+            "has_cover,last_modified,series_index,path,uuid) VALUES "
+            f"({book_id},'T{book_id}','T{book_id}','A','2024-01-01',"
+            f"'2024-01-01',0,'2024-01-02 00:00:00',1.0,'p/{book_id}','u{book_id}')"
+        )
+        # Calibre dedupes tag names: get or create the one tag row.
+        row = con.execute("SELECT id FROM tags WHERE name=?", (tag,)).fetchone()
+        tag_id = (
+            row[0]
+            if row
+            else con.execute(
+                "INSERT INTO tags (id,name) VALUES ((SELECT COALESCE(MAX(id),0)+1 FROM tags),?)",
+                (tag,),
+            ).lastrowid
+        )
+        con.execute(
+            "INSERT INTO books_tags_link (book,tag) VALUES (?,?)", (book_id, tag_id)
+        )
+        con.commit()
+        con.close()
+
+    def test_depth_three_tree_and_parents_with_direct_books(self):
+        # The real-library shape the 3.47.0 renderer crashed on: a
+        # depth-3 subtree (the inlined rollup recursed into a dict as an
+        # addend) and a parent that carries its own direct books (the
+        # leaves-only rollup dropped them). The engine's tag_rollup
+        # arithmetic answers both: every node shows its subtree total.
+        self._add_tagged_book(50, "Fic.Fantasy.Grimdark")
+        self._add_tagged_book(51, "Fic.Fantasy.Grimdark")
+        self._add_tagged_book(52, "Fic.Fantasy")
+        self._add_tagged_book(53, "Fic.Standalone")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            show_tag_tree(self.db, quiet=True)
+        body = out.getvalue()
+        self.assertIn("Fic (5)", body)  # 2 + 1 + 1 beneath, 1 direct SciFi
+        self.assertIn("Fantasy (3)", body)  # 2 Grimdark + 1 direct
+        self.assertIn("Grimdark (2)", body)
+        self.assertIn("Standalone (1)", body)
+
 
 class IdentifierlessCliFlagTests(unittest.TestCase):
     def test_flag_is_registered(self):

@@ -35,12 +35,13 @@ read modes never import it.
 """
 
 import json
-from datetime import datetime
 import subprocess
 import sys
 from pathlib import Path
 
 from cquarry_cli import writeops
+from cquarry_cli.backups import make_backup
+from cquarry_cli.dests import BATCH_BOOL_DESTS, BATCH_VALUE_DESTS, SET_MODE_SOURCES
 
 _PGREP_TIMEOUT = 15
 
@@ -50,7 +51,10 @@ _PGREP_TIMEOUT = 15
 # every door shares); this alias keeps set mode's entrance check naming.
 _FORBIDDEN_LABELS = writeops.FORBIDDEN_COLUMNS
 
-_SOURCES = ("set_ids", "from_search", "from_untagged", "from_manifest")
+# Set mode's target sources and verb dests come from dests.py, the one
+# shared source for every parallel dest list (restrict's refusal gate
+# counts the same tuples; a new verb lands once, not three times).
+_SOURCES = SET_MODE_SOURCES
 
 
 class _UsageError(Exception):
@@ -407,35 +411,11 @@ def _has_verbs(args) -> bool:
     # Value-bearing flags count by PRESENCE: an empty string is a real
     # argument whose refusal must reach the user, never a missing verb.
     # The store_true --batch-clear-* flags count by truthiness, since
-    # their False default would read as present.
-    value_flags = (
-        "batch_add_tag",
-        "batch_remove_tag",
-        "batch_set_column",
-        "batch_clear_column",
-        "batch_add_column_value",
-        "batch_set_title",
-        "batch_set_authors",
-        "batch_set_pubdate",
-        "batch_set_publisher",
-        "batch_set_languages",
-        "batch_set_series",
-        "batch_set_identifier",
-        "batch_clear_identifier",
-        "batch_set_cover",
-        "batch_remove_format",
-    )
-    bool_flags = (
-        "batch_clear_tags",
-        "batch_clear_rating",
-        "batch_clear_pubdate",
-        "batch_clear_publisher",
-        "batch_clear_languages",
-        "batch_clear_series",
-    )
-    return any(getattr(args, name, None) is not None for name in value_flags) or any(
-        getattr(args, name, False) for name in bool_flags
-    )
+    # their False default would read as present. The tuples live in
+    # dests.py beside the lists they must stay disjoint from.
+    return any(
+        getattr(args, name, None) is not None for name in BATCH_VALUE_DESTS
+    ) or any(getattr(args, name, False) for name in BATCH_BOOL_DESTS)
 
 
 def _validate(args) -> None:
@@ -471,48 +451,6 @@ def _validate(args) -> None:
         raise _UsageError("set writes support --format json only.")
     if args.commit_per_book and not args.apply:
         raise _UsageError("--commit-per-book is only meaningful with --apply.")
-
-
-def _make_backup(db_path: str, backup_dir_raw: str) -> Path:
-    backup_dir = Path(backup_dir_raw).expanduser()
-    resolved = backup_dir.resolve()
-    lib_dir = Path(db_path).resolve().parent
-    if resolved == lib_dir or resolved.is_relative_to(lib_dir):
-        raise _UsageError(
-            f"--backup-dir ({resolved}) must sit OUTSIDE the library "
-            f"directory ({lib_dir}): a backup beside metadata.db invites "
-            "re-import and shares the disk."
-        )
-    try:
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        # Timestamped, like run.py's phase-2 backup: a fixed name let a
-        # second run destroy the only restore point. Taken through the
-        # sqlite backup API like the other doors (run.py, integrate.py):
-        # a copy2 of a database with a hot journal can snapshot a state
-        # its WAL would never replay into.
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        dest = backup_dir / f"metadata-{stamp}.db"
-        n = 2
-        while dest.exists():
-            dest = backup_dir / f"metadata-{stamp}-{n}.db"
-            n += 1
-        import sqlite3
-
-        src = sqlite3.connect(db_path)
-        try:
-            dst = sqlite3.connect(dest)
-            try:
-                with dst:
-                    src.backup(dst)
-            finally:
-                dst.close()
-        finally:
-            src.close()
-    except OSError as e:
-        raise _UsageError(f"could not write the backup: {e}") from None
-    except sqlite3.Error as e:
-        raise _UsageError(f"could not write the backup: {e}") from None
-    return dest
 
 
 def _run_one(results, wdb, book_id: int, label: str, make) -> None:
@@ -715,8 +653,8 @@ def dispatch_set_write(args, db_path: str) -> int | None:
         print("ERROR: Calibre is running; close it before --apply.", file=sys.stderr)
         return 1
     try:
-        backup = _make_backup(db_path, args.backup_dir)
-    except _UsageError as e:
+        backup = Path(make_backup(db_path, args.backup_dir))
+    except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
 

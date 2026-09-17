@@ -35,7 +35,6 @@ import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -44,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from cquarry_cli import manifest
+from cquarry_cli.backups import make_backup
 from cquarry_cli.manifest import DEFAULT_AUDIENCE
 
 _PGREP_TIMEOUT = 15
@@ -344,6 +344,60 @@ def _mirror_lossy(man: dict[str, Any], bindery_shape: dict[str, Any]) -> None:
         )
 
 
+def _mirror_bindery_decisions(
+    man: dict[str, Any], bindery_shape: dict[str, Any], *, apply_lossy: bool
+) -> None:
+    """Bindery's run-report decisions become decisions_needed entries, the
+    durable record the seal binds and phase 2 blocks on.
+
+    Two mirrors land here. manual_watermark_repair becomes manual_repair
+    per book (the sibling gap of the 3.43.0 lossy mirror: books bindery
+    refuses to auto-strip used to vanish from the record entirely). And a
+    dry pass (apply_lossy False) emits lossy_consent for every
+    lossy-flagged file, the designed home for an in-manifest resolution:
+    the reviewer sets the decision's "resolution" to "apply" and re-signs
+    instead of re-running phase 1 with --apply-lossy (the re-run used to
+    mint a second manifest under the unique-name rule and orphan the
+    first). phase 2 consumes the resolution and drives the strips itself;
+    an unresolved lossy_consent still blocks the import like any other
+    open decision."""
+    if not bindery_shape:
+        return
+    by_path = {os.path.abspath(f["path"]): f for f in man["files"]}
+    for decision in bindery_shape.get("decisions_needed", []):
+        if not isinstance(decision, dict):
+            continue
+        if decision.get("decision") != "manual_watermark_repair":
+            continue
+        for path in decision.get("books", []):
+            if by_path.get(os.path.abspath(str(path))) is None:
+                continue
+            manifest.add_decision(
+                man,
+                "manual_repair",
+                file=str(path),
+                detail=(
+                    "bindery refused the watermark strip (too large to "
+                    "remove safely); remove the stamp by hand"
+                ),
+            )
+    if apply_lossy:
+        return
+    for entry in man["files"]:
+        if entry["lossy"]["flagged"]:
+            manifest.add_decision(
+                man,
+                "lossy_consent",
+                file=entry["path"],
+                detail=(
+                    "bindery's gate-accepted lossy repairs are pending "
+                    "(this phase-1 run was read-only): re-run phase 1 "
+                    "with --apply-lossy, or set this decision's "
+                    '"resolution" to "apply" and re-sign'
+                ),
+            )
+
+
 def _quarantine(downloads_dir: str, path: str, reason: str) -> str:
     """Move one problem file into _quarantine/, never onto an existing
     file: a basename collision gets a numbered sibling, so two same-named
@@ -501,6 +555,7 @@ def run_phase1(
         if entry["verdict"] == "needs_decision":
             entry["verdict"] = "approved_for_import"
     _mirror_lossy(man, bindery_shape)
+    _mirror_bindery_decisions(man, bindery_shape, apply_lossy=apply_lossy)
     manifest.approve(
         man,
         [f["path"] for f in man["files"] if f["verdict"] == "approved_for_import"],
@@ -538,38 +593,6 @@ def run_phase1(
 # ---------------------------------------------------------------------------
 # phase 2: the automated import
 # ---------------------------------------------------------------------------
-
-
-def _backup_db(db_path: str, backup_dir: str) -> str:
-    """A pre-run backup that a second run cannot destroy: the copy is
-    timestamped (a fixed name let rerun two overwrite the only restore
-    point) and taken through sqlite's backup API, so a hot journal can
-    never leave the snapshot internally inconsistent."""
-    resolved = Path(backup_dir).expanduser().resolve()
-    lib_dir = Path(db_path).resolve().parent
-    if resolved == lib_dir or resolved.is_relative_to(lib_dir):
-        raise ValueError(
-            f"--backup-dir ({resolved}) must sit OUTSIDE the library directory"
-        )
-    os.makedirs(resolved, exist_ok=True)
-    stem = Path(db_path).stem
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = resolved / f"{stem}-{stamp}.db"
-    n = 2
-    while dest.exists():
-        dest = resolved / f"{stem}-{stamp}-{n}.db"
-        n += 1
-    src = sqlite3.connect(db_path)
-    try:
-        dst = sqlite3.connect(str(dest))
-        try:
-            with dst:
-                src.backup(dst)
-        finally:
-            dst.close()
-    finally:
-        src.close()
-    return str(dest)
 
 
 def _fetch_metadata(isbn: str, opf_path: str) -> str:
@@ -693,8 +716,16 @@ def run_phase2(
         )
         return 2
     # metadata_download entries are phase 2's own product (phase 3's
-    # input); every other kind predates the import and blocks it.
-    blockers = [d for d in man["decisions_needed"] if d["kind"] != "metadata_download"]
+    # input); every other kind predates the import and blocks it. The
+    # one exception is a lossy_consent the reviewer resolved in-manifest
+    # ("resolution": "apply"): that resolution IS the consent, and the
+    # strips are driven below instead of blocking the import.
+    blockers = [
+        d
+        for d in man["decisions_needed"]
+        if d["kind"] != "metadata_download"
+        and not (d["kind"] == "lossy_consent" and d.get("resolution") == "apply")
+    ]
     if blockers:
         print(
             f"ERROR: {len(blockers)} decision(s) still open; "
@@ -716,10 +747,64 @@ def run_phase2(
         )
         return 2
     try:
-        backup = _backup_db(db_path, backup_dir)
+        backup = make_backup(db_path, backup_dir)
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
+
+    # The in-manifest lossy consent (see _mirror_bindery_decisions): the
+    # strips happen NOW, file-side, before anything is imported -- the
+    # --apply-lossy phase-1 re-run's outcome without the second manifest.
+    # Consent is all-or-nothing (bindery's re-drive applies every
+    # gate-accepted repair in the tree), so a partial resolution refuses
+    # before any file is touched. Each consumed decision is removed and
+    # the lossy records flip to applied, so a resume never re-drives a
+    # strip that already happened.
+    consents = {
+        d["file"]
+        for d in man["decisions_needed"]
+        if d["kind"] == "lossy_consent" and d.get("resolution") == "apply"
+    }
+    if consents:
+        flagged = {f["path"] for f in man["files"] if f["lossy"]["flagged"]}
+        if consents != flagged:
+            print(
+                "ERROR: lossy consent is all-or-nothing: "
+                f"{len(consents)} decision(s) resolved against "
+                f"{len(flagged)} lossy-flagged file(s); resolve every "
+                "lossy_consent (or none), then re-sign.",
+                file=sys.stderr,
+            )
+            return 2
+        shape = _bindery_phase1(man["downloads_dir"], apply_lossy=True)
+        repaired = {
+            os.path.abspath(str(b.get("path") or "")): b.get("repair")
+            for b in shape.get("books", [])
+            if isinstance(b, dict)
+        }
+        for path in sorted(flagged):
+            repair = repaired.get(os.path.abspath(path))
+            if (
+                not isinstance(repair, dict)
+                or repair.get("status") not in ("accept", "partial")
+                or not (repair.get("summary") or "").strip()
+            ):
+                print(
+                    "ERROR: bindery could not apply the consented repairs "
+                    f"to {os.path.basename(path)}; nothing was imported.",
+                    file=sys.stderr,
+                )
+                return 1
+            entry = manifest.file_by_path(man, path)
+            for record in entry["lossy"]["repairs"]:
+                record["applied"] = True
+        man["decisions_needed"] = [
+            d for d in man["decisions_needed"] if d["kind"] != "lossy_consent"
+        ]
+        # Durable before the import: a crash after this point must not
+        # re-drive the strips on a resume (save re-seals the signed
+        # manifest).
+        manifest.save(man, manifest_path)
 
     from cquarry.write import WritableCalibreDB
 

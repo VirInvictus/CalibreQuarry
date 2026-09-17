@@ -21,9 +21,9 @@ from contextlib import redirect_stderr
 from unittest import mock
 
 from cquarry_cli import manifest
+from cquarry_cli.backups import make_backup
 from cquarry_cli.cli import main
 from cquarry_cli.run import (
-    _backup_db,
     _bindery_phase1,
     _drive_stamp,
     _fetch_metadata,
@@ -462,6 +462,99 @@ class TestRunPhase1(RunCase):
         lossy = manifest.file_by_path(man, path)["lossy"]
         self.assertEqual(lossy["repairs"][0]["applied"], True)
 
+    def test_dry_phase1_emits_lossy_consent_decisions(self):
+        # The lossy-pending flow's in-manifest home (roadmap: the double-
+        # manifest wrinkle): a read-only phase 1 records a lossy_consent
+        # decision per flagged file, so the reviewer can resolve it in
+        # the manifest instead of the --apply-lossy re-run minting a
+        # second batch file.
+        flagged = self._make_file("Security in Computing.epub")
+        clean = self._make_file("clean_edition.epub")
+        shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": flagged,
+                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                },
+                {"path": clean, "repair": None},
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        consents = [d for d in man["decisions_needed"] if d["kind"] == "lossy_consent"]
+        self.assertEqual([d["file"] for d in consents], [flagged])
+
+    def test_apply_lossy_phase1_emits_no_consent_decisions(self):
+        # The consent was carried by the flag itself; the applied record
+        # needs no open decision (one would block phase 2 forever).
+        path = self._make_file("stripped_already.epub")
+        shape = {
+            "apply_lossy": True,
+            "books": [
+                {
+                    "path": path,
+                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                }
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, apply_lossy=True, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertEqual(
+            [d for d in man["decisions_needed"] if d["kind"] == "lossy_consent"], []
+        )
+
+    def test_watermark_refusals_mirror_as_manual_repair_decisions(self):
+        # bindery's manual_watermark_repair books used to vanish from the
+        # durable record entirely (the 3.43.0 lossy mirror's sibling gap).
+        refused = self._make_file("watermarked_edition.epub")
+        outside = "/tmp/not-in-this-batch.epub"
+        shape = {
+            "apply_lossy": False,
+            "books": [{"path": refused, "repair": None}],
+            "decisions_needed": [
+                {
+                    "decision": "manual_watermark_repair",
+                    "detail": "1 book(s) carry a watermark the strip refused",
+                    "books": [refused, outside],
+                }
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        mirrored = [d for d in man["decisions_needed"] if d["kind"] == "manual_repair"]
+        # The in-tree book mirrors; a path bindery names that is not in
+        # the manifest cannot.
+        self.assertEqual([d["file"] for d in mirrored], [refused])
+        self.assertIn("watermark", mirrored[0]["detail"])
+
     def test_inventory_skips_stamp_backups(self):
         # A rerun used to sweep _stamp_backups into the batch as books.
         backups = os.path.join(self.downloads, "_stamp_backups")
@@ -836,6 +929,125 @@ class TestRunPhase2(RunCase):
         rc, _ = self._import(man_path)
         self.assertEqual(rc, 2)
 
+    def _lossy_manifest(self, *paths, resolved=False):
+        """A signed manifest with one lossy-flagged file and its
+        lossy_consent decision (resolved in-manifest on request)."""
+        man_path = self._manifest(*paths)
+        man = manifest.load(man_path)
+        for p in paths:
+            entry = manifest.file_by_path(man, p)
+            entry["lossy"]["flagged"] = True
+            entry["lossy"]["repairs"].append(
+                {
+                    "tool": "bindery",
+                    "summary": "stripped_watermarks:1",
+                    "applied": False,
+                }
+            )
+            decision = manifest.add_decision(
+                man, "lossy_consent", file=p, detail="pending consent"
+            )
+            if resolved:
+                decision["resolution"] = "apply"
+        manifest.save(man, man_path)
+        return man_path
+
+    _APPLY_SHAPE = {
+        "apply_lossy": True,
+        "books": [],  # filled per test; the paths differ per fixture
+    }
+
+    def _apply_shape(self, *paths):
+        return {
+            "apply_lossy": True,
+            "books": [
+                {
+                    "path": p,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                    },
+                }
+                for p in paths
+            ],
+        }
+
+    def test_unresolved_lossy_consent_blocks_the_import(self):
+        path = self._make_file("Security in Computing.epub")
+        man_path = self._lossy_manifest(path)
+        rc, _ = self._import(man_path)
+        self.assertEqual(rc, 2)
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 0)
+
+    def test_resolved_lossy_consent_applies_then_imports(self):
+        # The double-manifest wrinkle's fix: resolution "apply" in the
+        # manifest replaces the --apply-lossy phase-1 re-run; phase 2
+        # drives the strips itself, flips the lossy records to applied,
+        # consumes the decisions, and imports the repaired files.
+        path = self._make_file("Security in Computing.epub")
+        man_path = self._lossy_manifest(path, resolved=True)
+        with mock.patch(
+            "cquarry_cli.run._bindery_phase1",
+            return_value=self._apply_shape(path),
+        ) as bindery:
+            rc, _ = self._import(man_path)
+        self.assertEqual(rc, 0)
+        self.assertTrue(bindery.call_args.kwargs["apply_lossy"])
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 1)
+        man = manifest.load(man_path)
+        self.assertEqual(
+            [d for d in man["decisions_needed"] if d["kind"] == "lossy_consent"], []
+        )
+        self.assertTrue(
+            manifest.file_by_path(man, path)["lossy"]["repairs"][0]["applied"]
+        )
+
+    def test_partial_lossy_consent_refused_before_anything_runs(self):
+        # Consent is all-or-nothing: bindery's re-drive applies every
+        # gate-accepted repair in the tree, so resolving one of two
+        # flagged files would silently outpace the consent.
+        first = self._make_file("Security in Computing.epub")
+        second = self._make_file("watermarked_edition.epub")
+        man_path = self._lossy_manifest(first, second)
+        man = manifest.load(man_path)
+        next(
+            d
+            for d in man["decisions_needed"]
+            if d["kind"] == "lossy_consent" and d["file"] == first
+        )["resolution"] = "apply"
+        manifest.save(man, man_path)
+        with mock.patch("cquarry_cli.run._bindery_phase1") as bindery:
+            rc, _ = self._import(man_path)
+        self.assertEqual(rc, 2)
+        bindery.assert_not_called()
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 0)
+
+    def test_failed_consent_apply_leaves_the_library_unwritten(self):
+        # The re-drive's report is the proof: a book bindery could not
+        # strip fails the verb BEFORE the import batch opens.
+        path = self._make_file("Security in Computing.epub")
+        man_path = self._lossy_manifest(path, resolved=True)
+        shape = {
+            "apply_lossy": True,
+            "books": [{"path": path, "repair": None}],
+        }
+        with mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape):
+            rc, _ = self._import(man_path)
+        self.assertEqual(rc, 1)
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 0)
+
     def test_phase2_refuses_a_tampered_manifest(self):
         # The seal (the sweep's P0): a manifest edited after signing must
         # fail the load loudly, never import the tampered content.
@@ -1015,8 +1227,8 @@ class TestRunPhase2(RunCase):
 
     def test_backup_survives_a_second_run(self):
         bdir = os.path.join(self.temp_dir, "backups")
-        first = _backup_db(self.db_path, bdir)
-        second = _backup_db(self.db_path, bdir)
+        first = make_backup(self.db_path, bdir)
+        second = make_backup(self.db_path, bdir)
         self.assertNotEqual(first, second)
         self.assertTrue(os.path.exists(first))  # the first restore point survives
         con = sqlite3.connect(first)
