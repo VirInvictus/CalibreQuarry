@@ -7,6 +7,7 @@ metadata.db.
 """
 
 import contextlib
+import csv
 import importlib.util
 import io
 import os
@@ -1504,6 +1505,31 @@ class TestIsbnCopyrightYear(unittest.TestCase):
         self.assertTrue(audit_isbns._year_disagrees([1985], 2020))
         self.assertFalse(audit_isbns._year_disagrees([], 2020))
         self.assertFalse(audit_isbns._year_disagrees([1985], None))
+
+
+audit_drm = _load("audit_drm")
+
+
+class TestDrmCsvCarriesNaRows(unittest.TestCase):
+    """The DJVU box (2026-09-17): the directory scan used to skip N/A
+    files before the CSV append, so the runner recorded `unscanned` for a
+    format that WAS judged. N/A rows reach the CSV; they stay out of the
+    counters and the summary."""
+
+    def test_na_files_reach_the_csv(self):
+        tmp = tempfile.mkdtemp(prefix="cquarry_drm_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        djvu = os.path.join(tmp, "scan_book.djvu")
+        with open(djvu, "wb") as f:
+            f.write(b"ATTACK1DjVu")
+        csv_path = os.path.join(tmp, "drm.csv")
+        rc = audit_drm.run_directory(pathlib.Path(tmp), pathlib.Path(csv_path))
+        self.assertEqual(rc, 0)
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual([r["path"] for r in rows], [djvu])
+        self.assertEqual(rows[0]["status"], "N/A")
+        self.assertEqual(rows[0]["kind"], "djvu")
 
 
 if __name__ == "__main__":

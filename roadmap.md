@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.48.0.
+What's done, what's next. Updated as of v3.49.0.
 
 ---
 
@@ -1394,3 +1394,100 @@ note; every integration ships with a dry-run before any write.
       recovered 15 of the 17 misses at work level (only the German Analysis
       3 and the Chinese Kodaira have no LoC record at all). The tool could
       do this fallback itself and tag work-level hits as such.
+
+- [x] **audit_drm has no DJVU coverage, and the runner reports it as
+      `unscanned`** (observed 2026-09-17, math/CS wave: the batch's one
+      .djvu shipped with `checks.drm = "unscanned"` while every other
+      format got the scan). The phase-1 skill's battery table says DJVU
+      gets "the DRM scan and the format checks", so the doc and the tool
+      disagree; DjVu has no ADEPT/FairPlay history, so the real ask is
+      either an explicit "djvu: n/a (no DRM scheme)" verdict in the runner
+      or a scan hook in audit_drm, not silence. *(3.49.0: the N/A verdict
+      already existed in audit_drm -- the directory- and library-scan
+      loops `continue`d past it BEFORE the CSV append, so the row never
+      reached the runner. Both loops now write N/A rows (still out of the
+      counters and the summary); the manifest records `N/A`, which is no
+      quarantine reason. Instrument test re-pinned from "unscanned" to
+      the N/A contract; the skill's coverage note updated.)*
+
+- [x] **Phase 2 did not stamp cc6 from the manifest's provenance** (observed
+      2026-09-18, math/CS wave): the signed manifest recorded provenance as
+      35 Z-Lib + 1 Anna's Archive + 1 None, but every one of the 37 books
+      arrived in metadata.db with cc6 = Anna's Archive — as if the
+      provenance review never reached the source column (or the import ran
+      outside `cquarry run phase2` entirely; the run that landed was
+      Brandon's, so the verb path is unconfirmed). Either way the contract
+      "the import stamps cc6 #source from the manifest's recorded
+      provenance" did not hold end to end for this batch; worth a phase-2
+      audit of where provenance is consumed, and a cc6-vs-manifest check at
+      the end of the verb. *(3.49.0: audit AND verb-side check, with an
+      erratum. The audit read both signed manifests against metadata.db:
+      the reviewed provenance landed CORRECTLY on 77 of 79 books; the only
+      two mismatches are the manifest-None files (one picked up Z-Lib, one
+      Anna's Archive), and BOTH signed manifests carry zero
+      `imported_id`s -- phase 2 saves the resume record right after the
+      import, so these two batches never went through the verb. The
+      "all-Anna's-Archive" reading does not match the landed DB either.
+      The verb's only `#source` writer is run.py's import loop, and it
+      now verifies in-batch: set_custom_column's changed flag must be
+      True for a fresh book's first stamp, or the batch rolls back and
+      the verb exits 1 with the library unwritten. The out-of-verb door
+      remains outside the verb's reach -- the question for a future
+      mismatch is which door ran.)*
+
+- [x] **Runner seeds manifest stamps from filenames even when the file
+      carries good embedded metadata** (observation 2026-09-18, after three
+      batch runs): `_stamps_from_filename` is mechanical by design and the
+      skill's correction step covers the gap, but with z-library
+      parenthetical names every stamp arrives as the whole filename + empty
+      authors, so the correction pass is the single highest-risk human step
+      in the pipeline (the 2026-09-17 stamp-mismatch bug lived exactly
+      there). For PDFs the phase-1 deep-stamp pass has ALREADY written
+      verified title/author/publisher into the file: reading seeds from
+      `ebook-meta` where embedded metadata exists (filename fallback only
+      when empty) would delete the correction step for most files and
+      retire its failure mode. *(3.49.0: `_stamps_from_embedded` reads
+      the ebook-meta display output; title/authors/publisher/pubdate/
+      language seed per-field over the filename parse, ISBN deliberately
+      never. A bare-year pubdate is dropped (cquarry's add_book raises on
+      it); a garbage read (calibre exits 0 with its own reversed-order
+      filename guess plus a stderr traceback) returns no data, and a
+      missing binary degrades to filename-only with a warning; a
+      per-file read failure lands in the entry's `repairs`. Skill step
+      5c rewritten around the new seeding.)*
+
+- [x] **lossy_consent decisions fire on structurally-repaired EPUBs**
+      (observed 2026-09-17 on KR&R and again 2026-09-19 on three Confucian-classics
+      EPUBs): bindery's gate-accepted fixes in these cases were structural
+      (`--add-img-alt`, `--strip-invalid-value`, `fix_ncx_ids`, `ncx_uid_synced`)
+      with no lossy strip among them, yet the runner emitted a `lossy_consent`
+      decision per file, requiring a `"resolution": "apply"` pass before
+      phase 2. Either the lossy mirror should record WHICH repairs are
+      lossy (and only consent-gate those), or the decision detail should
+      name the fix classes so the reviewer can see consent is vacuous.
+      *(3.49.0, both halves: `_mirror_lossy` records every gate-accepted
+      repair with its class (`"lossy": true/false`, judged by the five
+      fix keys bindery's own gate treats as lossy strips: stripped_pagination,
+      stripped_broken_tags, stripped_watermarks, dropped_marker,
+      stub_docs_dropped) and only lossy-marker repairs set `flagged`, so
+      structural-only files stop firing consent decisions; the decision
+      detail carries the lossy summaries. Phase 2's consent re-drive
+      flips and refuses over every recorded repair, lossy or structural
+      -- bindery's re-drive applies all of them, so a structural record
+      left `applied: false` would lie. The structured-fixes idea is
+      recorded on bindery-cli's roadmap as the cleaner long-term home.)*
+
+- [x] **cc6 provenance gap RECURRED on 2026-09-19** (the 09-18 box above):
+      the numerics/classics batch arrived all-Anna's-Archive again against a
+      manifest recording 41 Z-Lib + 1 None, across 42 of 42 books. Two
+      consecutive batches means the provenance-to-cc6 path is systematically
+      disconnected (or both imports went through a door that skips it); the
+      phase-3 cc6-vs-manifest check is catching it, but the verb-side fix
+      (or a provenance audit of the import door actually used) is owed.
+      *(3.49.0: resolved as the 09-18 box. The audit found the DB at 41
+      Z-Lib + 1 Anna's Archive for this wave, not all-Anna's-Archive
+      across 42 of 42, with the single mismatch again being the
+      manifest-None file; both batches went through a non-verb door (zero
+      recorded `imported_id`s), which no verb-side fix can police. The
+      in-batch stamp verification is the verb-side half; the phase-3
+      check stays.)*

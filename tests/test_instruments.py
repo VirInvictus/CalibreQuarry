@@ -61,15 +61,16 @@ class TestRealInstruments(unittest.TestCase):
         verdicts = _drm_verdicts(self.downloads)
         self.assertEqual(verdicts[epub], "CLEAN")
 
-    def test_djvu_is_unscanned_not_drm(self):
-        # audit_drm skips its N/A verdicts (DJVU has no DRM scheme) when
-        # writing the CSV, so the runner sees such files as "unscanned" —
-        # never as a quarantine reason.
+    def test_djvu_is_na_in_the_verdicts(self):
+        # The DJVU box (2026-09-17): the CSV used to skip N/A verdicts, so
+        # the runner recorded "unscanned" for a format that WAS judged.
+        # The row now reaches the CSV and the verdicts dict as "N/A" --
+        # still never a quarantine reason (only DRM/ERROR are).
         djvu = os.path.join(self.downloads, "scan.djvu")
         with open(djvu, "wb") as f:
             f.write(b"AT&TFORM\x00\x00\x00\x14DJVU INFO")
         verdicts = _drm_verdicts(self.downloads)
-        self.assertEqual(verdicts.get(djvu, "unscanned"), "unscanned")
+        self.assertEqual(verdicts[djvu], "N/A")
 
 
 class TestDispatchRunWiring(unittest.TestCase):

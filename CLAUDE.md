@@ -5,6 +5,48 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.49.0 onward, the roadmap findings batch)
+
+- **audit_drm's N/A rows reach the CSV.** The directory- and library-scan
+  loops used to `continue` past N/A verdicts (DJVU) before the CSV
+  append, so `_drm_verdicts` missed them and the manifest recorded
+  `unscanned` for a format that was judged. N/A rows are now written
+  (still excluded from the counters/summary), and the instrument test
+  pins `"N/A"` in the verdicts dict. N/A remains no quarantine reason
+  (only DRM/ERROR are).
+- **Phase-1 stamps seed from embedded metadata first.**
+  `_stamps_from_embedded` reads the `ebook-meta` display output
+  (padded labels, `" : "` separator, authors joined `" & "`); the five
+  fields title/authors/publisher/pubdate/language merge per-field over
+  the filename parse, and ISBN is deliberately never seeded. A pubdate
+  that fails `datetime.fromisoformat` is dropped (a bare year would fail
+  cquarry's `add_book`); a read with `Traceback` on stderr returns no
+  data (calibre exits 0 on unparseable files and prints its own
+  reversed-order filename guess, which must never beat the decided
+  "Author - Title" parse); `Unknown` placeholders are dropped; a missing
+  binary degrades to filename-only with one warning; a per-file failure
+  lands in the entry's `repairs`. `_drive_stamp` is unchanged.
+- **The phase-2 `#source` stamp is verified in-batch.** A fresh book's
+  first `set_custom_column` must return `changed=True`; `False` raises
+  inside the one `batch()`, rolls the import back, and exits 1 with the
+  library unwritten. This is the effect flag, not a read-back
+  (WritableCalibreDB has no custom-column reader; a true read-back would
+  need a cquarry API and is a recorded future option). The 2026-09-18/19
+  "all Anna's Archive" observations were an out-of-verb door: both signed
+  manifests carry zero `imported_id`s, and the DB showed the reviewed
+  provenance landed on 77 of 79 books (the mismatches were the
+  manifest-None files).
+- **Only lossy-marker bindery repairs consent-gate.** `_mirror_lossy`
+  records every gate-accepted repair with a `"lossy"` class judged by
+  `_LOSSY_REPAIR_MARKERS` (the five fix keys bindery's own gate treats as
+  lossy strips), and only those set `flagged`; structural-only files stop
+  firing `lossy_consent` decisions. The decision detail carries the lossy
+  summaries. Phase 2's consent re-drive flips and refuses over every
+  recorded repair (bindery applies all of them), not just the flagged
+  ones. The marker tuple is a string contract with bindery's summary
+  renderer; the structured-fixes box on bindery-cli's roadmap is the
+  long-term replacement.
+
 ## Programmer-facing contract notes (3.48.0 onward, the wave-2 refactor + consent batch)
 
 - **The write-verb dest lists have one source: `dests.py`.**

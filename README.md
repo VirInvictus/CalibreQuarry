@@ -456,7 +456,7 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 ### Automated Test Suite
 
-The whole suite runs without a Calibre library (stdlib `unittest`; 601 tests across 31 files as of 3.48.0):
+The whole suite runs without a Calibre library (stdlib `unittest`; 615 tests across 31 files as of 3.49.0):
 
 - **Modes and renderers** (`tests/test_modes.py`, `tests/test_read_modes.py`, `tests/test_book_json.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, the audit's cover checks, the read-mode renderers, and the machine-readable `--book --format json` dossier, all against a temporary database.
 - **Search and scoping** (`tests/test_restrict.py`): the `--restrict` view (book-row scoping, recounted aggregations, per-book getters, write-verb and run-verb refusals) and its mode-level composition.

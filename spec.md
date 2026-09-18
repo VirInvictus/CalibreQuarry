@@ -1,6 +1,6 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.48.0  
+**Version:** 3.49.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry` (>= 1.22.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -108,9 +108,9 @@ The path is saved to config on first successful resolution.
 | Library info | `--info` | Library dossier: identity UUID, wings + expressions, saved searches, `@Name` categories, grouped search terms, feeds, sync queues, conversion overrides |
 | LibraryThing | `--exportlt` | LibraryThing import CSVs (fixed eleven-column template), batched, self-checked; failures exit 1 ("do not upload") |
 | Format stats | `--format-stats` | Per-format book counts and total catalogued bytes |
-| Run: phase1 | `run phase1 DIR` | Vet a downloads directory into an `acquisition-manifest/1` batch (duplicate screen, DRM audit, PDF/DJVU battery, bindery's EPUB slice); filename-derived stamps and provenance seeds land in the manifest for the review step to correct; read-only against `metadata.db`; the emitted manifest is unsigned until `run sign` seals it |
+| Run: phase1 | `run phase1 DIR` | Vet a downloads directory into an `acquisition-manifest/1` batch (duplicate screen, DRM audit, PDF/DJVU battery, bindery's EPUB slice); embedded-metadata stamp seeds (via `ebook-meta`, filename parse as fallback; ISBN never seeded) and provenance seeds land in the manifest for the review step to correct; read-only against `metadata.db`; the emitted manifest is unsigned until `run sign` seals it |
 | Run: sign | `run sign --manifest FILE` | Seal the reviewed manifest for phase 2: structure checks (no seal check, so re-signing after a deliberate edit works), then an HMAC seal over the approved set, the per-file stamps, provenance, and lossy flags, and the decisions list |
-| Run: phase2 | `run phase2 --manifest FILE` | Import the SIGNED, SEALED manifest as ONE `batch()` through `add_book` (the seal is recomputed at load; a post-sign edit refuses to load until re-signed); `#source`/`#audience` stamped, tags+rating cleared on the imported ids only, downloads after the commit (failures become decisions), resumable |
+| Run: phase2 | `run phase2 --manifest FILE` | Import the SIGNED, SEALED manifest as ONE `batch()` through `add_book` (the seal is recomputed at load; a post-sign edit refuses to load until re-signed); `#source`/`#audience` stamped (`#source` verified in-batch: a stamp that writes no state rolls the import back), tags+rating cleared on the imported ids only, downloads after the commit (failures become decisions), resumable |
 | Run: phase3 | `run phase3 --manifest FILE` | Curate via TTY prompts or `--answer-file` in ONE `batch()`, then bindery phase3 + file reconciliation + re-validation to 0 errors and the prose batch record |
 | Run: integration verbs | `run convert\|polish\|cover\|export\|merge\|flush\|backfill\|trash` | The Phase 19 C batch (dry-run by default; `--apply` requires a closed Calibre and, for metadata-mutating verbs, a `--backup-dir` outside the library). convert drives `ebook-convert` and registers the output through `add_format`; polish drives `ebook-polish` and re-syncs the size; cover drives cquarry's `set_cover`/`remove_cover`; export drives `calibredb export --template`; merge folds a duplicate's unique formats into the keeper and sends the duplicate to cquarry 1.20's trash; flush embeds the OPF queue via `calibredb embed_metadata` in chunks; backfill drives `fetch-ebook-metadata` (network only at `--apply`) and applies the requested fields through cquarry writes; trash lists/empties/expires `.caltrash` through cquarry 1.20's verbs (a pure-filesystem lifecycle: no backup, dry-run listing by default). Targets resolve read-only from `--search`/`--ids`; unknown ids abort before anything opens writable |
 

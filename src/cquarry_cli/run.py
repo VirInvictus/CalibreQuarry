@@ -16,7 +16,8 @@ instruments. The 2026-09-06 decisions are encoded here:
   ``decisions_needed`` is empty, and Calibre is closed; it backs
   ``metadata.db`` up first (``--backup-dir``, outside the library) and
   commits the whole import as ONE ``batch()``. ``#source`` is stamped from
-  manifest provenance, ``#audience`` unconditionally, tags and rating are
+  manifest provenance and verified in-batch (a stamp that writes no state
+  rolls the batch back), ``#audience`` unconditionally, tags and rating are
   cleared on the imported ids only. A file the library already has is
   refused and flagged, never imported twice. Metadata downloads run after
   the DB pass; a failure or ambiguity is a decision, never a guess.
@@ -157,6 +158,65 @@ def _stamps_from_filename(path: str) -> dict[str, Any]:
                 "authors": [a.strip() for a in author.split(",") if a.strip()],
             }
     return stamp
+
+
+def _stamps_from_embedded(path: str) -> dict[str, Any] | None:
+    """The file's embedded metadata as seed stamps, read through the
+    ebook-meta seam (the 2026-09-18 roadmap box: z-library parenthetical
+    filenames seeded whole-filename stamps and made the review pass the
+    pipeline's highest-risk human step, while the skill's deep-stamp pass
+    has usually already written verified metadata into the file).
+
+    Non-empty embedded fields win over the filename parse (the merge is
+    the caller's); ISBN is deliberately never seeded -- embedded
+    identifiers are misidentification-prone, and the filename never
+    seeded one either. ``pubdate`` is carried only when it parses as ISO:
+    a bare year is unstoreable (cquarry's add_book raises on it) and a
+    wrong-format seed must not fail phase 2. Returns None when ebook-meta
+    is missing or the file cannot be read; an empty dict means the read
+    succeeded and carried nothing usable. Authors arrive joined with
+    " & " (calibre's ebook-meta display form)."""
+    try:
+        proc = _run(["ebook-meta", path], timeout=120)
+    except OSError, subprocess.TimeoutExpired:
+        return None
+    if proc.returncode != 0:
+        return None
+    # A file calibre cannot parse still exits 0, prints ITS OWN
+    # filename-derived guess (the opposite "Title - Author" reading this
+    # pipeline deliberately rejects) and a traceback on stderr. That
+    # guess must never beat the filename parse, so a traceback disables
+    # the read, and calibre's "Unknown" placeholders are dropped.
+    if "traceback" in (proc.stderr or "").lower():
+        return None
+    fields: dict[str, str] = {}
+    for line in (proc.stdout or "").splitlines():
+        if " : " not in line:
+            continue
+        label, value = line.split(" : ", 1)
+        fields[label.strip()] = value.strip()
+    stamps: dict[str, Any] = {}
+    title = fields.get("Title") or ""
+    if title and title != "Unknown":
+        stamps["title"] = title
+    authors = [
+        a.strip() for a in (fields.get("Author(s)") or "").split(" & ") if a.strip()
+    ]
+    if authors and authors != ["Unknown"]:
+        stamps["authors"] = authors
+    if fields.get("Publisher"):
+        stamps["publisher"] = fields["Publisher"]
+    if fields.get("Languages"):
+        stamps["language"] = fields["Languages"].split(",")[0].strip()
+    published = fields.get("Published") or ""
+    if published:
+        try:
+            datetime.fromisoformat(published)
+        except ValueError:
+            published = ""
+    if published:
+        stamps["pubdate"] = published
+    return stamps
 
 
 #: Filename-evidence provenance seeds, mapped onto the library's #source
@@ -314,13 +374,40 @@ def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
         os.unlink(report)
 
 
+#: The fix keys that mark a bindery repair as LOSSY (a content strip),
+#: the set bindery's own repair gate treats specially (their gain is
+#: invisible to epubcheck): stripped_pagination, stripped_broken_tags,
+#: stripped_watermarks, dropped_marker, stub_docs_dropped. A gate-accepted
+#: summary without these is structural (alt text, invalid values, NCX
+#: fixes) and consent-free. The 2026-09-17/19 roadmap box: every
+#: gate-accepted repair used to fire a lossy_consent decision, so
+#: reviewers signed off on vacuous consent.
+_LOSSY_REPAIR_MARKERS = (
+    "stripped_pagination",
+    "stripped_broken_tags",
+    "stripped_watermarks",
+    "dropped_marker",
+    "stub_docs_dropped",
+)
+
+
+def _repair_is_lossy(summary: str) -> bool:
+    return any(marker in summary for marker in _LOSSY_REPAIR_MARKERS)
+
+
 def _mirror_lossy(man: dict[str, Any], bindery_shape: dict[str, Any]) -> None:
     """Bindery's gate-accepted EPUB repairs become per-file ``lossy``
     records: the field the seal binds, so the signature consents to (and
     the batch record retains) exactly the repairs the report listed. The
     2026-09-14 hole: bindery carried an ``apply_lossy`` decision with
     gate-accepted repairs, and every lossy record stayed
-    ``{flagged: false, repairs: []}`` -- sign consented to nothing."""
+    ``{flagged: false, repairs: []}`` -- sign consented to nothing.
+
+    Every gate-accepted repair is recorded (with its lossy/structural
+    class named), but only repairs carrying a lossy marker set the file's
+    ``flagged`` -- the flag the consent gate and the seal's consent scope
+    key off. Structural-only files keep their record and never block
+    phase 2 on a vacuous consent."""
     if not bindery_shape:
         return
     applied = bool(bindery_shape.get("apply_lossy"))
@@ -338,10 +425,12 @@ def _mirror_lossy(man: dict[str, Any], bindery_shape: dict[str, Any]) -> None:
         entry = by_path.get(os.path.abspath(str(book.get("path") or "")))
         if entry is None:
             continue
-        entry["lossy"]["flagged"] = True
+        lossy = _repair_is_lossy(summary)
         entry["lossy"]["repairs"].append(
-            {"tool": "bindery", "summary": summary, "applied": applied}
+            {"tool": "bindery", "summary": summary, "applied": applied, "lossy": lossy}
         )
+        if lossy:
+            entry["lossy"]["flagged"] = True
 
 
 def _mirror_bindery_decisions(
@@ -385,14 +474,19 @@ def _mirror_bindery_decisions(
         return
     for entry in man["files"]:
         if entry["lossy"]["flagged"]:
+            lossy_bits = "; ".join(
+                record["summary"]
+                for record in entry["lossy"]["repairs"]
+                if record.get("lossy")
+            )
             manifest.add_decision(
                 man,
                 "lossy_consent",
                 file=entry["path"],
                 detail=(
-                    "bindery's gate-accepted lossy repairs are pending "
-                    "(this phase-1 run was read-only): re-run phase 1 "
-                    "with --apply-lossy, or set this decision's "
+                    f"lossy repairs pending ({lossy_bits}; this phase-1 "
+                    "run was read-only): re-run phase 1 with "
+                    "--apply-lossy, or set this decision's "
                     '"resolution" to "apply" and re-sign'
                 ),
             )
@@ -494,10 +588,31 @@ def run_phase1(
     )
 
     man = manifest.new_manifest(downloads_dir)
+    ebook_meta = shutil.which("ebook-meta")
+    if ebook_meta is None:
+        print(
+            "WARNING: ebook-meta not found; stamp seeds fall back to the "
+            "filename parse alone (embedded metadata unread).",
+            file=sys.stderr,
+        )
     for path in files:
         entry = manifest.new_file_entry(path)
         entry["size"] = os.path.getsize(path)
         entry["stamps"] = _stamps_from_filename(path)
+        if ebook_meta is not None:
+            embedded = _stamps_from_embedded(path)
+            if embedded is None:
+                # A file whose metadata cannot be read still ships, with
+                # the filename seeds and the failure on the record for
+                # the review pass to see.
+                entry["repairs"].append(
+                    "ebook-meta could not read embedded metadata; "
+                    "stamps seeded from the filename"
+                )
+            else:
+                for key, value in embedded.items():
+                    if value:
+                        entry["stamps"][key] = value
         entry["provenance"] = _provenance_from_filename(path)
         if path in stamped_files:
             entry["repairs"].append("stamped via stamp_pdf (--stamp)")
@@ -782,7 +897,13 @@ def run_phase2(
             for b in shape.get("books", [])
             if isinstance(b, dict)
         }
-        for path in sorted(flagged):
+        # Bindery's re-drive applies EVERY gate-accepted repair (the
+        # consent only gated the lossy ones), so the refuse/flip pass
+        # walks every file with a recorded repair, lossy or structural;
+        # a structural record left applied=false would lie about the
+        # file on disk.
+        recorded = {f["path"] for f in man["files"] if f["lossy"]["repairs"]}
+        for path in sorted(recorded):
             repair = repaired.get(os.path.abspath(path))
             if (
                 not isinstance(repair, dict)
@@ -843,8 +964,23 @@ def run_phase2(
                     entry["import"]["clears"]["rating_cleared"] = wdb.clear_rating(
                         book_id
                     )
-                    if entry.get("provenance"):
-                        wdb.set_custom_column(book_id, "#source", entry["provenance"])
+                    provenance = entry.get("provenance")
+                    if provenance:
+                        # The in-batch cc6-vs-manifest check (the
+                        # 2026-09-18/19 observations): a fresh book's
+                        # first #source write must report changed, and
+                        # the setter validates the enum loudly; False
+                        # means the stamp silently landed nowhere, and
+                        # the batch rolls back rather than commit an
+                        # import whose provenance never reached the
+                        # column.
+                        if not wdb.set_custom_column(book_id, "#source", provenance):
+                            raise RuntimeError(
+                                f"#source stamp {provenance!r} for book "
+                                f"{book_id} ({os.path.basename(path)}) "
+                                "wrote no state; the import batch rolls "
+                                "back"
+                            )
                     wdb.add_custom_column_values(book_id, "#audience", [audience])
                     entry["import"]["fixes"].append("filename-derived stamps applied")
     except Exception as e:

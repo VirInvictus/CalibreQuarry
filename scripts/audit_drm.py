@@ -457,6 +457,10 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
     csv_rows = []
     for path in ui.tqdm(files, desc=ui.info("Scanning files")):
         verdict = classify_file(path)
+        # N/A rows still reach the CSV: dropping them left the runner
+        # recording "unscanned" for a format that WAS judged (the DJVU
+        # box, 2026-09-17). They stay out of the counters and the print.
+        csv_rows.append(("", verdict.status, verdict.kind, verdict.detail, str(path)))
         if verdict.status == NA:
             continue
         scanned += 1
@@ -468,7 +472,6 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
             errors += 1
         if verdict.status in (DRM, BENIGN, ERROR):
             _print_row(path.name, verdict)
-        csv_rows.append(("", verdict.status, verdict.kind, verdict.detail, str(path)))
     if csv_path:
         _write_csv(csv_path, csv_rows)
         print(f"\nWrote {csv_path}")
@@ -515,6 +518,9 @@ def run_library(csv_path: Path | None) -> int:
             csv_rows.append((book_id, v.status, v.kind, v.detail, str(full)))
             continue
         verdict = classify_file(full)
+        csv_rows.append(
+            (book_id, verdict.status, verdict.kind, verdict.detail, str(full))
+        )
         if verdict.status == NA:
             continue
         scanned += 1
@@ -526,9 +532,6 @@ def run_library(csv_path: Path | None) -> int:
             errors += 1
         if verdict.status in (DRM, BENIGN, ERROR):
             _print_row(f"#{book_id} [{fmt}] {title}", verdict)
-        csv_rows.append(
-            (book_id, verdict.status, verdict.kind, verdict.detail, str(full))
-        )
     if csv_path:
         _write_csv(csv_path, csv_rows)
         print(f"\nWrote {csv_path}")

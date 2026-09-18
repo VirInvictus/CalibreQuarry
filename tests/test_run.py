@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr
@@ -31,6 +32,7 @@ from cquarry_cli.run import (
     _precedent_tags,
     _provenance_from_filename,
     _screen_duplicates,
+    _stamps_from_embedded,
     _stamps_from_filename,
     run_phase1,
     run_phase2,
@@ -119,6 +121,13 @@ class RunCase(unittest.TestCase):
         os.makedirs(self.downloads)
         self.db_path = os.path.join(self.library, "metadata.db")
         _build_library(self.db_path)
+        # The ebook-meta seam is mocked OFF by default: the fixture files
+        # are payload bytes, and a real calibre on PATH would exit 0 with
+        # its own filename-derived guess (CI has no calibre at all). The
+        # seeding tests opt back in with explicit patching.
+        which = mock.patch("cquarry_cli.run.shutil.which", return_value=None)
+        which.start()
+        self.addCleanup(which.stop)
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
@@ -428,11 +437,183 @@ class TestRunPhase1(RunCase):
                     "tool": "bindery",
                     "summary": "stripped_pagination:3",
                     "applied": False,
+                    "lossy": True,
                 }
             ],
         )
         self.assertTrue(manifest.file_by_path(man, partial)["lossy"]["flagged"])
         self.assertFalse(manifest.file_by_path(man, untouched)["lossy"]["flagged"])
+
+    def test_structural_only_repairs_record_but_never_consent_gate(self):
+        # The 2026-09-17/19 roadmap box: bindery's gate-accepted STRUCTURAL
+        # fixes (alt text, invalid values, NCX sync) used to fire a
+        # lossy_consent decision per file and the reviewer signed vacuous
+        # consent. They still land in the sealed record (lossy: false on
+        # each repair), but nothing flags and no decision is emitted.
+        structural = self._make_file("confusable_classic.epub")
+        shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": structural,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "add-img-alt:4, strip-invalid-value:2, ncx_uid_synced",
+                    },
+                }
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        entry = manifest.file_by_path(man, structural)
+        self.assertFalse(entry["lossy"]["flagged"])
+        self.assertEqual(
+            entry["lossy"]["repairs"],
+            [
+                {
+                    "tool": "bindery",
+                    "summary": "add-img-alt:4, strip-invalid-value:2, ncx_uid_synced",
+                    "applied": False,
+                    "lossy": False,
+                }
+            ],
+        )
+        self.assertEqual(
+            [d for d in man["decisions_needed"] if d["kind"] == "lossy_consent"], []
+        )
+
+    def test_mixed_repair_flags_and_names_the_lossy_classes(self):
+        # One file, both classes: the record carries each repair's class
+        # and the decision detail names the lossy ones, so the reviewer
+        # can see exactly what consent buys.
+        mixed = self._make_file("annotated_edition.epub")
+        shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": mixed,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "add-img-alt:2, stripped_watermarks:1",
+                    },
+                }
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        entry = manifest.file_by_path(man, mixed)
+        self.assertTrue(entry["lossy"]["flagged"])
+        # One combined summary per book: the record is classed by its
+        # whole string, and it carries the lossy key.
+        self.assertEqual(
+            [(r["summary"], r["lossy"]) for r in entry["lossy"]["repairs"]],
+            [("add-img-alt:2, stripped_watermarks:1", True)],
+        )
+        (decision,) = [
+            d for d in man["decisions_needed"] if d["kind"] == "lossy_consent"
+        ]
+        self.assertIn("stripped_watermarks:1", decision["detail"])
+
+    def test_embedded_metadata_seeds_stamps_over_the_filename_parse(self):
+        # The 2026-09-18 seeding box: the file's embedded metadata (the
+        # skill's deep-stamp pass wrote it) beats the filename parse;
+        # ISBN is never seeded.
+        path = self._make_file("Ann Leckie - Fifth Head of Data.epub")
+        embedded = {
+            "title": "Verified Title",
+            "authors": ["Verified Author"],
+            "publisher": "Verified Press",
+            "pubdate": "2001-05-01T00:00:00+00:00",
+            "language": "eng",
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+            mock.patch(
+                "cquarry_cli.run.shutil.which", return_value="/usr/bin/ebook-meta"
+            ),
+            mock.patch("cquarry_cli.run._stamps_from_embedded", return_value=embedded),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        entry = manifest.file_by_path(man, path)
+        self.assertEqual(entry["stamps"], embedded)
+        self.assertNotIn("isbn", entry["stamps"])
+        self.assertEqual(entry["repairs"], [])
+
+    def test_unreadable_embedded_metadata_falls_back_with_a_record(self):
+        # A file ebook-meta cannot read still ships: filename seeds plus
+        # the failure on the record for the review pass to see.
+        path = self._make_file("Ann Leckie - Fifth Head of Data.epub")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+            mock.patch(
+                "cquarry_cli.run.shutil.which", return_value="/usr/bin/ebook-meta"
+            ),
+            mock.patch("cquarry_cli.run._stamps_from_embedded", return_value=None),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        entry = manifest.file_by_path(man, path)
+        self.assertEqual(entry["stamps"]["title"], "Fifth Head of Data")
+        self.assertEqual(entry["stamps"]["authors"], ["Ann Leckie"])
+        self.assertEqual(
+            entry["repairs"],
+            [
+                "ebook-meta could not read embedded metadata; "
+                "stamps seeded from the filename"
+            ],
+        )
+
+    def test_missing_ebook_meta_binary_keeps_the_filename_seeds(self):
+        path = self._make_file("Ann Leckie - Fifth Head of Data.epub")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+            mock.patch("cquarry_cli.run.shutil.which", return_value=None),
+        ):
+            buffer = io.StringIO()
+            with redirect_stderr(buffer):
+                rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("ebook-meta not found", buffer.getvalue())
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        entry = manifest.file_by_path(man, path)
+        self.assertEqual(entry["stamps"]["title"], "Fifth Head of Data")
+        self.assertEqual(entry["repairs"], [])
 
     def test_apply_lossy_run_records_the_repairs_as_applied(self):
         # --apply-lossy means the strips already happened file-side during
@@ -1048,6 +1229,147 @@ class TestRunPhase2(RunCase):
         con.close()
         self.assertEqual(count, 0)
 
+    def test_consent_re_drive_flips_structural_records_too(self):
+        # The narrowed consent gates only lossy-flagged files, but
+        # bindery's re-drive applies EVERY recorded repair; walking only
+        # the flagged files left a structural record at applied=false,
+        # lying about the file on disk.
+        lossy_path = self._make_file("watermarked_edition.epub")
+        # A distinct payload: cquarry refuses a byte-identical re-import,
+        # and both fixture files are approved in one manifest.
+        structural_path = self._make_file(
+            "confusable_classic.epub", payload=b"EPUBDATA-STRUCTURAL"
+        )
+        man_path = self._manifest(lossy_path, structural_path)
+        man = manifest.load(man_path)
+        lossy_entry = manifest.file_by_path(man, lossy_path)
+        lossy_entry["lossy"]["flagged"] = True
+        lossy_entry["lossy"]["repairs"].append(
+            {
+                "tool": "bindery",
+                "summary": "stripped_watermarks:1",
+                "applied": False,
+                "lossy": True,
+            }
+        )
+        decision = manifest.add_decision(
+            man, "lossy_consent", file=lossy_path, detail="pending consent"
+        )
+        decision["resolution"] = "apply"
+        entry = manifest.file_by_path(man, structural_path)
+        entry["lossy"]["repairs"].append(
+            {
+                "tool": "bindery",
+                "summary": "add-img-alt:4, ncx_uid_synced",
+                "applied": False,
+                "lossy": False,
+            }
+        )
+        manifest.save(man, man_path)
+        shape = {
+            "apply_lossy": True,
+            "books": [
+                {
+                    "path": lossy_path,
+                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                },
+                {
+                    "path": structural_path,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "add-img-alt:4, ncx_uid_synced",
+                    },
+                },
+            ],
+        }
+        with mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape):
+            rc, _ = self._import(man_path)
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 2)
+        man = manifest.load(man_path)
+        self.assertTrue(
+            manifest.file_by_path(man, structural_path)["lossy"]["repairs"][0][
+                "applied"
+            ]
+        )
+        self.assertTrue(
+            manifest.file_by_path(man, lossy_path)["lossy"]["repairs"][0]["applied"]
+        )
+
+    def test_consent_re_drive_refuses_when_a_structural_repair_fails(self):
+        # The refuse pass walks every recorded repair, not just the
+        # consented lossy ones: a file the re-drive can no longer repair
+        # fails the verb before the import opens.
+        lossy_path = self._make_file("watermarked_edition.epub")
+        structural_path = self._make_file("confusable_classic.epub")
+        man_path = self._manifest(lossy_path, structural_path)
+        man = manifest.load(man_path)
+        lossy_entry = manifest.file_by_path(man, lossy_path)
+        lossy_entry["lossy"]["flagged"] = True
+        lossy_entry["lossy"]["repairs"].append(
+            {
+                "tool": "bindery",
+                "summary": "stripped_watermarks:1",
+                "applied": False,
+                "lossy": True,
+            }
+        )
+        decision = manifest.add_decision(
+            man, "lossy_consent", file=lossy_path, detail="pending consent"
+        )
+        decision["resolution"] = "apply"
+        entry = manifest.file_by_path(man, structural_path)
+        entry["lossy"]["repairs"].append(
+            {
+                "tool": "bindery",
+                "summary": "add-img-alt:4",
+                "applied": False,
+                "lossy": False,
+            }
+        )
+        manifest.save(man, man_path)
+        shape = {
+            "apply_lossy": True,
+            "books": [
+                {
+                    "path": lossy_path,
+                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                }
+            ],
+        }
+        with mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape):
+            rc, _ = self._import(man_path)
+        self.assertEqual(rc, 1)
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 0)
+
+    def test_silent_source_stamp_failure_rolls_the_batch_back(self):
+        # The 2026-09-18/19 cc6 observations: a #source stamp that writes
+        # no state must fail the batch, never land an import whose
+        # provenance did not reach the column. set_custom_column's
+        # changed flag is the in-batch signal (a fresh book's first
+        # #source write always changes state); False raises inside the
+        # one batch() and the whole import rolls back.
+        path = self._make_file("Fifth Head.epub")
+        man_path = self._manifest(path)
+        with mock.patch(
+            "cquarry.write.WritableCalibreDB.set_custom_column",
+            return_value=False,
+        ):
+            rc, _ = self._import(man_path)
+        self.assertEqual(rc, 1)
+        con = sqlite3.connect(self.db_path)
+        count = con.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+        con.close()
+        self.assertEqual(count, 0)
+        man = manifest.load(man_path)
+        self.assertIsNone(man["files"][0]["import"]["imported_id"])
+
     def test_phase2_refuses_a_tampered_manifest(self):
         # The seal (the sweep's P0): a manifest edited after signing must
         # fail the load loudly, never import the tampered content.
@@ -1623,6 +1945,68 @@ class TestRunPhase3(RunCase):
                 man_path, self.db_path, answer_file=self._answers(), quiet=True
             )
         self.assertEqual(rc, 1)
+
+
+class TestEmbeddedStamps(unittest.TestCase):
+    """The ebook-meta seam's parse (the 2026-09-18 seeding box): embedded
+    metadata seeds the manifest, the filename parse is the fallback, and
+    a wrong-format pubdate must never reach phase 2."""
+
+    def _proc(self, stdout, returncode=0):
+        return mock.Mock(returncode=returncode, stdout=stdout, stderr="")
+
+    def test_labels_parse_into_stamps_and_identifiers_stay_out(self):
+        # The real calibre 9.14 display form: padded labels, " : "
+        # separator, authors joined with " & ". Identifiers are read but
+        # never seeded (misidentification-prone).
+        stdout = (
+            "Title               : Probe Title\n"
+            "Author(s)           : Ada Author & Bob B. Author\n"
+            "Publisher           : Probe Press\n"
+            "Languages           : eng\n"
+            "Published           : 2001-05-01T04:00:00+00:00\n"
+            "Identifiers         : isbn:9780123456789, goodreads:1234\n"
+        )
+        with mock.patch("cquarry_cli.run._run", return_value=self._proc(stdout)):
+            stamps = _stamps_from_embedded("/tmp/probe.epub")
+        self.assertEqual(
+            stamps,
+            {
+                "title": "Probe Title",
+                "authors": ["Ada Author", "Bob B. Author"],
+                "publisher": "Probe Press",
+                "language": "eng",
+                "pubdate": "2001-05-01T04:00:00+00:00",
+            },
+        )
+        self.assertNotIn("isbn", stamps)
+
+    def test_year_only_pubdate_is_dropped(self):
+        # cquarry's add_book raises on an unparseable pubdate: a bare
+        # year (common in PDF metadata) must not seed one.
+        stdout = "Title               : T\nPublished           : 2001\n"
+        with mock.patch("cquarry_cli.run._run", return_value=self._proc(stdout)):
+            stamps = _stamps_from_embedded("/tmp/probe.pdf")
+        self.assertEqual(stamps, {"title": "T"})
+
+    def test_a_failed_read_returns_none(self):
+        with mock.patch(
+            "cquarry_cli.run._run", return_value=self._proc("", returncode=1)
+        ):
+            self.assertIsNone(_stamps_from_embedded("/tmp/probe.epub"))
+
+    def test_a_timeout_returns_none(self):
+        with mock.patch(
+            "cquarry_cli.run._run",
+            side_effect=subprocess.TimeoutExpired(cmd="ebook-meta", timeout=120),
+        ):
+            self.assertIsNone(_stamps_from_embedded("/tmp/probe.epub"))
+
+    def test_an_empty_read_is_a_dict_not_a_failure(self):
+        # returncode 0 with nothing usable: the caller keeps the filename
+        # seeds and records no failure.
+        with mock.patch("cquarry_cli.run._run", return_value=self._proc("")):
+            self.assertEqual(_stamps_from_embedded("/tmp/probe.epub"), {})
 
 
 if __name__ == "__main__":
