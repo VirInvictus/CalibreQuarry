@@ -25,6 +25,7 @@ Reads `metadata.db` directly: no `calibredb` dependency, no JSON intermediaries.
 ## Contents
 
 - [Why this exists](#why-this-exists)
+- [How this compares](#how-this-compares)
 - [Features](#features)
 - [Installation](#installation) · [Requirements](#requirements)
 - [Usage](#usage) · [Recipes](#recipes)
@@ -40,6 +41,14 @@ Reads `metadata.db` directly: no `calibredb` dependency, no JSON intermediaries.
 Calibre is a good database. It is not a good reporting tool. If you maintain a large library (3000+ books) organized with virtual libraries, hierarchical tags, and series tracking, you eventually want answers to questions Calibre's UI doesn't surface well: which series have gaps, how many books are unrated, what does a given wing actually contain, and can I get a machine-readable export without running `calibredb list` through a parser script.
 
 This tool reads the SQLite database directly in read-only mode. It ships a near-complete port of Calibre's own search engine (field prefixes like `tags:`, `author:`, `series:`, `rating:`, `pubdate:`; `vl:` cross-references; boolean and hierarchical matching), so your existing wing definitions and search habits work without being re-encoded anywhere.
+
+## How this compares
+
+**calibredb.** The official CLI, and the right tool for adding books, editing metadata, and administering a library. To script against a library while the GUI is open, calibredb's content-server mode is the clean route: run the server from Calibre and point calibredb at it. What calibredb doesn't ship is reporting: no series gap detection, no audit pass, no library statistics, no per-virtual-library catalog sweeps. CalibreQuarry reads the same database and adds that layer; the two compose (the catalog's `--show-id` output exists precisely for piping into `calibredb set_metadata` scripts).
+
+**Quality Check (GUI plugin).** Excellent for hunting metadata problems from inside the Calibre interface, and the better choice if that is where you do your thinking. The audit here covers overlapping ground (duplicate detection, coverless books, metadata-quality flags); beyond that overlap its scope runs elsewhere: series gap detection across a library, filesystem-versus-database mismatches, FTS index staleness, and machine-readable output for every mode.
+
+**Scripting it yourself.** If you have been piping `calibredb list` through parser scripts to get machine-readable answers, that pipeline is where this project started. For code, the underlying `cquarry` library (PyPI, stdlib-only) returns the same data as structured rows instead of text to parse.
 
 ## Features
 
