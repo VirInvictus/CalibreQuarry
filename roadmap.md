@@ -1540,3 +1540,25 @@ note; every integration ships with a dry-run before any write.
       standard `rule_options.EVERY_BOOK_COVER.allowed_ids` — would close
       it. (The cover was set from PDF page 1 for this batch, but a
       digital-native file with genuinely no cover art will recur.)
+
+- [x] stamp_pdf.py verify: author read-back fails on calibre-touched PDFs (found 2026-09-21, Effective C wave). `_verify` compares the raw `ebook-meta` `Author(s)` line against the stamp, but ebook-meta renders `Display [Sort]` whenever the file's XMP carries a calibre-style `author_sort`; the stamp writes `-Author` + `-XMP-dc:Creator` and never clears/updates that extension, so any PDF Calibre has ever produced or touched fails verification on author even though every written field took (two cases in one batch: De Anima, How Software Works; both verified correct via exiftool + ebook-meta by hand). Exact culprit field: XMP-calibre:AuthorSort (calibre-produced PDFs carry it; ebook-meta renders Display [Sort] from it). Fix: clear/rewrite XMP-calibre:AuthorSort in the stamp set, or strip the `[...]` suffix before comparing.
+      *(Fixed 2026-09-21, stamp-side, and the poison was real: calibre's
+      `create_book_entry` writes an embedded `mi.author_sort` verbatim
+      instead of recomputing from the stamped authors (calibre/db/cache.py),
+      so the stale sort would have landed in the library on import — the
+      verify-side strip was never enough. exiftool cannot write the
+      calibre namespace ("Tag not defined", even via a user-defined
+      -config table), so the erase rides calibre's own writer: when the
+      stamp sets authors and `exiftool -s3 -Author_sort` shows the
+      property, a follow-up value-preserving `ebook-meta` pass with
+      `--author-sort ""` (empty is null, so calibre writes no sort of its
+      own) regenerates the XMP packet without ANY calibre-namespaced
+      element — stale sorts, timestamps, ratings included; docinfo
+      Keywords (the ISBN) survive it, verified. `_verify` stays strict.
+      Tests pin the erase argv, the skip, and the erase-failure path;
+      the two call-count assertions now filter for the write invocation
+      since detection also shells out to exiftool. Side note left open
+      on purpose: the erase also drops stale calibre rating/timestamp
+      extensions, which is desirable, but a title-only stamp on a
+      touched file leaves them alone — the bug class here is author
+      verify and author import, both author-scoped.)*

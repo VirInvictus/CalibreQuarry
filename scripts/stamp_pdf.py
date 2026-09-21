@@ -24,6 +24,16 @@ exiftool round-trip. On write-reports-success-but-readback-disagrees (the
 stubborn-XMP class) the script prints STAMP_FAILED, exits nonzero, and stops:
 do not keep fighting; phase 3 fixes the field in SQL instead.
 
+A PDF Calibre has ever produced or touched also carries an XMP
+`calibre:author_sort`. Left in place it breaks the stamp twice: ebook-meta
+renders the author as `Display [Sort]` (failing verify), and Calibre's import
+honors the embedded sort verbatim instead of recomputing from the stamped
+authors. When the stamp sets authors and the file carries one, a follow-up
+`ebook-meta` pass with `--author-sort ""` (empty is null, so Calibre writes no
+sort of its own) rewrites the XMP packet without the calibre extensions; the
+docinfo Keywords (the ISBN) survive that rewrite. Detection is
+`exiftool -s3 -Author_sort`, the raw XMP property.
+
 Dry-run by default; `--apply` writes and REQUIRES `--backup-dir`, which is
 refused when it resolves inside the directory holding any target file (a
 stray backup beside the file gets imported — the phase-1 cardinal sin).
@@ -67,6 +77,36 @@ def _derive_from_filename(path: Path) -> tuple[str, str]:
 
 def _run_exiftool(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, timeout=300)
+
+
+def _run_ebook_meta(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True, timeout=300)
+
+
+def _has_calibre_authorsort(path: Path) -> bool:
+    """True when the file's XMP carries a calibre-style author_sort (any PDF
+    Calibre has produced or touched does). Detection reads the raw XMP
+    property, not the ebook-meta rendering: an author whose NAME contains a
+    bracket would render ambiguously, the property cannot."""
+    proc = _run_exiftool(["exiftool", "-s3", "-Author_sort", str(path)])
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
+def _erase_ebook_meta_args(title: str, authors: list[str], publisher: str) -> list[str]:
+    """Value-preserving ebook-meta invocation for the author_sort erase: it
+    re-carries the stamped values (fields the stamp leaves alone are not
+    touched by Calibre's PDF writer either) and passes `--author-sort ""` so
+    Calibre writes no sort of its own — its PDF writer drops every
+    calibre-namespaced XMP element from the existing packet, stale sorts
+    included."""
+    args = ["ebook-meta"]
+    if title:
+        args += ["--title", title]
+    if authors:
+        args += ["--authors", " & ".join(authors), "--author-sort", ""]
+    if publisher:
+        args += ["--publisher", publisher]
+    return args
 
 
 def _read_ebook_meta(path: Path) -> dict[str, str]:
@@ -256,6 +296,7 @@ def main() -> int:
 
         backup = backup_dir / f.name
         shutil.copy2(f, backup)
+        need_sort_erase = bool(args.author) and _has_calibre_authorsort(f)
         exif_args = _build_exiftool_args(
             args.title, args.author, args.publisher, args.isbn
         )
@@ -267,6 +308,18 @@ def main() -> int:
             )
             failed_any = True
             continue
+
+        if need_sort_erase:
+            erase_args = _erase_ebook_meta_args(args.title, args.author, args.publisher)
+            erase_args.append(str(f))
+            proc = _run_ebook_meta(erase_args)
+            if proc.returncode != 0:
+                print(
+                    f"  {RED}STAMP_FAILED (calibre author_sort rewrite exited {proc.returncode}): {proc.stderr.strip()}{RESET}"
+                )
+                failed_any = True
+                continue
+            print(f"  {DIM}cleared a stale calibre author_sort (XMP rewrite){RESET}")
 
         readback = _read_ebook_meta(f)
         failed_fields = _verify(

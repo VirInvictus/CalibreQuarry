@@ -1009,6 +1009,141 @@ class TestStampPdfGuards(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("OUTSIDE", out)
 
+    def test_erase_args_carry_stamp_values_and_null_sort(self):
+        # The erase pass re-carries the stamped values and nulls the sort so
+        # Calibre's PDF writer regenerates the XMP packet with no
+        # calibre-namespaced elements at all.
+        args = stamp_pdf._erase_ebook_meta_args("T", ["A One", "A Two"], "P")
+        self.assertEqual(
+            args,
+            [
+                "ebook-meta",
+                "--title",
+                "T",
+                "--authors",
+                "A One & A Two",
+                "--author-sort",
+                "",
+                "--publisher",
+                "P",
+            ],
+        )
+        # a field the stamp leaves alone is not re-carried either (Calibre's
+        # writer leaves it alone too)
+        self.assertNotIn(
+            "--publisher", stamp_pdf._erase_ebook_meta_args("T", ["A"], "")
+        )
+
+    def _write_calls(self, run_mock):
+        return [
+            c
+            for c in run_mock.call_args_list
+            if any(a.startswith("-") and "=" in a for a in c.args[0])
+        ]
+
+    def test_apply_clears_stale_calibre_authorsort(self):
+        # Roadmap 2026-09-21: a calibre-touched PDF carries XMP AuthorSort,
+        # which rendered read-back as `Display [Sort]` and failed verify (and
+        # Calibre's import honors it verbatim). The stamp now detects it and
+        # rewrites the packet through ebook-meta before the read-back.
+        backup = Path(self.tmp.name + "-backups")
+        detect = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="WRONG SORT\n", stderr=""
+        )
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf, "_run_exiftool", side_effect=[detect, ok]
+            ) as run,
+            mock.patch.object(
+                stamp_pdf,
+                "_run_ebook_meta",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout="", stderr=""
+                ),
+            ) as erase,
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Wonderland", "author(s)": "A One & A Two"},
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(backup),
+                "--title",
+                "Wonderland",
+                "--author",
+                "A One",
+                "--author",
+                "A Two",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("author_sort", out)
+        erase_args = erase.call_args.args[0]
+        self.assertEqual(erase_args[0], "ebook-meta")
+        self.assertEqual(erase_args[erase_args.index("--author-sort") + 1], "")
+        self.assertEqual(erase_args[-1], str(self.pdf))
+        writes = self._write_calls(run)
+        self.assertEqual(len(writes), 1, "exiftool writes exactly once")
+
+    def test_apply_skips_erase_when_no_calibre_authorsort(self):
+        backup = Path(self.tmp.name + "-backups")
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok),
+            mock.patch.object(stamp_pdf, "_run_ebook_meta") as erase,
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Wonderland", "author(s)": "A One"},
+            ),
+        ):
+            rc, _ = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(backup),
+                "--title",
+                "Wonderland",
+                "--author",
+                "A One",
+            )
+        self.assertEqual(rc, 0)
+        erase.assert_not_called()
+
+    def test_apply_erase_failure_fails_the_stamp(self):
+        backup = Path(self.tmp.name + "-backups")
+        detect = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="WRONG SORT\n", stderr=""
+        )
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(stamp_pdf, "_run_exiftool", side_effect=[detect, ok]),
+            mock.patch.object(
+                stamp_pdf,
+                "_run_ebook_meta",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr="ebook-meta died"
+                ),
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(backup),
+                "--title",
+                "Wonderland",
+                "--author",
+                "A One",
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertIn("author_sort rewrite", out)
+
     def test_apply_stamps_and_verifies(self):
         backup = Path(self.tmp.name + "-backups")
         joined = "A One & A Two"
@@ -1026,7 +1161,7 @@ class TestStampPdfGuards(unittest.TestCase):
                 },
             ),
         ):
-            rc, out = self._run_main(
+            rc, _ = self._run_main(
                 "--apply",
                 "--backup-dir",
                 str(backup),
@@ -1040,8 +1175,9 @@ class TestStampPdfGuards(unittest.TestCase):
                 "9780140445688",
             )
         self.assertEqual(rc, 0)
-        run.assert_called_once()
-        called = run.call_args.args[0]
+        writes = self._write_calls(run)
+        self.assertEqual(len(writes), 1, "one detection probe plus one write")
+        called = writes[0].args[0]
         self.assertEqual(called[-1], str(self.pdf))
         self.assertIn("-Title=Wonderland", called)
         self.assertIn(f"-Author={joined}", called)
@@ -1073,7 +1209,7 @@ class TestStampPdfGuards(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("STAMP_FAILED", out)
         self.assertIn("isbn", out)
-        run.assert_called_once()  # no re-fighting
+        self.assertEqual(len(self._write_calls(run)), 1, "no re-fighting")
 
     def test_refuses_non_pdf(self):
         epub = self.dir / "book.epub"
