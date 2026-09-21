@@ -5,6 +5,25 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.50.0 onward, the calibre-touched PDF fix)
+
+- **stamp_pdf's author_sort erase rides calibre's own writer.** exiftool
+  cannot write the calibre XMP namespace (not in its tables; a
+  user-defined `-config` table registers but never associates with the
+  packet parse, so deletes find nothing). When the stamp sets authors
+  and `exiftool -s3 -Author_sort` shows the property,
+  `_erase_ebook_meta_args` builds a value-preserving `ebook-meta` pass
+  whose `--author-sort ""` (empty is null, so calibre writes no sort of
+  its own) makes calibre's PDF rewrite drop EVERY calibre-namespaced
+  XMP element from the old packet; docinfo Keywords (the ISBN carrier)
+  survive the rewrite. Detection reads the raw property, not the
+  rendering, because an author NAME can legitimately contain a bracket.
+  `_verify` remains strict equality: the file is cleaned, the comparison
+  is not loosened. The calibre facts behind it, verified on 9.15:
+  `create_book_entry` honors an embedded author_sort verbatim (the
+  import-poison half), and `ebook-meta --authors` auto-computes a sort,
+  which is why the null override is load-bearing.
+
 ## Programmer-facing contract notes (3.49.0 onward, the roadmap findings batch)
 
 - **audit_drm's N/A rows reach the CSV.** The directory- and library-scan
