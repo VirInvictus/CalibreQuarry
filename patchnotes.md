@@ -1,5 +1,13 @@
 # CalibreQuarry Patch Notes
 
+# 3.51.0 (2026-09-21)
+
+### The bindery structured-fix records adoption: lossy consent reads data, with a version gate on the PATH binary
+
+- **`_mirror_lossy` classes repairs from bindery's structured fix records, not summary substrings** (the 2026-09-18 box on bindery-cli's roadmap, fulfilled by its v0.45.0): every per-book record in bindery's phase-1 report now carries the `fixes` dict plus `ncx_uid_synced`/`watermark_refusals` as data, so the lossy/structural split is judged by `fixes.get(marker)` over the same five keys bindery's own gate treats as lossy strips. The rendered summary stays in the sealed record as the display line the `lossy_consent` detail quotes. The practical gain: the class no longer depends on bindery's summary vocabulary staying stable; a summary that names no marker string still classes correctly from its data.
+- **A PATH bindery below 0.45.0 is a hard error, never a silent downgrade**: `_bindery_phase1` probes `bindery --version` and refuses below `_BINDERY_MIN_VERSION` (0.45.0) with the upgrade command named, because the data-driven classing against an older report would class every strip as structural (the vacuous-consent hole again). The probe result is also why this is a minor release: the consent gate's contract now includes a versioned report shape.
+- **Landed from the preservation branch**: the work was written in a working tree a parallel release lane had to sweep aside mid-run on 2026-09-21; it survived on `bindery-version-gate-wip` (snapshot 9135493) and was cherry-picked onto main after 3.50.0 shipped. That branch's WIP message warned `test_dry_phase1_emits_lossy_consent_decisions` was broken; the warning was stale (the pre-fix state from the collision window), the snapshot carries all five migrated fixtures, and the full suite runs 622 green against the branch tree, verified in an isolated checkout before landing. The branch is deleted; the content lives on main.
+
 # 3.50.0 (2026-09-21)
 
 ### The calibre-touched PDF fix: stamp_pdf erases the stale author_sort that failed verify and would have poisoned imports
