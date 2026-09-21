@@ -62,9 +62,13 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   firing `lossy_consent` decisions. The decision detail carries the lossy
   summaries. Phase 2's consent re-drive flips and refuses over every
   recorded repair (bindery applies all of them), not just the flagged
-  ones. The marker tuple is a string contract with bindery's summary
-  renderer; the structured-fixes box on bindery-cli's roadmap is the
-  long-term replacement.
+  ones. Since 2026-09-21 the class is judged against the repair record's
+  structured `fixes` dict (bindery-cli v0.45.0's structured-fix records),
+  never against the rendered summary string; the summary rides along as
+  the display line. `_BINDERY_MIN_VERSION` probes the PATH bindery and
+  hard-errors below 0.45.0 naming the upgrade: an older binary would
+  class every strip as structural (the vacuous-consent hole again), so
+  too old is never a silent downgrade.
 
 ## Programmer-facing contract notes (3.48.0 onward, the wave-2 refactor + consent batch)
 

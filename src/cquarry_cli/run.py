@@ -340,6 +340,30 @@ def _pdf_battery(files: list[str]) -> dict[str, Any]:
     return {r["path"]: r for r in data.get("files", []) if isinstance(r, dict)}
 
 
+def _bindery_version(bindery: str) -> tuple[int, ...] | None:
+    """Parse `bindery --version` (it prints ``bindery 0.45.0``) into a
+    comparable tuple, or None when it cannot be run or parsed."""
+    try:
+        proc = _run([bindery, "--version"], timeout=30)
+    except OSError, subprocess.TimeoutExpired:
+        return None
+    text = (proc.stdout or proc.stderr).strip()
+    m = re.search(r"(\d+(?:\.\d+)*)", text)
+    if not m:
+        return None
+    return tuple(int(part) for part in m.group(1).split("."))
+
+
+#: The oldest bindery whose phase-1 report this code trusts: every repair
+#: record must carry the structured fix breakdown (the ``fixes`` dict plus
+#: ``ncx_uid_synced``/``watermark_refusals``), shipped in v0.45.0. The
+#: lossy-consent mirror classes repairs from that data; against an older
+#: PATH binary it would silently class every strip as structural (the
+#: vacuous-consent hole again), so too old is a hard error, not a
+#: downgrade.
+_BINDERY_MIN_VERSION = (0, 45, 0)
+
+
 def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
     """bindery run phase1 --json FILE (the EPUB slice). Read-only unless the
     signed-consent flag is passed (phase 2's repair step uses that).
@@ -353,6 +377,15 @@ def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
     bindery = shutil.which("bindery")
     if bindery is None:
         return {}
+    version = _bindery_version(bindery)
+    if version is None or version < _BINDERY_MIN_VERSION:
+        found = ".".join(str(part) for part in version) if version else "unreadable"
+        raise RuntimeError(
+            f"bindery on PATH is {found}, but the lossy-consent mirror needs "
+            f"{_BINDERY_MIN_VERSION[0]}.{_BINDERY_MIN_VERSION[1]}."
+            f"{_BINDERY_MIN_VERSION[2]}+ (the structured fix records); "
+            "upgrade it (uv tool upgrade bindery-cli)"
+        )
     fd, report = tempfile.mkstemp(prefix="bindery-phase1-", suffix=".json")
     os.close(fd)
     try:
@@ -378,10 +411,12 @@ def _bindery_phase1(downloads_dir: str, *, apply_lossy: bool) -> dict[str, Any]:
 #: the set bindery's own repair gate treats specially (their gain is
 #: invisible to epubcheck): stripped_pagination, stripped_broken_tags,
 #: stripped_watermarks, dropped_marker, stub_docs_dropped. A gate-accepted
-#: summary without these is structural (alt text, invalid values, NCX
-#: fixes) and consent-free. The 2026-09-17/19 roadmap box: every
-#: gate-accepted repair used to fire a lossy_consent decision, so
-#: reviewers signed off on vacuous consent.
+#: repair without these is structural (alt text, invalid values, NCX
+#: fixes) and consent-free. Judged against the record's structured
+#: ``fixes`` dict (bindery-cli >= 0.45.0), never against the rendered
+#: summary string: the 2026-09-18 bindery roadmap box replaced the old
+#: string contract with data, and _BINDERY_MIN_VERSION enforces the
+#: report shape this reads.
 _LOSSY_REPAIR_MARKERS = (
     "stripped_pagination",
     "stripped_broken_tags",
@@ -391,8 +426,8 @@ _LOSSY_REPAIR_MARKERS = (
 )
 
 
-def _repair_is_lossy(summary: str) -> bool:
-    return any(marker in summary for marker in _LOSSY_REPAIR_MARKERS)
+def _repair_is_lossy(fixes: dict[str, int]) -> bool:
+    return any(fixes.get(marker) for marker in _LOSSY_REPAIR_MARKERS)
 
 
 def _mirror_lossy(man: dict[str, Any], bindery_shape: dict[str, Any]) -> None:
@@ -419,13 +454,16 @@ def _mirror_lossy(man: dict[str, Any], bindery_shape: dict[str, Any]) -> None:
             "partial",
         ):
             continue
+        fixes = repair.get("fixes") or {}
         summary = (repair.get("summary") or "").strip()
-        if not summary:
+        if not fixes and not summary:
             continue
         entry = by_path.get(os.path.abspath(str(book.get("path") or "")))
         if entry is None:
             continue
-        lossy = _repair_is_lossy(summary)
+        # The class comes from the data; the summary rides along as the
+        # human-readable audit line the decision detail quotes.
+        lossy = _repair_is_lossy(fixes)
         entry["lossy"]["repairs"].append(
             {"tool": "bindery", "summary": summary, "applied": applied, "lossy": lossy}
         )

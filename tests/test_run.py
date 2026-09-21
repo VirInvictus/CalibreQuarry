@@ -405,6 +405,9 @@ class TestRunPhase1(RunCase):
                     "repair": {
                         "status": "accept",
                         "summary": "stripped_pagination:3",
+                        "fixes": {"stripped_pagination": 3},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
                     },
                 },
                 {
@@ -412,6 +415,9 @@ class TestRunPhase1(RunCase):
                     "repair": {
                         "status": "partial",
                         "summary": "stripped_watermarks:1 dropped_marker:1",
+                        "fixes": {"stripped_watermarks": 1, "dropped_marker": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
                     },
                 },
                 {"path": untouched, "repair": None},
@@ -459,6 +465,9 @@ class TestRunPhase1(RunCase):
                     "repair": {
                         "status": "accept",
                         "summary": "add-img-alt:4, strip-invalid-value:2, ncx_uid_synced",
+                        "fixes": {"add-img-alt": 4, "strip-invalid-value": 2},
+                        "ncx_uid_synced": True,
+                        "watermark_refusals": 0,
                     },
                 }
             ],
@@ -504,6 +513,9 @@ class TestRunPhase1(RunCase):
                     "repair": {
                         "status": "accept",
                         "summary": "add-img-alt:2, stripped_watermarks:1",
+                        "fixes": {"add-img-alt": 2, "stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
                     },
                 }
             ],
@@ -531,6 +543,46 @@ class TestRunPhase1(RunCase):
             d for d in man["decisions_needed"] if d["kind"] == "lossy_consent"
         ]
         self.assertIn("stripped_watermarks:1", decision["detail"])
+
+    def test_lossy_class_comes_from_the_fixes_data_not_the_summary(self):
+        # The 2026-09-21 adoption of bindery v0.45.0's structured records:
+        # the class is judged by the fixes dict, never by vocabulary in the
+        # rendered summary. This summary names no marker string, and under
+        # the old substring contract the strip would have consent-gated as
+        # structural -- the exact hole the data contract closes.
+        terse = self._make_file("quiet_strip.epub")
+        shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": terse,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "3 page layers removed",
+                        "fixes": {"stripped_pagination": 3},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
+                }
+            ],
+        }
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        entry = manifest.file_by_path(man, terse)
+        self.assertTrue(entry["lossy"]["flagged"])
+        (decision,) = [
+            d for d in man["decisions_needed"] if d["kind"] == "lossy_consent"
+        ]
+        self.assertIn("3 page layers removed", decision["detail"])
 
     def test_embedded_metadata_seeds_stamps_over_the_filename_parse(self):
         # The 2026-09-18 seeding box: the file's embedded metadata (the
@@ -625,7 +677,13 @@ class TestRunPhase1(RunCase):
             "books": [
                 {
                     "path": path,
-                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
                 }
             ],
         }
@@ -656,7 +714,13 @@ class TestRunPhase1(RunCase):
             "books": [
                 {
                     "path": flagged,
-                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
                 },
                 {"path": clean, "repair": None},
             ],
@@ -684,7 +748,13 @@ class TestRunPhase1(RunCase):
             "books": [
                 {
                     "path": path,
-                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
                 }
             ],
         }
@@ -932,6 +1002,8 @@ class TestPhase1Seams(RunCase):
     @staticmethod
     def _bindery_proc(returncode, payload=None, stderr=""):
         def side_effect(cmd, **kw):
+            if "--version" in cmd:
+                return mock.Mock(returncode=0, stdout="bindery 0.45.0\n", stderr="")
             report = cmd[cmd.index("--json") + 1]
             if payload is not None:
                 with open(report, "w", encoding="utf-8") as f:
@@ -939,6 +1011,10 @@ class TestPhase1Seams(RunCase):
             return mock.Mock(returncode=returncode, stdout="prose", stderr=stderr)
 
         return side_effect
+
+    @staticmethod
+    def _version_proc(line):
+        return mock.Mock(returncode=0, stdout=line, stderr="")
 
     _BINDERY_PAYLOAD = {
         "mode": "phase1",
@@ -964,6 +1040,8 @@ class TestPhase1Seams(RunCase):
         real_side_effect = self._bindery_proc(2, payload=self._BINDERY_PAYLOAD)
 
         def side_effect(cmd, **kw):
+            if "--version" in cmd:
+                return mock.Mock(returncode=0, stdout="bindery 0.45.0\n", stderr="")
             seen["report"] = cmd[cmd.index("--json") + 1]
             return real_side_effect(cmd, **kw)
 
@@ -982,7 +1060,10 @@ class TestPhase1Seams(RunCase):
         proc = mock.Mock(returncode=1, stdout="", stderr="no .epub files under root")
         with (
             self._has_bindery(),
-            mock.patch("cquarry_cli.run._run", return_value=proc),
+            mock.patch(
+                "cquarry_cli.run._run",
+                side_effect=[self._version_proc("bindery 0.45.0"), proc],
+            ),
         ):
             self.assertEqual(_bindery_phase1(self.downloads, apply_lossy=False), {})
 
@@ -992,7 +1073,10 @@ class TestPhase1Seams(RunCase):
         proc = mock.Mock(returncode=2, stdout="", stderr="invalid choice: 'run'")
         with (
             self._has_bindery(),
-            mock.patch("cquarry_cli.run._run", return_value=proc),
+            mock.patch(
+                "cquarry_cli.run._run",
+                side_effect=[self._version_proc("bindery 0.45.0"), proc],
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "no readable report"):
                 _bindery_phase1(self.downloads, apply_lossy=False)
@@ -1001,9 +1085,36 @@ class TestPhase1Seams(RunCase):
         proc = mock.Mock(returncode=3, stdout="", stderr="boom")
         with (
             self._has_bindery(),
-            mock.patch("cquarry_cli.run._run", return_value=proc),
+            mock.patch(
+                "cquarry_cli.run._run",
+                side_effect=[self._version_proc("bindery 0.45.0"), proc],
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "bindery run phase1 failed"):
+                _bindery_phase1(self.downloads, apply_lossy=False)
+
+    def test_bindery_phase1_refuses_a_bindery_below_the_floor(self):
+        # The structured fix records are a versioned contract (bindery-cli
+        # 0.45.0). An older PATH bindery would class every strip as
+        # structural -- the vacuous-consent hole again -- so too old is a
+        # hard error naming the upgrade, never a silent downgrade.
+        with (
+            self._has_bindery(),
+            mock.patch(
+                "cquarry_cli.run._run",
+                return_value=self._version_proc("bindery 0.44.1\n"),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "0.45.0") as ctx:
+                _bindery_phase1(self.downloads, apply_lossy=False)
+        self.assertIn("upgrade", str(ctx.exception))
+
+    def test_bindery_phase1_refuses_an_unreadable_version(self):
+        with (
+            self._has_bindery(),
+            mock.patch("cquarry_cli.run._run", return_value=self._version_proc("")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "unreadable"):
                 _bindery_phase1(self.downloads, apply_lossy=False)
 
     def test_bindery_phase1_without_the_entry_point_degrades(self):
@@ -1271,13 +1382,22 @@ class TestRunPhase2(RunCase):
             "books": [
                 {
                     "path": lossy_path,
-                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
                 },
                 {
                     "path": structural_path,
                     "repair": {
                         "status": "accept",
                         "summary": "add-img-alt:4, ncx_uid_synced",
+                        "fixes": {"add-img-alt": 4},
+                        "ncx_uid_synced": True,
+                        "watermark_refusals": 0,
                     },
                 },
             ],
@@ -1336,7 +1456,13 @@ class TestRunPhase2(RunCase):
             "books": [
                 {
                     "path": lossy_path,
-                    "repair": {"status": "accept", "summary": "stripped_watermarks:1"},
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
                 }
             ],
         }
