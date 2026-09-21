@@ -1491,3 +1491,52 @@ note; every integration ships with a dry-run before any write.
       recorded `imported_id`s), which no verb-side fix can police. The
       in-batch stamp verification is the verb-side half; the phase-3
       check stays.)*
+
+- [ ] **screen_duplicate: within-batch title-PREFIX containment collides
+      distinct works when the author also matches** (observed 2026-09-19,
+      mixed wave — the sibling of the Moral Letters volume-token box
+      above, different token class and a new root cause): "Arcana
+      Unleashed" and "Arcana Unleashed: Deadfall" are two DISTINCT
+      official WotC products (base guide + companion adventure), but with
+      identical corporate author (Wizards of the Coast) the within-batch
+      screen refused each as a duplicate of the other on the completed/
+      re-run. Notably the FIRST run over ~/Downloads approved both — the
+      collision appeared only after the deep-stamp pass unified the
+      authors, i.e. CORRECT stamping created the match. Candidate rule:
+      within-batch pairs whose normalized title is a strict PREFIX
+      containment (or differ only by subtitle after the colon) are a
+      "related works" advisory for human review, never an auto-refusal.
+      The single-file re-screen rule caught it, as designed.
+- [ ] **stamp_pdf should checksum-validate --isbn at the tool boundary**
+      (observed 2026-09-19, mixed wave): the tool writes whatever --isbn
+      it is given, and this run supplied three bad numbers before the
+      operator's external batch-script assert caught them — Hewitt's own
+      PRINTED ISBN-13/10 both fail checksum (a print artifact; the valid
+      form is 1-59863-503-5), the WPN-listed Arcana Unleashed ISBN
+      9780786967006 fails checksum (valid: 9780786970063), and earlier
+      runs caught LoC and web listings carrying invalid numbers. The
+      docstring already warns "a wrong ISBN pulls in the wrong book's
+      metadata"; the tool should refuse any --isbn failing its check
+      digit (10- or 13-form; exit 2 usage error) so the guard lives where
+      the write happens, not in every caller's script.
+- [ ] **Reviewer verdict flips have no sanctioned propagation into
+      approved_for_import** (observed 2026-09-19): the runner builds the
+      approved list from per-file verdicts at manifest-creation time
+      (run.py manifest.approve), and the Moral Letters / Arcana review
+      flows both require flipping `verdict` AND rebuilding
+      `approved_for_import` by hand — two places, no warning on
+      divergence, and sign seals whatever the list says. Either sign
+      should re-derive the list from the per-file verdicts (single source
+      of truth) or refuse to sign on divergence; a reviewer-facing
+      `cquarry run approve --manifest FILE` wrapping manifest.approve()
+      would also close it.
+
+- [ ] **validate_library.py: EVERY_BOOK_COVER has no allowlist mechanism**
+      (observed 2026-09-19, mixed wave): #9268 Deadfall arrived with no
+      embedded cover (D&DBeyond digital files carry none), and the
+      validator reports it as an error with no suppression path. Every
+      other by-design finding has one (READ_NO_DATE, FORMAT_FICTION_PDF,
+      etc.). A `every_book_cover_allowed` key in taxonomy.yaml — or the
+      standard `rule_options.EVERY_BOOK_COVER.allowed_ids` — would close
+      it. (The cover was set from PDF page 1 for this batch, but a
+      digital-native file with genuinely no cover art will recur.)
