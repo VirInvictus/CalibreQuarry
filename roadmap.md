@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.52.0.
+What's done, what's next. Updated as of v3.53.0.
 
 ---
 
@@ -1599,3 +1599,23 @@ note; every integration ships with a dry-run before any write.
       extensions, which is desirable, but a title-only stamp on a
       touched file leaves them alone — the bug class here is author
       verify and author import, both author-scoped.)*
+
+- [x] stamp_epub.py: an EPUB sibling of stamp_pdf.py so the pre-stamp ritual (mandatory for ALL filetypes per Brandon, 2026-09-22) has a real tool instead of a batch driver. Contract: exact-filename mapping with bijection asserts, cquarry ISBN checksum gate, `ebook-meta --title --authors --publisher --isbn` write (it rewrites the OPF in place and REPLACES any existing isbn identifier), backups outside the tree, STAMP_FAILED stop. Verify contract differs from PDF: ebook-meta's read-back never displays ISBN, so verify title/authors/publisher from the read-back and the ISBN from a direct OPF read under VALUE EQUALITY over every dc:identifier (bare isbn:... form, opf:scheme/ns2:scheme="ISBN", dashed values, isbn-in-element-id are all live shapes; a file that already carried the right ISBN makes --isbn an honest no-op and must verify, not fail). First exercised on the 2026-09-22 fiction wave: 46 EPUBs stamped, three verifier iterations to learn the identifier spellings, one masked duplicate (Mandeville file carrying Mozart's A Life in Letters metadata wholesale) caught at the door. Multi-author join is " & " (ebook-meta's separator), matching the cquarry --set-authors ";" split only at the CLI layer.
+      *(3.53.0: shipped as `scripts/stamp_epub.py`, CLI-shaped like stamp_pdf:
+      dry-run default, `--apply` demands an out-of-tree `--backup-dir`, the
+      `_check_isbn` checksum gate refuses bad numbers before anything writes,
+      exit 2/1/0. The bijection asserts became: a target named twice is
+      refused, and a failed stamp STOPS the run with every remainder named
+      AND recorded `left_unstamped` in the `--json` report, so no staged file
+      is ever left unstamped silently. The verifier is the third iteration's
+      final form: read-back for title/authors/publisher with the author
+      compared as the display segment before the ` [` bracket (live files
+      render `Name [Sort, Form]`); direct OPF read for the ISBN, every
+      dc:identifier's value AND id attribute normalized by dropping an
+      optional urn:/isbn: prefix and all non-alphanumerics, verified when any
+      candidate equals the stamp. Live-pinned against the real writer: the
+      wrong-ISBN replace, the honest no-op in all four spelling shapes (the
+      writer never destroys a matching identifier; it may add its own
+      canonical one alongside), and the clean-file gain. 29 new tests
+      including a real-ebook-meta seam class that skips on ebook-meta-less
+      machines.)*

@@ -10,6 +10,7 @@ import contextlib
 import csv
 import importlib.util
 import io
+import json
 import os
 import pathlib
 import shutil
@@ -20,6 +21,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -731,6 +733,43 @@ class TestFetchWriteIdentifiers(unittest.TestCase):
 
 screen_duplicate = _load("screen_duplicate")
 stamp_pdf = _load("stamp_pdf")
+stamp_epub = _load("stamp_epub")
+
+
+def _make_epub(
+    path,
+    title="Stub Title",
+    author="Stub Author",
+    identifiers=(),
+    opf_name="content.opf",
+):
+    """A minimal synthetic EPUB: mimetype + container.xml + one OPF whose
+    metadata carries the given dc:identifier elements verbatim, so every
+    producer spelling from the 2026-09-22 live exercise can be built."""
+    ident_xml = "".join(f"    {ident}\n" for ident in identifiers)
+    opf = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<package xmlns="http://www.idpf.org/2007/opf" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">\n'
+        "  <metadata>\n"
+        f"    <dc:title>{title}</dc:title>\n"
+        f"    <dc:creator>{author}</dc:creator>\n"
+        f"{ident_xml}"
+        "  </metadata>\n"
+        "</package>\n"
+    )
+    container = (
+        '<?xml version="1.0"?>\n'
+        '<container version="1.0" '
+        'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+        '  <rootfiles><rootfile full-path="' + opf_name + '" '
+        'media-type="application/oebps-package+xml"/></rootfiles>\n'
+        "</container>\n"
+    )
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("META-INF/container.xml", container)
+        z.writestr(opf_name, opf)
 
 
 class TestScreenDuplicateNormalize(unittest.TestCase):
@@ -1501,6 +1540,499 @@ class TestStampPdfGuards(unittest.TestCase):
             rc = stamp_pdf.main()
         self.assertEqual(rc, 2)
         self.assertIn("EPUB", buf.getvalue())
+
+
+class TestStampEpubVerify(unittest.TestCase):
+    """The EPUB verify contract (the 2026-09-22 live exercise): title/
+    authors/publisher from the ebook-meta read-back, the author compared as
+    the display segment before the ` [` bracket; ISBN from the OPF's
+    dc:identifier elements under VALUE EQUALITY."""
+
+    def _verify(self, readback, candidates, **kw):
+        return stamp_epub._verify(
+            readback,
+            candidates,
+            kw.get("title", ""),
+            kw.get("authors", []),
+            kw.get("publisher", ""),
+            kw.get("isbn", ""),
+        )
+
+    def test_author_display_segment_ignores_sort_bracket(self):
+        # ebook-meta renders `Display [Sort, Form]` whenever a sort exists;
+        # only the display segment is the stamp comparison target.
+        failed = self._verify(
+            {"title": "T", "author(s)": "Caitlín R. Kiernan [Kiernan, Caitlín R.]"},
+            [],
+            title="T",
+            authors=["Caitlín R. Kiernan"],
+        )
+        self.assertEqual(failed, [])
+
+    def test_wrong_display_author_still_fails(self):
+        failed = self._verify(
+            {"title": "T", "author(s)": "Someone Else [Else, Someone]"},
+            [],
+            title="T",
+            authors=["Caitlín R. Kiernan"],
+        )
+        self.assertEqual(failed, ["author"])
+
+    def test_isbn_value_equality_over_every_live_shape(self):
+        # Bare isbn: value, scheme-attributed bare value, dashed value, and
+        # the ISBN carried in the element id: all verify against one stamp.
+        want = "9780786970063"
+        for cand in (
+            "isbn:9780786970063",
+            "9780786970063",
+            "978-0-7869-7006-3",
+            "isbn_9780786970063",
+            "urn:isbn:978-0-7869-7006-3",
+        ):
+            failed = self._verify({"title": "T"}, [cand], title="T", isbn=want)
+            self.assertEqual(failed, [], cand)
+
+    def test_wrong_isbn_fails(self):
+        # The 2026-09-22 masked-duplicate class: a wrong number the writer
+        # failed to replace must not read as the stamp.
+        failed = self._verify(
+            {"title": "T"},
+            ["9781101218631"],
+            title="T",
+            isbn="9780786970063",
+        )
+        self.assertEqual(failed, ["isbn"])
+
+    def test_no_isbn_requested_skips_the_check(self):
+        failed = self._verify({"title": "T"}, [], title="T")
+        self.assertEqual(failed, [])
+
+    def test_missing_readback_fields_fail(self):
+        failed = self._verify({}, [], title="T", authors=["A"], publisher="P")
+        self.assertEqual(failed, ["title", "author", "publisher"])
+
+
+class TestStampEpubNormalize(unittest.TestCase):
+    def test_shapes_collapse_onto_the_bare_number(self):
+        for raw, want in (
+            ("isbn:9780786970063", "9780786970063"),
+            ("ISBN:9780786970063", "9780786970063"),
+            ("urn:isbn:9780786970063", "9780786970063"),
+            ("isbn_9780786970063", "9780786970063"),
+            ("978-0-7869-7006-3", "9780786970063"),
+            ("9780786970063", "9780786970063"),
+            ("0-8044-2957-X", "080442957X"),
+        ):
+            self.assertEqual(stamp_epub._normalize_identifier(raw), want, raw)
+
+    def test_dashed_stamp_equals_prefixed_candidate(self):
+        self.assertEqual(
+            stamp_epub._normalize_identifier("978-0-7869-7006-3"),
+            stamp_epub._normalize_identifier("ISBN: 9780786970063"),
+        )
+
+
+class TestStampEpubOpfRead(unittest.TestCase):
+    """_opf_identifier_candidates reads the real zip: the value AND the id
+    attribute of every dc:identifier, via the container's rootfile path."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _candidates(self, ident_el, **kw):
+        p = self.dir / "b.epub"
+        _make_epub(p, identifiers=[ident_el], **kw)
+        return stamp_epub._opf_identifier_candidates(p)
+
+    def test_value_and_id_attribute_are_both_candidates(self):
+        cands = self._candidates(
+            '<dc:identifier id="isbn_9780786970063">978-0-7869-7006-3</dc:identifier>'
+        )
+        self.assertIn("978-0-7869-7006-3", cands)
+        self.assertIn("isbn_9780786970063", cands)
+
+    def test_namespaced_scheme_shape_is_read(self):
+        cands = self._candidates(
+            '<dc:identifier xmlns:ns2="http://www.idpf.org/2007/opf" '
+            'ns2:scheme="ISBN">9780786970063</dc:identifier>'
+        )
+        self.assertEqual(cands, ["9780786970063"])
+
+    def test_rootfile_path_is_honored_not_the_filename(self):
+        # Real EPUBs commonly nest the OPF under OEBPS/; the container.xml
+        # rootfile entry is the only authority.
+        p = self.dir / "b.epub"
+        _make_epub(p, identifiers=(), opf_name="OEBPS/content.opf")
+        zip_names = zipfile.ZipFile(p).namelist()
+        self.assertIn("OEBPS/content.opf", zip_names)
+        self.assertEqual(stamp_epub._opf_identifier_candidates(p), [])
+
+
+class TestStampEpubMain(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.epub = self.dir / "5E - Wonderland.epub"
+        _make_epub(
+            self.epub,
+            identifiers=[
+                '<dc:identifier id="badid" opf:scheme="ISBN">9781101218631'
+                "</dc:identifier>"
+            ],
+        )
+        self.backup = Path(self.tmp.name + "-backups")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run_main(self, *extra, files=None):
+        argv = ["stamp_epub", *(str(f) for f in (files or [self.epub])), *extra]
+        buf = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            contextlib.redirect_stdout(buf),
+            contextlib.redirect_stderr(buf),
+        ):
+            return stamp_epub.main(), buf.getvalue()
+
+    def test_invalid_isbn_is_refused(self):
+        # The tool-boundary checksum guard, same shape as stamp_pdf 3.52.0.
+        rc, out = self._run_main("--isbn", "9780786967006", "--title", "X")
+        self.assertEqual(rc, 2)
+        self.assertIn("check digit", out)
+
+    def test_invalid_isbn_is_refused_on_apply_too(self):
+        rc, out = self._run_main(
+            "--isbn",
+            "9780786967006",
+            "--title",
+            "X",
+            "--apply",
+            "--backup-dir",
+            str(self.backup),
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("check digit", out)
+
+    def test_no_fields_is_a_usage_error(self):
+        rc, out = self._run_main()
+        self.assertEqual(rc, 2)
+        self.assertIn("nothing to stamp", out)
+
+    def test_missing_file_refused(self):
+        rc, out = self._run_main("--title", "X", files=[self.dir / "gone.epub"])
+        self.assertEqual(rc, 2)
+        self.assertIn("no such file", out)
+
+    def test_refuses_non_epub(self):
+        pdf = self.dir / "book.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        rc, out = self._run_main("--title", "X", files=[pdf])
+        self.assertEqual(rc, 2)
+        self.assertIn("not an EPUB", out)
+
+    def test_duplicate_target_refused(self):
+        # Bijection: one file, one stamp; a repeated target would
+        # double-stamp and lie about the batch.
+        rc, out = self._run_main("--title", "X", files=[self.epub, self.epub])
+        self.assertEqual(rc, 2)
+        self.assertIn("twice", out)
+
+    def test_dry_run_default_never_invokes_ebook_meta(self):
+        with mock.patch.object(stamp_epub, "_run_ebook_meta") as run:
+            rc, out = self._run_main("--title", "Wonderland")
+        self.assertEqual(rc, 0)
+        run.assert_not_called()
+        self.assertIn("dry run", out)
+        self.assertIn("'5E'", out)  # the filename-derivation preview
+
+    def test_dry_run_works_without_ebook_meta_on_path(self):
+        with mock.patch.object(stamp_epub.shutil, "which", return_value=None):
+            rc, _ = self._run_main("--title", "Wonderland")
+        self.assertEqual(rc, 0)
+
+    def test_apply_requires_backup_dir(self):
+        rc, out = self._run_main("--apply", "--title", "Wonderland")
+        self.assertEqual(rc, 2)
+        self.assertIn("backup-dir", out)
+
+    def test_backup_dir_inside_target_dir_is_refused(self):
+        rc, out = self._run_main(
+            "--apply", "--title", "W", "--backup-dir", str(self.dir / "sub")
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("OUTSIDE", out)
+
+    def test_args_carry_only_requested_fields(self):
+        # The fixed field set, joined " & " (ebook-meta's separator); a
+        # field the caller leaves off is not passed at all.
+        self.assertEqual(
+            stamp_epub._build_ebook_meta_args("T", ["A One", "A Two"], "", ""),
+            ["ebook-meta", "--title", "T", "--authors", "A One & A Two"],
+        )
+        self.assertEqual(
+            stamp_epub._build_ebook_meta_args("T", [], "P", "9780786970063"),
+            [
+                "ebook-meta",
+                "--title",
+                "T",
+                "--publisher",
+                "P",
+                "--isbn",
+                "9780786970063",
+            ],
+        )
+
+    def _apply_mocks(self, write_rc=0, readback=None):
+        return (
+            mock.patch.object(stamp_epub.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_epub,
+                "_run_ebook_meta",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=write_rc, stdout="", stderr="boom"
+                ),
+            ),
+            mock.patch.object(
+                stamp_epub, "_read_ebook_meta", return_value=readback or {}
+            ),
+        )
+
+    def test_apply_stamps_and_verifies(self):
+        # The fixture already carries the stamp ISBN in its OPF, so the
+        # value-equality verify passes over the real zip without a write.
+        _make_epub(
+            self.epub,
+            title="Real Title",
+            author="Real Author",
+            identifiers=[
+                '<dc:identifier xmlns:ns2="http://www.idpf.org/2007/opf" '
+                'ns2:scheme="ISBN">9780786970063</dc:identifier>'
+            ],
+        )
+        which, run, read = self._apply_mocks(
+            readback={
+                "title": "Real Title",
+                "author(s)": "Real Author [Real, Author]",
+                "publisher": "Real Press",
+            }
+        )
+        with which, run as run_mock, read:
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(self.backup),
+                "--title",
+                "Real Title",
+                "--author",
+                "Real Author",
+                "--publisher",
+                "Real Press",
+                "--isbn",
+                "9780786970063",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("stamped and verified", out)
+        self.assertTrue(
+            (self.backup / self.epub.name).exists(),
+            "backup copy made before writing",
+        )
+        called = run_mock.call_args.args[0]
+        self.assertEqual(called[0], "ebook-meta")
+        self.assertEqual(called[-1], str(self.epub))
+        self.assertIn("--authors", called)
+
+    def test_write_failure_stops_the_list(self):
+        second = self.dir / "second.epub"
+        _make_epub(second)
+        which, run, _ = self._apply_mocks(write_rc=1)
+        with which, run as run_mock:
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(self.backup),
+                "--title",
+                "W",
+                files=[self.epub, second],
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertEqual(run_mock.call_count, 1, "no re-fighting, no second write")
+        self.assertIn("left unstamped", out)
+        self.assertIn("second.epub", out)
+
+    def test_verify_failure_stops_the_list(self):
+        second = self.dir / "second.epub"
+        _make_epub(second)
+        which, run, _ = self._apply_mocks(
+            readback={"title": "Something Else"},
+        )
+        with which, run as run_mock:
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(self.backup),
+                "--title",
+                "Wonderland",
+                files=[self.epub, second],
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertIn("title", out)
+        self.assertEqual(run_mock.call_count, 1, "no re-fighting, no second write")
+        self.assertIn("left unstamped", out)
+        self.assertIn("second.epub", out)
+
+    def test_json_report_records_every_target_once(self):
+        # The bijection record: every input file appears exactly once with a
+        # status, including the remainder a stop leaves unstamped.
+        second = self.dir / "second.epub"
+        _make_epub(second)
+        json_path = self.dir / "report.json"
+        which, run, _ = self._apply_mocks(
+            readback={"title": "Something Else"},
+        )
+        with which, run:
+            rc, _ = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(self.backup),
+                "--title",
+                "Wonderland",
+                "--json",
+                str(json_path),
+                files=[self.epub, second],
+            )
+        self.assertEqual(rc, 1)
+        report = json.loads(json_path.read_text(encoding="utf-8"))
+        statuses = {r["file"]: r["status"] for r in report["files"]}
+        self.assertEqual(len(report["files"]), 2)
+        self.assertEqual(statuses[str(self.epub)], "stamp_failed")
+        self.assertEqual(statuses[str(second)], "left_unstamped")
+
+
+@unittest.skipUnless(shutil.which("ebook-meta"), "needs Calibre's ebook-meta on PATH")
+class TestStampEpubLive(unittest.TestCase):
+    """The real-writer contract (verified live 2026-09-22): ebook-meta
+    REPLACES a wrong isbn identifier, keeps a matching producer's spelling,
+    and the OPF read verifies every shape under value equality."""
+
+    RIGHT = "9780786970063"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.backup = Path(self.tmp.name + "-backups")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _stamp(self, name, identifiers, **kw):
+        f = self.dir / name
+        _make_epub(f, identifiers=identifiers, **kw)
+        argv = [
+            "stamp_epub",
+            str(f),
+            "--title",
+            "Real Title",
+            "--author",
+            "Real Author",
+            "--isbn",
+            self.RIGHT,
+            "--apply",
+            "--backup-dir",
+            str(self.backup),
+        ]
+        buf = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            contextlib.redirect_stdout(buf),
+            contextlib.redirect_stderr(buf),
+        ):
+            rc = stamp_epub.main()
+        return rc, f
+
+    def _identifiers(self, f):
+        return stamp_epub._opf_identifier_candidates(f)
+
+    def test_wrong_isbn_is_replaced_and_verifies(self):
+        # The correction mechanism: a wrong ISBN-scheme identifier goes
+        # away, the stamp's number takes its place, verify passes.
+        rc, f = self._stamp(
+            "wrong.epub",
+            [
+                '<dc:identifier id="badid" opf:scheme="ISBN">9781101218631'
+                "</dc:identifier>"
+            ],
+        )
+        self.assertEqual(rc, 0)
+        wrong = stamp_epub._normalize_identifier("9781101218631")
+        survivors = [
+            c
+            for c in self._identifiers(f)
+            if stamp_epub._normalize_identifier(c) == wrong
+        ]
+        self.assertEqual(survivors, [], "the wrong ISBN must be replaced")
+        self.assertIn(
+            self.RIGHT,
+            [stamp_epub._normalize_identifier(c) for c in self._identifiers(f)],
+        )
+
+    def test_already_right_isbn_no_op_verifies_in_each_shape(self):
+        # The honest no-op: the writer keeps the producer's spelling (it
+        # never destroys a matching identifier; it may add its own
+        # canonical one alongside), and value equality verifies anyway.
+        shapes = {
+            "s1_bare_value": ["<dc:identifier>isbn:" + self.RIGHT + "</dc:identifier>"],
+            "s2_opfscheme": [
+                '<dc:identifier id="isbn" opf:scheme="ISBN">'
+                + self.RIGHT
+                + "</dc:identifier>"
+            ],
+            "s3_ns2scheme": [
+                '<dc:identifier xmlns:ns2="http://www.idpf.org/2007/opf" '
+                'ns2:scheme="ISBN">' + self.RIGHT + "</dc:identifier>"
+            ],
+            "s4_id_isbn": [
+                '<dc:identifier id="isbn_' + self.RIGHT + '">978-0-7869-7006-3'
+                "</dc:identifier>"
+            ],
+        }
+        for name, idents in shapes.items():
+            with self.subTest(shape=name):
+                rc, f = self._stamp(f"{name}.epub", idents)
+                self.assertEqual(rc, 0, name)
+                opf_text = self._opf_text(f)
+                self.assertIn(
+                    stamp_epub._normalize_identifier(self.RIGHT),
+                    [stamp_epub._normalize_identifier(c) for c in self._identifiers(f)],
+                    name,
+                )
+                if name == "s1_bare_value":
+                    self.assertIn("isbn:" + self.RIGHT, opf_text, name)
+                elif name == "s4_id_isbn":
+                    # The producer's distinctive spelling survives the write.
+                    self.assertIn("isbn_" + self.RIGHT, opf_text, name)
+                    self.assertIn("978-0-7869-7006-3", opf_text, name)
+                else:
+                    self.assertIn('scheme="ISBN"', opf_text, name)
+
+    def test_clean_epub_gains_the_isbn(self):
+        rc, f = self._stamp("clean.epub", [])
+        self.assertEqual(rc, 0)
+        self.assertIn(
+            stamp_epub._normalize_identifier(self.RIGHT),
+            [stamp_epub._normalize_identifier(c) for c in self._identifiers(f)],
+        )
+
+    def _opf_text(self, f):
+        z = zipfile.ZipFile(f)
+        opf_name = next(n for n in z.namelist() if n.endswith(".opf"))
+        return z.read(opf_name).decode("utf-8")
 
 
 class TestCommentsCensus(unittest.TestCase):

@@ -5,6 +5,35 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.53.0 onward, the EPUB stamp tool)
+
+- **`scripts/stamp_epub.py` is stamp_pdf's EPUB sibling, CLI-shaped identically**
+  (dry-run default; `--apply` demands a `--backup-dir` refused inside any
+  target's directory; the `_check_isbn` checksum gate is exit 2, dry-run and
+  apply alike; multi-author joins " & "). The write is ONE `ebook-meta`
+  invocation over the fixed field set (title/authors/publisher/isbn); a
+  field the caller leaves off is not passed at all. Two guards stamp_pdf
+  does not have: a target named twice is refused (exit 2, one file one
+  stamp), and a failed stamp STOPS the list with the remainder named AND
+  recorded `left_unstamped` in the `--json FILE` report (statuses:
+  `dry_run`/`stamped_verified`/`stamp_failed`/`left_unstamped`), the
+  bijection record.
+- **The EPUB verify contract is two-sourced on purpose.** Title/authors/
+  publisher verify from the `ebook-meta` read-back with the author compared
+  as the display segment before the ` [` bracket (`_display_author`; live
+  files render `Name [Sort, Form]`). The ISBN NEVER verifies from the
+  read-back: `_opf_identifier_candidates` reads the OPF via the container's
+  rootfile entry (never the entry name) and collects every `dc:identifier`'s
+  text AND `id` attribute; `_normalize_identifier` drops an optional leading
+  `urn:`/`isbn:` (also the `isbn_` id spelling) then all non-alphanumerics,
+  case-insensitive; the stamp verifies when ANY candidate equals it. This
+  makes an already-right ISBN an honest no-op (the writer keeps the
+  producer's spelling, sometimes adding its own canonical identifier
+  alongside) and makes the wrong-ISBN replace verifiable; no `--isbn`
+  requested skips the check entirely. Tests pin all of it against the REAL
+  ebook-meta (`TestStampEpubLive`, skipUnless the binary is on PATH) plus a
+  mocked-seam class, so the fixture zips are the verify inputs.
+
 ## Programmer-facing contract notes (3.52.0 onward, the screen-semantics batch)
 
 - **`classify_titles` is the one title-pair judge.** Everything the

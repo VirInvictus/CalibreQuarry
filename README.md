@@ -959,6 +959,20 @@ library tree and backs up every original first. The phase-1 skill owns the
 research rules: never stamp from the filename or from memory, and prefer
 no ISBN over a wrong one.
 
+### `stamp_epub.py`: pre-stamp EPUB metadata for clean imports (writes with `--apply`)
+
+The EPUB sibling of `stamp_pdf.py`: one `ebook-meta` write puts
+Title/Author/Publisher and the ISBN into the OPF (Calibre rewrites it in
+place and REPLACES any existing isbn identifier, which is how a wrong
+embedded ISBN gets corrected). The `--isbn` checksum gate, the out-of-tree
+`--backup-dir` requirement, and the dry-run default all match stamp_pdf.
+Verification differs because EPUB differs: title/authors/publisher are
+read back through `ebook-meta`, while the ISBN is verified from the OPF's
+`dc:identifier` elements under value equality, so every producer spelling
+verifies and a file that already carried the right ISBN stays untouched.
+A failed stamp stops the batch with the remainder named; `--json FILE`
+records every target exactly once.
+
 ### `screen_duplicate.py`: screen downloads for duplicates (read-only)
 
 The one-pass duplicate screen the acquisition pathway uses: each file's
