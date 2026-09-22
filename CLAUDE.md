@@ -5,6 +5,46 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.52.0 onward, the screen-semantics batch)
+
+- **`classify_titles` is the one title-pair judge.** Everything the
+  screener (library path, within-batch path) decides about two titles
+  goes through it; do not re-derive normalized comparisons at a call
+  site. Verdicts: `duplicate` (equal base, equal core subtitle), `related`
+  (colon-boundary containment: one full title equals the other's
+  pre-colon base or post-colon subtitle; a masked duplicate as often as
+  two products of one series), `volume_sibling` (both sides declare
+  volume annotations and they disagree, or the cores differ by one
+  trailing bare ordinal), `distinct` (shared base, differing real
+  subtitles), None (no opinion). The arabic-signature gate
+  (`_volume_signature`, the 3.25.0 shape, raw token keys) is unchanged
+  and deliberately stricter than the annotation comparison
+  (`_annotations`, canonical kinds, roman-aware): a one-sided arabic
+  declaration stays a silent no-match because surfacing every sibling is
+  the recorded 19-candidate Wandering Inn flood. `_annotations` values
+  are ints (roman parsed), so "Vol. 1" and "Volume I" agree; the
+  signature keeps string values and its `{("book", "8")}` shape is
+  pinned.
+- **The screen's report has two refusal classes and three advisory
+  classes.** Refusals: `library_hits`, `batch_duplicates` (run.py's
+  `_screen_duplicates` refused-set contract, unchanged). Advisories:
+  `related_hits`/`batch_related` (candidate pairs, count toward exit 1,
+  land in the manifest's `checks.related_works`) and `batch_volumes`
+  (multi-volume set members, informational, never exit 1, land in
+  `checks.volume_siblings`). NO advisory sets a file's verdict; phase 1
+  passes a notes dict into the seam to receive them. A test pins the
+  masked-duplicate pair (library "Mothership: Wages of Sin" vs the bare
+  "Wages of Sin" file) as `related`, not a pass.
+- **stamp_pdf's `--isbn` is checksum-gated at the boundary**
+  (`_check_isbn`, exit 2, dry-run and apply alike, separators tolerated).
+  The roadmap box's Hewitt "valid form" 1-59863-503-5 also fails its
+  check digit; the guard refuses it, so that number needs re-sourcing.
+- **`_apply_opf` writes pubdate date-only** (`_date_only`): a downloaded
+  OPF has no trustworthy time-of-day, so `YYYY-MM-DDThh:mm...` truncates
+  to `YYYY-MM-DD` before `set_pubdate` (which canonicalizes to midnight
+  UTC). Bare years and unparseable forms ride through and fail
+  `set_pubdate` exactly as before.
+
 ## Programmer-facing contract notes (3.50.0 onward, the calibre-touched PDF fix)
 
 - **stamp_pdf's author_sort erase rides calibre's own writer.** exiftool

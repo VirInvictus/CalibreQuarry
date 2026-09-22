@@ -779,6 +779,91 @@ class TestScreenDuplicateNormalize(unittest.TestCase):
         self.assertEqual(screen_duplicate.normalize_author("ÉRIC"), "eric")
 
 
+class TestScreenDuplicateClassify(unittest.TestCase):
+    """classify_titles is the work-identity verdict the 2026-09-21 waves
+    needed: prefix containment is a candidate, not a silent pass; shared
+    bases with differing real subtitles are distinct; declared volumes
+    disagreeing are one series root, not duplicates."""
+
+    def _check(self, a, b, want):
+        self.assertEqual(screen_duplicate.classify_titles(a, b), want)
+
+    def test_volume_1_and_2_of_one_root_are_volume_siblings(self):
+        # The 2026-09-16 Moral Letters shape (roadmap): distinct declared
+        # volumes of one series root, never duplicates.
+        self._check(
+            "Moral Letters to Lucilius. Volume 1",
+            "Moral Letters to Lucilius. Volume 2",
+            "volume_sibling",
+        )
+        # Roman declarations, which the arabic-only signature cannot see,
+        # obey the same rule (this pair was a FALSE duplicate before).
+        self._check("Capital: Volume I", "Capital: Volume II", "volume_sibling")
+
+    def test_bare_ordinal_tail_is_a_volume_sibling_not_a_duplicate(self):
+        # The 2026-09-21 Monster Vault shape (roadmap): the scrubbed title
+        # collides, the trailing ordinal separates the volumes.
+        self._check(
+            "Tales of the Valiant: Monster Vault",
+            "Tales of the Valiant: Monster Vault 2",
+            "volume_sibling",
+        )
+
+    def test_differing_real_subtitles_are_distinct_works(self):
+        # The 2026-09-21 sibling collapse: two real books sharing a base
+        # title, different ISBNs, 520 vs 515 pages. Never a match.
+        self._check(
+            "Introduction to Computer Organization: ARM",
+            "Introduction to Computer Organization: An Under-the-Hood Look "
+            "at Hardware and x86-64 Assembly",
+            "distinct",
+        )
+
+    def test_prefix_containment_is_related_not_a_pass(self):
+        # The Arcana Unleashed shape (roadmap 2026-09-19 box): bare base vs
+        # base + companion subtitle.
+        self._check("Arcana Unleashed", "Arcana Unleashed: Deadfall", "related")
+        # The masked-duplicate shape: the file title IS the library copy's
+        # post-colon subtitle.
+        self._check("Wages of Sin", "Mothership: Wages of Sin", "related")
+
+    def test_arabic_asymmetric_volume_stays_silent(self):
+        # The 3.25.0 gate unchanged: one side declaring an arabic volume the
+        # other does not mention is a gap-fill (the Wandering Inn smoke
+        # finding), never a match — and never an advisory flood either.
+        self._check(
+            "The Wandering Inn",
+            "The Wandering Inn: Book 8: Blood of Liscor",
+            None,
+        )
+        self._check(
+            "Moral letters to Lucilius. Volume 1", "Moral Letters to Lucilius", None
+        )
+
+    def test_roman_annotation_keeps_the_capital_case_matching(self):
+        # The regression floor: "Volume I" is a pure annotation, so the
+        # core subtitle is empty and the full-subtitle edition matches.
+        self._check(
+            "Capital: Volume I",
+            "Capital: A Critique of Political Economy",
+            "duplicate",
+        )
+
+    def test_annotations_read_roman_and_canonicalize_tokens(self):
+        self.assertEqual(
+            screen_duplicate._annotations("Capital: Volume I"),
+            frozenset({("volume", 1)}),
+        )
+        self.assertEqual(
+            screen_duplicate._annotations("Capital: Vol. 1"),
+            frozenset({("volume", 1)}),
+        )
+        self.assertEqual(
+            screen_duplicate._annotations("The Wandering Inn: Book 8"),
+            frozenset({("book", 8)}),
+        )
+
+
 class TestScreenDuplicateMatching(unittest.TestCase):
     """The library match: exact ISBN first, then normalized title + first
     author over cquarry's tight `=` search. ebook-meta is stubbed."""
@@ -810,11 +895,32 @@ class TestScreenDuplicateMatching(unittest.TestCase):
                     "Le Guin, Ursula K.",
                     "p2",
                 ),
+                # The 2026-09-21 masked-duplicate fixture: the library copy
+                # carries the series prefix the download's embedded title
+                # lacks ("Mothership: Wages of Sin" vs "Wages of Sin").
+                (
+                    3,
+                    "Mothership: Wages of Sin",
+                    "Wages of Sin",
+                    "Gearing, Luke",
+                    "p3",
+                ),
+                # The 2026-09-21 volume-collapse fixture: the library holds
+                # Monster Vault 2 while a Monster Vault (no ordinal)
+                # download screens against it.
+                (
+                    4,
+                    "Tales of the Valiant: Monster Vault 2",
+                    "Tales of the Valiant: Monster Vault 2",
+                    "Kobold Press",
+                    "p4",
+                ),
             ],
         )
         c.execute("CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT)")
         c.execute(
-            "INSERT INTO authors VALUES (1, 'Karl Marx'), (2, 'Ursula K. Le Guin')"
+            "INSERT INTO authors VALUES (1, 'Karl Marx'), (2, 'Ursula K. Le Guin'),"
+            " (3, 'Luke Gearing'), (4, 'Kobold Press')"
         )
         c.execute(
             "CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY,"
@@ -822,7 +928,7 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         )
         c.executemany(
             "INSERT INTO books_authors_link (book, author) VALUES (?, ?)",
-            [(1, 1), (2, 2)],
+            [(1, 1), (2, 2), (3, 3), (4, 4)],
         )
         c.execute("CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT)")
         c.execute(
@@ -871,7 +977,7 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             "authors": ["Karl Marx"],
             "isbn": "9780140445688",
         }
-        hits = screen_duplicate._library_hits(self.db, fields)
+        hits, related = screen_duplicate._library_hits(self.db, fields)
         self.assertEqual([h["id"] for h in hits], [1])
         self.assertEqual(hits[0]["formats"], ["EPUB"])
         self.assertEqual(hits[0]["size"], 2048)
@@ -907,8 +1013,37 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             "authors": ["Karl Marx"],
             "isbn": "",
         }
-        hits = screen_duplicate._library_hits(self.db, fields)
+        hits, related = screen_duplicate._library_hits(self.db, fields)
         self.assertEqual([h["id"] for h in hits], [1])
+        self.assertEqual(related, [])
+
+    def test_masked_duplicate_surfaces_as_related_not_a_pass(self):
+        # The 2026-09-21 masked duplicate (named fixture): the library copy
+        # is "Mothership: Wages of Sin", the download's embedded title is
+        # just "Wages of Sin". The old normalized equality passed silently;
+        # the containment candidate must reach the report instead.
+        fields = {
+            "file": "/dl/wages.epub",
+            "title": "Wages of Sin",
+            "authors": ["Luke Gearing"],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(hits, [])
+        self.assertEqual([h["id"] for h in related], [3])
+
+    def test_bare_ordinal_volume_file_is_not_a_library_duplicate(self):
+        # The Monster Vault shape against the library: "Tales of the
+        # Valiant: Monster Vault 2" owned, "Monster Vault" download arrives.
+        # Distinct volumes: no duplicate, no related, nothing refused (the
+        # phase-1 series census judges gaps).
+        fields = {
+            "file": "/dl/vault1.pdf",
+            "title": "Tales of the Valiant: Monster Vault",
+            "authors": ["Kobold Press"],
+            "isbn": "",
+        }
+        self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
 
     def test_different_author_is_not_a_hit(self):
         # Tight `=` author matching: Mark Lawrence is not T. E. Lawrence.
@@ -918,7 +1053,7 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             "authors": ["Mark Lawrence"],
             "isbn": "",
         }
-        self.assertEqual(screen_duplicate._library_hits(self.db, fields), [])
+        self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
 
     def test_batch_duplicates_cross_reference(self):
         # Within-batch dedup: same ISBN binds the two files both ways.
@@ -946,6 +1081,116 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         self.assertEqual([h["id"] for h in out[0]["library_hits"]], [1])
         self.assertEqual([h["id"] for h in out[1]["library_hits"]], [1])
 
+    def test_sibling_editions_are_not_batch_duplicates(self):
+        # The 2026-09-21 sibling collapse (named fixture): two REAL books
+        # (different ISBNs, 520 vs 515 pages) sharing the base title. The
+        # pre-colon scrub refused the newcomer twice in one day; the
+        # differing real subtitles now separate them. Nothing is flagged.
+        files = [Path("/dl/arm.pdf"), Path("/dl/x86.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Introduction to Computer Organization: ARM",
+                    "author(s)": "Jonathan Bartlett",
+                    "identifiers": "isbn:9781718502758",
+                },
+                {
+                    "title": "Introduction to Computer Organization: An "
+                    "Under-the-Hood Look at Hardware and x86-64 Assembly",
+                    "author(s)": "Jonathan Bartlett",
+                    "identifiers": "isbn:9781718500105",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_related", rec)
+            self.assertNotIn("batch_volumes", rec)
+
+    def test_volume_set_is_advised_not_refused(self):
+        # The 2026-09-21 volume collapse (named fixture): Monster Vault and
+        # Monster Vault 2 collided within the batch (the scrub made them
+        # equal) and refused each other. Now they surface as a multi-volume
+        # set: batch_volumes both ways, never batch_duplicates.
+        files = [Path("/dl/vault.pdf"), Path("/dl/vault2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Tales of the Valiant: Monster Vault",
+                    "author(s)": "Kobold Press",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Tales of the Valiant: Monster Vault 2",
+                    "author(s)": "Kobold Press",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertNotIn("batch_duplicates", out[0])
+        self.assertNotIn("batch_duplicates", out[1])
+        self.assertEqual(out[0]["batch_volumes"], ["/dl/vault2.pdf"])
+        self.assertEqual(out[1]["batch_volumes"], ["/dl/vault.pdf"])
+
+    def test_moral_letters_volumes_advised_as_a_set(self):
+        # The 2026-09-16 roadmap shape, within-batch: differing declared
+        # arabic volumes are a set to approve together, not refusals.
+        files = [Path("/dl/ml1.epub"), Path("/dl/ml2.epub"), Path("/dl/ml3.epub")]
+
+        def meta(n):
+            return {
+                "title": f"Moral Letters to Lucilius. Volume {n}",
+                "author(s)": "Lucius Annaeus Seneca",
+                "identifiers": "",
+            }
+
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[meta(1), meta(2), meta(3)],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        expected = [
+            ["/dl/ml2.epub", "/dl/ml3.epub"],
+            ["/dl/ml1.epub", "/dl/ml3.epub"],
+            ["/dl/ml1.epub", "/dl/ml2.epub"],
+        ]
+        for rec, volumes in zip(out, expected):
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertEqual(rec["batch_volumes"], volumes)
+
+    def test_related_titles_advised_within_batch(self):
+        # The 2026-09-19 Arcana shape (roadmap): bare base vs base +
+        # companion subtitle. Advisory for human review, never a refusal.
+        files = [Path("/dl/arcana.pdf"), Path("/dl/deadfall.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Arcana Unleashed",
+                    "author(s)": "Wizards of the Coast",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Arcana Unleashed: Deadfall",
+                    "author(s)": "Wizards of the Coast",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertNotIn("batch_duplicates", out[0])
+        self.assertNotIn("batch_duplicates", out[1])
+        self.assertEqual(out[0]["batch_related"], ["/dl/deadfall.pdf"])
+        self.assertEqual(out[1]["batch_related"], ["/dl/arcana.pdf"])
+
 
 class TestStampPdfGuards(unittest.TestCase):
     def setUp(self):
@@ -966,6 +1211,38 @@ class TestStampPdfGuards(unittest.TestCase):
             contextlib.redirect_stderr(buf),
         ):
             return stamp_pdf.main(), buf.getvalue()
+
+    def test_invalid_isbn_is_refused(self):
+        # The 2026-09-19 roadmap case: the WPN-listed Arcana number fails
+        # its check digit and rode past the tool into Keywords.
+        rc, out = self._run_main("--isbn", "9780786967006", "--title", "X")
+        self.assertEqual(rc, 2)
+        self.assertIn("check digit", out)
+
+    def test_invalid_isbn_is_refused_on_apply_too(self):
+        # The guard is a usage error at the boundary: --apply does not
+        # change it, and nothing is written (no backup dir demanded first).
+        rc, out = self._run_main(
+            "--isbn",
+            "159863503",
+            "--title",
+            "X",
+            "--apply",
+            "--backup-dir",
+            str(self.dir / "bak"),
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("check digit", out)
+
+    def test_valid_isbn_passes_the_guard(self):
+        # The corrected Arcana number and a hyphenated ISBN-13 both pass
+        # (separators tolerated); the dry run proceeds to its preview.
+        # Note: the roadmap box's Hewitt "valid form" 1-59863-503-5 also
+        # fails its check digit and is refused like every other bad number.
+        for isbn in ("9780786970063", "978-0-14-044568-8"):
+            rc, out = self._run_main("--isbn", isbn, "--title", "X")
+            self.assertEqual(rc, 0, isbn)
+            self.assertIn("dry run", out)
 
     def test_derive_from_filename(self):
         self.assertEqual(

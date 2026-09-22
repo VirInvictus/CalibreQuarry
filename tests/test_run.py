@@ -25,7 +25,9 @@ from cquarry_cli import manifest
 from cquarry_cli.backups import make_backup
 from cquarry_cli.cli import main
 from cquarry_cli.run import (
+    _apply_opf,
     _bindery_phase1,
+    _date_only,
     _drive_stamp,
     _fetch_metadata,
     _inventory,
@@ -865,6 +867,43 @@ class TestRunPhase1(RunCase):
         rc = run_phase1(self.downloads, self.db_path)
         self.assertEqual(rc, 0)
 
+    def test_phase1_records_screen_advisories_without_refusing(self):
+        # The 2026-09-21 semantics: related containment candidates and
+        # multi-volume sets ride out of the screen into the manifest's
+        # checks, and never set a verdict. The file stays approved; the
+        # review pass judges.
+        epub = self._make_file("Luke Gearing - Wages of Sin.epub")
+        notes = {
+            epub: {
+                "related": [{"with": "#3", "title": "Mothership: Wages of Sin"}],
+                "volumes": [],
+            }
+        }
+
+        def fake_screen(files, db, out_notes=None):
+            if out_notes is not None:
+                out_notes.update(notes)
+            return set()
+
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", side_effect=fake_screen),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={epub: "CLEAN"}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        entry = manifest.file_by_path(man, epub)
+        self.assertEqual(entry["verdict"], "approved_for_import")
+        self.assertEqual(
+            entry["checks"]["related_works"],
+            [{"with": "#3", "title": "Mothership: Wages of Sin"}],
+        )
+        self.assertNotIn("volume_siblings", entry["checks"])
+
 
 class TestPhase1Seams(RunCase):
     """The two phase-1 subprocess seams, against their instruments' real
@@ -955,6 +994,37 @@ class TestPhase1Seams(RunCase):
         con.close()
         self.assertEqual(_screen_duplicates([epub], self.db_path), {epub})
 
+    def test_screen_duplicates_notes_carry_advisories_not_refusals(self):
+        # The advisory half of the report: related containment candidates
+        # and volume-set siblings reach the notes dict, and a file with
+        # ONLY advisories stays out of the refused set.
+        hit = self._make_file("Luke Gearing - Wages of Sin.epub")
+        report = [
+            {
+                "file": hit,
+                "title": "Wages of Sin",
+                "authors": ["Luke Gearing"],
+                "isbn": "",
+                "library_hits": [],
+                "related_hits": [{"id": 3, "title": "Mothership: Wages of Sin"}],
+                "batch_volumes": ["/tmp/vault2.epub"],
+            },
+        ]
+        proc = mock.Mock(returncode=1, stdout=json.dumps(report), stderr="")
+        notes: dict = {}
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            dups = _screen_duplicates([hit], self.db_path, notes)
+        self.assertEqual(dups, set())
+        self.assertEqual(
+            notes,
+            {
+                hit: {
+                    "related": [{"with": "#3", "title": "Mothership: Wages of Sin"}],
+                    "volumes": [{"with": "/tmp/vault2.epub", "title": ""}],
+                }
+            },
+        )
+
     def test_phase1_hands_the_screen_only_screenable_files(self):
         # The pre-filter is screen_duplicate's own extension set: a djvu
         # inventory never reaches it (its exit-2 "no ebook files" was the
@@ -963,7 +1033,7 @@ class TestPhase1Seams(RunCase):
         djvu = self._make_file("broken_scan.djvu", payload=b"DJVUDATA")
         seen = {}
 
-        def fake_screen(files, db):
+        def fake_screen(files, db, notes=None):
             seen["files"] = files
             return set()
 
@@ -1159,6 +1229,63 @@ class TestPrecedentTags(RunCase):
         )
         self.assertEqual(_precedent_tags(self.db_path, []), [])
         self.assertEqual(_precedent_tags(self.db_path, ["Nobody, Alice"]), [])
+
+
+class TestApplyOpfPubdate(RunCase):
+    """The 2026-09-16/21 pubdate poison: the downloaded OPF carried the
+    edition date at the download run's clock time (42 of 47 books in one
+    batch shared the same minute-band), and phase 3 had to normalize every
+    one by hand. The apply seam writes date-only precision now."""
+
+    def _book_and_opf(self, date_text):
+        con = sqlite3.connect(self.db_path)
+        from cquarry.write import register_udfs
+
+        register_udfs(con)
+        book_id = con.execute(
+            "INSERT INTO books (title) VALUES ('Some Title')"
+        ).lastrowid
+        con.commit()
+        con.close()
+        opf = os.path.join(self.temp_dir, "book.opf")
+        with open(opf, "w", encoding="utf-8") as f:
+            f.write(
+                "<?xml version='1.0' encoding='utf-8'?>\n"
+                "<package xmlns='http://www.idpf.org/2007/opf' version='2.0'>"
+                "<metadata xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+                "<dc:title>Some Title</dc:title>"
+                f"<dc:date>{date_text}</dc:date>"
+                "</metadata></package>"
+            )
+        return book_id, opf
+
+    def test_date_only_shapes(self):
+        # The run clock is stripped; a bare date survives unchanged; exotic
+        # input rides through to fail set_pubdate exactly as before.
+        self.assertEqual(_date_only("2010-05-25T01:49:00.233821+00:00"), "2010-05-25")
+        self.assertEqual(_date_only("2010-05-25"), "2010-05-25")
+        self.assertEqual(_date_only("2010"), "2010")
+
+    def test_apply_writes_the_edition_date_without_the_run_clock(self):
+        book_id, opf = self._book_and_opf("2010-05-25T01:49:00.233821+00:00")
+        self.assertTrue(_apply_opf(book_id, opf, self.db_path))
+        con = sqlite3.connect(self.db_path)
+        stored = con.execute(
+            "SELECT pubdate FROM books WHERE id = ?", (book_id,)
+        ).fetchone()[0]
+        con.close()
+        # cquarry's canonical midnight form: no 01:49 minute-band anywhere.
+        self.assertTrue(stored.startswith("2010-05-25 00:00:00"), stored)
+
+    def test_apply_of_a_date_only_opf_is_unchanged(self):
+        book_id, opf = self._book_and_opf("2010-05-25")
+        self.assertTrue(_apply_opf(book_id, opf, self.db_path))
+        con = sqlite3.connect(self.db_path)
+        stored = con.execute(
+            "SELECT pubdate FROM books WHERE id = ?", (book_id,)
+        ).fetchone()[0]
+        con.close()
+        self.assertTrue(stored.startswith("2010-05-25 00:00:00"), stored)
 
 
 class TestRunPhase2(RunCase):

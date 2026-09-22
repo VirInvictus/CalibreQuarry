@@ -250,13 +250,19 @@ def _provenance_from_filename(path: str) -> str | None:
     return None
 
 
-def _screen_duplicates(files: list[str], db_path: str) -> set[str]:
+def _screen_duplicates(
+    files: list[str], db_path: str, notes: dict[str, dict[str, list]] | None = None
+) -> set[str]:
     """screen_duplicate.py --format json over the inventoried files: the
     paths with a library or within-batch duplicate hit.
 
     The JSON report is a bare list holding EVERY screened file, so only
     records with hits count as duplicates. An unparseable report is a hard
-    error: silence here would approve files the screen never judged."""
+    error: silence here would approve files the screen never judged.
+    When `notes` is given it receives the screen's advisory pairs per path
+    (related containment candidates and multi-volume set siblings): these
+    are never refusals, but the manifest records them so the review pass
+    sees what the screen saw."""
     if not files:
         return set()
     script = _scripts_dir() / "screen_duplicate.py"
@@ -274,6 +280,31 @@ def _screen_duplicates(files: list[str], db_path: str) -> set[str]:
             "screen_duplicate report is not the documented list shape: "
             f"{type(records).__name__}"
         )
+    if notes is not None:
+        titles = {
+            r["file"]: r.get("title") or ""
+            for r in records
+            if isinstance(r, dict) and isinstance(r.get("file"), str)
+        }
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("file"), str):
+                continue
+            entry: dict[str, list] = {}
+            for hit in record.get("related_hits") or []:
+                if isinstance(hit, dict):
+                    entry.setdefault("related", []).append(
+                        {"with": f"#{hit.get('id')}", "title": hit.get("title") or ""}
+                    )
+            for other in record.get("batch_related") or []:
+                entry.setdefault("related", []).append(
+                    {"with": other, "title": titles.get(other, "")}
+                )
+            for other in record.get("batch_volumes") or []:
+                entry.setdefault("volumes", []).append(
+                    {"with": other, "title": titles.get(other, "")}
+                )
+            if entry:
+                notes[record["file"]] = entry
     return {
         record["file"]
         for record in records
@@ -620,9 +651,14 @@ def run_phase1(
 
     drm = _drm_verdicts(downloads_dir)
     battery = _pdf_battery(files)
+    # The advisories (related containment candidates, multi-volume set
+    # siblings) ride out of the same subprocess call; the refused set keeps
+    # its own contract.
+    screen_notes: dict[str, dict[str, list]] = {}
     dup_paths = _screen_duplicates(
         [f for f in files if os.path.splitext(f)[1].lower() in _SCREEN_EXTS],
         db_path,
+        screen_notes,
     )
 
     man = manifest.new_manifest(downloads_dir)
@@ -663,6 +699,15 @@ def run_phase1(
                 "qpdf_check": batt.get("qpdf_check"),
                 "findings": len(batt.get("findings", [])),
             }
+        # The screen's advisories are recorded for the review pass but never
+        # set a verdict: a related pair may be a masked duplicate or two
+        # products of one series, and a volume set is approve-all by design.
+        advisory = screen_notes.get(path)
+        if advisory:
+            if advisory.get("related"):
+                entry["checks"]["related_works"] = advisory["related"]
+            if advisory.get("volumes"):
+                entry["checks"]["volume_siblings"] = advisory["volumes"]
         # Quarantine audit_drm's own problem set only (its is_problem:
         # DRM, plus ERROR, a scan that could not verify). BENIGN (font
         # obfuscation, permission flags) and N/A (DJVU) are not locks and
@@ -734,6 +779,15 @@ def run_phase1(
         print(
             f"  quarantined/duplicate: {len(man['quarantines']) + sum(1 for f in man['files'] if f['verdict'] == 'duplicate_refused')}"
         )
+        related_count = sum(1 for f in man["files"] if f["checks"].get("related_works"))
+        volume_count = sum(
+            1 for f in man["files"] if f["checks"].get("volume_siblings")
+        )
+        if related_count or volume_count:
+            print(
+                f"  screen advisories: {related_count} related candidate(s), "
+                f"{volume_count} multi-volume file(s) (see checks; judged, not refused)"
+            )
         print(f"  decisions_needed: {len(man['decisions_needed'])}")
         print(f"Manifest: {manifest_path}")
         print(
@@ -783,12 +837,29 @@ def _fetch_metadata(isbn: str, opf_path: str) -> str:
 
 _OPF_NS = "{http://www.idpf.org/2007/opf}"
 
+_OPF_DATE = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})")
+
+
+def _date_only(value: str) -> str:
+    """The calendar date an OPF date carries, at day precision. Downloaded
+    metadata has no trustworthy time-of-day: the 2026-09-16 and 2026-09-21
+    waves landed pubdates stamped with the download run's own clock (42 of
+    47 books in one batch shared the same minute-band), and phase 3 had to
+    normalize every one by hand. Bare years and other exotic forms ride
+    through unchanged, failing set_pubdate exactly as before."""
+    m = _OPF_DATE.match(value)
+    if m is None:
+        return value
+    year, month, day = (int(part) for part in m.groups())
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
 
 def _apply_opf(book_id: int, opf_path: str, db_path: str) -> bool:
     """Apply a downloaded OPF through cquarry's write module (the repo's
     no-calibredb constraint). The fields are the ones a metadata download
     is for; anything the OPF does not carry is left as imported. One
-    batch per book; False on any failure."""
+    batch per book; False on any failure. The pubdate is written at
+    date-only precision (_date_only)."""
     try:
         import xml.etree.ElementTree as ET
 
@@ -828,7 +899,7 @@ def _apply_opf(book_id: int, opf_path: str, db_path: str) -> bool:
                     wdb.set_publisher(book_id, publisher)
                 pubdate = first_text("date")
                 if pubdate:
-                    wdb.set_pubdate(book_id, pubdate)
+                    wdb.set_pubdate(book_id, _date_only(pubdate))
                 description = first_text("description")
                 if description:
                     wdb.set_comments(book_id, description)

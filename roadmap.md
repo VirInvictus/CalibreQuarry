@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.51.0.
+What's done, what's next. Updated as of v3.52.0.
 
 ---
 
@@ -1355,7 +1355,7 @@ note; every integration ships with a dry-run before any write.
 
 - [x] **vir-tui floor >=2.5.0** (2026-09-14, no release cut: upstream 2.4.0/2.5.0 are additive terminal-safety and session-awareness releases; with no uv.lock, every fresh resolution takes the latest satisfying version automatically). *(Mention the floor bump in the next release's patchnotes.)*
 
-- [ ] **screen_duplicate: volume-token scrubbing collapses multi-volume sets
+- [x] **screen_duplicate: volume-token scrubbing collapses multi-volume sets
       into within-batch duplicates** (observed 2026-09-16, classics wave,
       Moral Letters to Lucilius vols 1-3): the normalizer scrubs standalone
       volume tokens, so "Moral letters to Lucilius. Volume 1/2/3" normalize
@@ -1369,8 +1369,18 @@ note; every integration ships with a dry-run before any write.
       volume tokens are a "multi-volume set" advisory (group, approve all,
       note the set), while same-normalized-title same-ISBN remains a true
       duplicate. Candidate for the screen's report shape.
+      *(3.52.0, both halves. The collapse is dead across every observed
+      token class: arabic token-word pairs were already separated by the
+      3.25.0 signature gate; roman declarations ("Vol I" vs "Vol II" — a
+      FALSE duplicate until now, both sides signature-less) are caught by
+      the new declared-annotation comparison; and the 2026-09-21
+      "Monster Vault" vs "Monster Vault 2" bare-ordinal shape separates by
+      a trailing-ordinal check over the post-colon subtitle. What remains
+      of a same-base volume pair is the advisory the box asked for: a
+      `batch_volumes` list per record (manifest `checks.volume_siblings`),
+      informational only — never a refusal, never an exit-1 trigger.)*
 
-- [ ] **Metadata download stamps `pubdate` with the download run's clock
+- [x] **Metadata download stamps `pubdate` with the download run's clock
       (microsecond timestamps), not the edition date** (observed 2026-09-16,
       classics wave: 42 of 47 books carried pubdates like
       `2010-05-25 01:49:00.233821+00:00` — the 01:49–01:59 band is the
@@ -1380,6 +1390,13 @@ note; every integration ships with a dry-run before any write.
       file-side date-only embeds as perpetual pubdate drift. Candidate
       fixes: normalize to date-only in the phase-2 DB pass, or make the
       reconcile pubdate compare ignore sub-day time components.
+      *(3.52.0, the first candidate fix: `_apply_opf` truncates every OPF
+      date to `YYYY-MM-DD` before `set_pubdate` (downloaded metadata has
+      no trustworthy time-of-day; the 2026-09-21 batch repeated the
+      same-minute-band shape). Bare years and exotic forms ride through
+      unchanged, failing set_pubdate exactly as before. The reconcile
+      compare is untouched — with the writer fixed at the seam it should
+      never see sub-day time again.)*
 - [ ] **reconcile: verify-after-embed for EPUB pubdate (the exiftool
       `-m` lesson again)** (observed 2026-09-16, #9177 Discourses and
       Selected Writings): `calibredb embed_metadata` reported success but
@@ -1492,7 +1509,7 @@ note; every integration ships with a dry-run before any write.
       in-batch stamp verification is the verb-side half; the phase-3
       check stays.)*
 
-- [ ] **screen_duplicate: within-batch title-PREFIX containment collides
+- [x] **screen_duplicate: within-batch title-PREFIX containment collides
       distinct works when the author also matches** (observed 2026-09-19,
       mixed wave — the sibling of the Moral Letters volume-token box
       above, different token class and a new root cause): "Arcana
@@ -1507,7 +1524,21 @@ note; every integration ships with a dry-run before any write.
       containment (or differ only by subtitle after the colon) are a
       "related works" advisory for human review, never an auto-refusal.
       The single-file re-screen rule caught it, as designed.
-- [ ] **stamp_pdf should checksum-validate --isbn at the tool boundary**
+      *(3.52.0: `classify_titles` replaces the normalized-equality gate.
+      Containment at a COLON boundary — one full title equal to the
+      other's pre-colon base or post-colon subtitle — is the `related`
+      advisory this box proposed: surfaced in the report (`batch_related`,
+      `related_hits` vs the library), recorded in the manifest's
+      `checks.related_works`, exit 1, but never a refusal and never a
+      verdict. The same rule catches the 2026-09-21 masked DUPLICATE the
+      old equality silently passed: library "Mothership: Wages of Sin"
+      vs the bare "Wages of Sin" download, the case that needed a manual
+      collision sweep. Differing real subtitles over one shared base
+      ("Introduction to Computer Organization: ARM" vs the x86-64
+      edition) are now `distinct` — the other 2026-09-21 false-refusal.
+      One-sided arabic volume declarations stay silent (the 3.25.0 gate;
+      the 19-candidate Wandering Inn flood stays impossible).)*
+- [x] **stamp_pdf should checksum-validate --isbn at the tool boundary**
       (observed 2026-09-19, mixed wave): the tool writes whatever --isbn
       it is given, and this run supplied three bad numbers before the
       operator's external batch-script assert caught them — Hewitt's own
@@ -1519,6 +1550,12 @@ note; every integration ships with a dry-run before any write.
       metadata"; the tool should refuse any --isbn failing its check
       digit (10- or 13-form; exit 2 usage error) so the guard lives where
       the write happens, not in every caller's script.
+      *(3.52.0: `_check_isbn` refuses any --isbn failing
+      cquarry's `isbn_check_digit_is_valid` (10- or 13-form, separators
+      tolerated), dry-run and apply alike, exit 2. Correction found while
+      testing: the Hewitt "valid form" 1-59863-503-5 quoted above ALSO
+      fails its check digit — the guard refuses it like every other bad
+      number, so that number needs re-sourcing, not re-typing.)*
 - [ ] **Reviewer verdict flips have no sanctioned propagation into
       approved_for_import** (observed 2026-09-19): the runner builds the
       approved list from per-file verdicts at manifest-creation time

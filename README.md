@@ -951,7 +951,8 @@ Exit codes: `0` clean (warnings do not fail), `1` one or more errors, `2` setup 
 Obscure PDFs (TTRPG modules, scans, indie releases) often carry no embedded
 metadata, so Calibre imports the FILENAME as the title. This tool stamps
 Title/Author/Publisher (and ISBN via keywords, so phase 2's metadata
-download can match) before import; it verifies with Calibre's own
+download can match) before import; an `--isbn` failing its check digit is
+refused outright, in dry-run and apply alike. It verifies with Calibre's own
 `ebook-meta` and prints `STAMP_FAILED` rather than fighting a stubborn XMP
 store. Dry-run by default; `--apply` requires `--backup-dir` OUTSIDE the
 library tree and backs up every original first. The phase-1 skill owns the
@@ -962,11 +963,18 @@ no ISBN over a wrong one.
 
 The one-pass duplicate screen the acquisition pathway uses: each file's
 embedded metadata is read with Calibre's `ebook-meta`, matched against the
-library (exact ISBN first, then normalized title + first author) and
-within the batch, and printed as comparison columns. `--format json` emits
-the bare list of per-file records the `run phase1` seam consumes (only
-records with `library_hits`/`batch_duplicates` are duplicates). Exit codes:
-0 clean, 1 candidates found, 2 setup error. Report-only, always.
+library (exact ISBN first, then classified normalized title + first author)
+and within the batch, and printed as comparison columns. Beyond true
+duplicates, the classifier surfaces two advisory classes it never auto-
+refuses: differing declared volume annotations as one multi-volume set
+(`batch_volumes`), and colon-boundary title containment as related
+candidates (`batch_related`, `related_hits`) — the shape a series/store
+prefix makes when it can either mask a duplicate or join two distinct
+products, so the human judges. `--format json` emits the bare list of
+per-file records the `run phase1` seam consumes (only records with
+`library_hits`/`batch_duplicates` are duplicates; advisories ride into the
+manifest's `checks`). Exit codes: 0 clean, 1 candidates found, 2 setup
+error. Report-only, always.
 
 ### `check_pdf.py`: the PDF/DJVU battery (read-only)
 

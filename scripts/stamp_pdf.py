@@ -11,7 +11,10 @@ the phase-1 skill: read the file's own credits/copyright pages
 (`pdftotext -f 1 -l 4`), research online, triple-check every value against
 two independent sources. A wrong embedded ISBN actively pulls the WRONG
 book's metadata wholesale during import — this script deliberately offers no
-web lookup, and none should be bolted on.
+web lookup, and none should be bolted on. One mechanical guard does live
+here: an --isbn failing its check digit is refused outright (exit 2), in
+dry-run and apply alike, so the guard sits where the write happens instead
+of in every caller's batch script.
 
 Field set is FIXED (the traps are already paid for):
   -Title + -XMP-dc:Title, -Author + -XMP-dc:Creator,
@@ -142,6 +145,25 @@ def _check_files(files: list[Path]) -> int | None:
     return None
 
 
+def _check_isbn(isbn: str) -> int | None:
+    """The tool-boundary checksum guard: an ISBN failing its check digit (10-
+    or 13-form, separators tolerated) is refused before anything stamps. The
+    2026-09-19 wave wrote three bad numbers past this script before an
+    external assert caught them, and a stamped wrong ISBN pulls the wrong
+    book's metadata wholesale on import."""
+    from cquarry.helpers import isbn_check_digit_is_valid
+
+    if isbn and not isbn_check_digit_is_valid(isbn):
+        print(
+            f"ERROR: --isbn {isbn!r} fails its check digit; refusing to stamp "
+            "garbage. Re-verify the number against the book itself (a wrong "
+            "ISBN pulls in the wrong book's metadata on import).",
+            file=sys.stderr,
+        )
+        return 2
+    return None
+
+
 def _check_tools() -> int | None:
     # Only the write path needs the external CLIs: a dry-run previews from
     # arguments alone and must work on machines without exiftool.
@@ -251,6 +273,8 @@ def main() -> int:
 
     files = [Path(f).expanduser() for f in args.files]
     if rc := _check_files(files):
+        return rc
+    if rc := _check_isbn(args.isbn):
         return rc
     if not (args.title or args.author or args.publisher or args.isbn):
         print(
