@@ -1868,10 +1868,10 @@ class TestStampEpubMain(unittest.TestCase):
     def test_verify_failure_stops_the_list(self):
         second = self.dir / "second.epub"
         _make_epub(second)
-        which, run, _ = self._apply_mocks(
+        which, run, read = self._apply_mocks(
             readback={"title": "Something Else"},
         )
-        with which, run as run_mock:
+        with which, run as run_mock, read:
             rc, out = self._run_main(
                 "--apply",
                 "--backup-dir",
@@ -1893,10 +1893,10 @@ class TestStampEpubMain(unittest.TestCase):
         second = self.dir / "second.epub"
         _make_epub(second)
         json_path = self.dir / "report.json"
-        which, run, _ = self._apply_mocks(
+        which, run, read = self._apply_mocks(
             readback={"title": "Something Else"},
         )
-        with which, run:
+        with which, run, read:
             rc, _ = self._run_main(
                 "--apply",
                 "--backup-dir",
