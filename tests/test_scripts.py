@@ -1527,6 +1527,198 @@ class TestStampPdfGuards(unittest.TestCase):
         self.assertIn("isbn", out)
         self.assertEqual(len(self._write_calls(run)), 1, "no re-fighting")
 
+    # --- the parse-crash class (2026-09-26): exiftool rc != 0 with a
+    # Perl-space error gets ONE qpdf --replace-input recovery + retry.
+
+    def _crash(self, stderr=None):
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=2,
+            stderr=stderr
+            if stderr is not None
+            else "Can't find Root object at /usr/share/perl5/Image/ExifTool/PDF.pm line 189.\n",
+            stdout="",
+        )
+
+    def _ok(self):
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    def _qpdf_flags(self, run_mock):
+        return [c.args[0][1] for c in run_mock.call_args_list]
+
+    def test_parse_crash_rebuilds_and_retries_once(self):
+        # The C++23 STL Cookbook live shape: exiftool cannot read the file
+        # (qpdf can), the rebuild preserves the page count, the retry stamps.
+        backup = Path(self.tmp.name + "-backups")
+        counts = iter(["3", "3"])
+
+        def qpdf(args):
+            if "--show-npages" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=next(counts), stderr=""
+                )
+            return self._ok()
+
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf, "_run_exiftool", side_effect=[self._crash(), self._ok()]
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf", side_effect=qpdf) as q,
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Wonderland"},
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("attempting one qpdf rebuild", out)
+        self.assertIn("Can't find Root object", out)
+        self.assertIn("3 pages preserved", out)
+        self.assertIn("stamped and verified", out)
+        self.assertEqual(
+            len(self._write_calls(run)), 2, "the failed write plus one retry"
+        )
+        self.assertEqual(
+            self._qpdf_flags(q),
+            ["--show-npages", "--replace-input", "--show-npages"],
+        )
+
+    def test_parse_crash_retry_still_failing_is_stamp_failed(self):
+        # Exactly one recovery: the retried write dies too, so STAMP_FAILED
+        # with no second rebuild.
+        backup = Path(self.tmp.name + "-backups")
+        counts = iter(["3", "3"])
+
+        def qpdf(args):
+            if "--show-npages" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=next(counts), stderr=""
+                )
+            return self._ok()
+
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf,
+                "_run_exiftool",
+                side_effect=[self._crash(), self._crash()],
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf", side_effect=qpdf) as q,
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertEqual(len(self._write_calls(run)), 2, "one retry, not three")
+        self.assertEqual(
+            self._qpdf_flags(q),
+            ["--show-npages", "--replace-input", "--show-npages"],
+            "no second rebuild after a failed retry",
+        )
+
+    def test_parse_crash_page_count_change_restores_backup_and_fails(self):
+        # The rebuild's check gate: a changed page count restores the
+        # backup copy and never retries.
+        backup = Path(self.tmp.name + "-backups")
+        counts = iter(["3", "4"])
+
+        def qpdf(args):
+            if "--show-npages" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=next(counts), stderr=""
+                )
+            self.pdf.write_bytes(b"%PDF-1.4 rebuilt")
+            return self._ok()
+
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf, "_run_exiftool", side_effect=[self._crash()]
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf", side_effect=qpdf),
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertIn("backup", out)
+        self.assertEqual(
+            self.pdf.read_bytes(),
+            b"%PDF-1.4 fake",
+            "backup restored after the page count changed",
+        )
+        self.assertEqual(len(self._write_calls(run)), 1, "no retry after a bad rebuild")
+
+    def test_parse_crash_without_qpdf_fails_without_recovery(self):
+        backup = Path(self.tmp.name + "-backups")
+        with (
+            mock.patch.object(
+                stamp_pdf.shutil,
+                "which",
+                side_effect=lambda name: None if name == "qpdf" else "/usr/bin/x",
+            ),
+            mock.patch.object(
+                stamp_pdf, "_run_exiftool", side_effect=[self._crash()]
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf") as q,
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        q.assert_not_called()
+        self.assertEqual(len(self._write_calls(run)), 1)
+
+    def test_non_parse_exiftool_failure_never_recovers(self):
+        # An rc != 0 without a Perl-space error is not the parse-crash
+        # class: straight STAMP_FAILED, untouched qpdf.
+        backup = Path(self.tmp.name + "-backups")
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf,
+                "_run_exiftool",
+                side_effect=[self._crash(stderr="Error: Unknown file type\n")],
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf") as q,
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        q.assert_not_called()
+        self.assertEqual(len(self._write_calls(run)), 1)
+
+    def test_is_parse_crash_shapes(self):
+        # The live shape and the generic Perl die families match; rc 0 and
+        # ordinary tool errors never do.
+        self.assertTrue(stamp_pdf._is_parse_crash(self._crash()))
+        self.assertTrue(
+            stamp_pdf._is_parse_crash(
+                self._crash(
+                    stderr='Can\'t call method "GetSetValue" on unblessed reference'
+                    " at /usr/share/perl5/Image/ExifTool/PDF.pm line 700.\n"
+                )
+            )
+        )
+        self.assertFalse(
+            stamp_pdf._is_parse_crash(
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout="", stderr=self._crash().stderr
+                )
+            ),
+            "rc 0 is the read-back's job, never a crash",
+        )
+        self.assertFalse(stamp_pdf._is_parse_crash(self._crash(stderr="died\n")))
+
     def test_refuses_non_pdf(self):
         epub = self.dir / "book.epub"
         epub.write_bytes(b"EPUB")

@@ -2234,6 +2234,50 @@ class TestEmbeddedStamps(unittest.TestCase):
         )
         self.assertNotIn("isbn", stamps)
 
+    def test_multi_author_bracket_is_cut_before_the_split(self):
+        # calibre renders N authors as `A & B [SortA & SortB]`: the
+        # bracket wraps the WHOLE list. Splitting on " & " before cutting
+        # it seeded the sort forms as phantom authors (the 2026-09-26
+        # HFT 2nd-ed live case: 4 stamped authors seeded as 7).
+        stdout = (
+            "Title               : Probe Title\n"
+            "Author(s)           : Ada Author & Bob B. Author & Cara Author"
+            " & Dee Author [Author, Ada & Author, Bob B. & Author, Cara"
+            " & Author, Dee]\n"
+        )
+        with mock.patch("cquarry_cli.run._run", return_value=self._proc(stdout)):
+            stamps = _stamps_from_embedded("/tmp/probe.epub")
+        self.assertEqual(
+            stamps,
+            {
+                "title": "Probe Title",
+                "authors": [
+                    "Ada Author",
+                    "Bob B. Author",
+                    "Cara Author",
+                    "Dee Author",
+                ],
+            },
+        )
+
+    def test_single_author_sort_suffix_is_cut(self):
+        # The one-author display form `Name [Sort, Form]`: only the
+        # display segment before the bracket seeds.
+        stdout = (
+            "Title               : T\nAuthor(s)           : Ada Author [Author, Ada]\n"
+        )
+        with mock.patch("cquarry_cli.run._run", return_value=self._proc(stdout)):
+            stamps = _stamps_from_embedded("/tmp/probe.epub")
+        self.assertEqual(stamps, {"title": "T", "authors": ["Ada Author"]})
+
+    def test_unknown_author_placeholder_is_dropped(self):
+        # Bare and bracketed Unknown forms both stay out of the seeds.
+        for line in ("Unknown", "Unknown [Unknown]"):
+            stdout = f"Title               : T\nAuthor(s)           : {line}\n"
+            with mock.patch("cquarry_cli.run._run", return_value=self._proc(stdout)):
+                stamps = _stamps_from_embedded("/tmp/probe.epub")
+            self.assertEqual(stamps, {"title": "T"}, line)
+
     def test_year_only_pubdate_is_dropped(self):
         # cquarry's add_book raises on an unparseable pubdate: a bare
         # year (common in PDF metadata) must not seed one.

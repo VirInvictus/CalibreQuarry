@@ -175,7 +175,10 @@ def _stamps_from_embedded(path: str) -> dict[str, Any] | None:
     wrong-format seed must not fail phase 2. Returns None when ebook-meta
     is missing or the file cannot be read; an empty dict means the read
     succeeded and carried nothing usable. Authors arrive joined with
-    " & " (calibre's ebook-meta display form)."""
+    " & " (calibre's ebook-meta display form), with the whole line cut at
+    the FIRST " [" before the split: calibre wraps the sort forms for the
+    WHOLE list in one trailing bracket (`A & B [SortA & SortB]`), and
+    splitting first leaked them as phantom authors."""
     try:
         proc = _run(["ebook-meta", path], timeout=120)
     except OSError, subprocess.TimeoutExpired:
@@ -199,9 +202,12 @@ def _stamps_from_embedded(path: str) -> dict[str, Any] | None:
     title = fields.get("Title") or ""
     if title and title != "Unknown":
         stamps["title"] = title
-    authors = [
-        a.strip() for a in (fields.get("Author(s)") or "").split(" & ") if a.strip()
-    ]
+    # The bracket cut comes BEFORE the " & " split: the bracket wraps the
+    # whole author LIST, so splitting first landed the sort forms inside it
+    # in the seeds (2026-09-26: a correct 4-author stamp seeded 7). Same
+    # display-segment shape stamp_epub's _display_author compares.
+    author_line = (fields.get("Author(s)") or "").partition(" [")[0]
+    authors = [a.strip() for a in author_line.split(" & ") if a.strip()]
     if authors and authors != ["Unknown"]:
         stamps["authors"] = authors
     if fields.get("Publisher"):

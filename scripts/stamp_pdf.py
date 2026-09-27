@@ -27,6 +27,14 @@ exiftool round-trip. On write-reports-success-but-readback-disagrees (the
 stubborn-XMP class) the script prints STAMP_FAILED, exits nonzero, and stops:
 do not keep fighting; phase 3 fixes the field in SQL instead.
 
+The other rc != 0 shape recovers mechanically. When exiftool cannot PARSE
+the file at all (a Perl-space error; 2026-09-26: "Can't find Root object"
+off a malformed catalog Names array, on a file `qpdf --check` passes), the
+script attempts exactly one recovery: a `qpdf --replace-input` rebuild whose
+page count must be preserved (a changed count restores the backup copy),
+then ONE stamp retry. A retry that still fails, and every stubborn-XMP
+read-back disagreement, still STAMP_FAILED immediately.
+
 A PDF Calibre has ever produced or touched also carries an XMP
 `calibre:author_sort`. Left in place it breaks the stamp twice: ebook-meta
 renders the author as `Display [Sort]` (failing verify), and Calibre's import
@@ -84,6 +92,69 @@ def _run_exiftool(args: list[str]) -> subprocess.CompletedProcess:
 
 def _run_ebook_meta(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, timeout=300)
+
+
+#: exiftool PARSE-crash signatures: a Perl-space error means it could not
+#: even READ the file (2026-09-26: "Can't find Root object" off a malformed
+#: catalog Names array, on a file `qpdf --check` passes). Deliberately not
+#: the write-succeeded shape: a read-back disagreement is the stubborn-XMP
+#: class and is never retried.
+_PARSE_CRASH_RE = re.compile(
+    r"\bCan't (?:call method|locate|find)\b"
+    r"|\bNot a (?:HASH|ARRAY|CODE) reference\b"
+    r"|\bUse of uninitialized value\b"
+    r"|\bsyntax error\b"
+)
+
+
+def _run_qpdf(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True, timeout=300)
+
+
+def _crash_detail(proc: subprocess.CompletedProcess) -> str:
+    """The first Perl-space error line (trimmed), for the recovery notice."""
+    for stream in (proc.stderr, proc.stdout):
+        for line in (stream or "").splitlines():
+            if _PARSE_CRASH_RE.search(line):
+                return line.strip()[:120]
+    return ""
+
+
+def _is_parse_crash(proc: subprocess.CompletedProcess) -> bool:
+    """exiftool rc != 0 WITH a Perl-space parse error. Any other rc != 0
+    failure never recovers; neither does rc == 0 (that is the read-back's
+    job, the stubborn-XMP class)."""
+    return proc.returncode != 0 and bool(_crash_detail(proc))
+
+
+def _pdf_page_count(path: Path) -> int | None:
+    proc = _run_qpdf(["qpdf", "--show-npages", str(path)])
+    if proc.returncode != 0:
+        return None
+    try:
+        return int(proc.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _rebuild_in_place(path: Path, backup: Path) -> int | None:
+    """One `qpdf --replace-input` rebuild, page count verified preserved.
+
+    Returns the preserved page count, or None when the rebuild is refused
+    (no qpdf on PATH, unreadable either side) or the page count changed;
+    every refusal restores the backup copy, so a failed recovery never
+    leaves the file more broken than it was found."""
+    if shutil.which("qpdf") is None:
+        return None
+    before = _pdf_page_count(path)
+    if before is None:
+        return None
+    proc = _run_qpdf(["qpdf", "--replace-input", str(path)])
+    after = _pdf_page_count(path) if proc.returncode == 0 else None
+    if after != before:
+        shutil.copy2(backup, path)
+        return None
+    return after
 
 
 def _has_calibre_authorsort(path: Path) -> bool:
@@ -326,6 +397,29 @@ def main() -> int:
         )
         exif_args.append(str(f))
         proc = _run_exiftool(exif_args)
+        if proc.returncode != 0 and _is_parse_crash(proc):
+            # The parse-crash class: exiftool cannot even read the file.
+            # One mechanical cure (2026-09-26 roadmap): a qpdf rebuild and
+            # exactly one retry; anything less clean stays a failure.
+            print(
+                f"  {DIM}exiftool cannot parse the file ({_crash_detail(proc)}); "
+                f"attempting one qpdf rebuild{RESET}"
+            )
+            pages = _rebuild_in_place(f, backup)
+            if pages is not None:
+                print(
+                    f"  {DIM}rebuild verified ({pages} pages preserved); "
+                    f"retrying the stamp once{RESET}"
+                )
+                # The rebuild rewrote the packet: re-read the raw property
+                # instead of trusting the pre-write detection.
+                need_sort_erase = bool(args.author) and _has_calibre_authorsort(f)
+                proc = _run_exiftool(exif_args)
+            else:
+                print(
+                    f"  {DIM}rebuild refused or page count changed (backup "
+                    f"restored); keeping the failure{RESET}"
+                )
         if proc.returncode != 0:
             print(
                 f"  {RED}STAMP_FAILED (exiftool exited {proc.returncode}): {proc.stderr.strip()}{RESET}"

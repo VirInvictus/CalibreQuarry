@@ -1,5 +1,13 @@
 # CalibreQuarry Patch Notes
 
+# 3.54.0 (2026-09-26)
+
+### The multi-author seed fix and the stamp_pdf parse-crash recovery
+
+- **`_stamps_from_embedded` cuts the author line at the ` [` bracket BEFORE splitting on " & "** (the 2026-09-26 HFT 2nd-ed EPUB): calibre renders N authors as `A & B & C & D [SortA & SortB & SortC & SortD]`, the bracket wrapping the WHOLE list, and the seeder split the display line before cutting it, so a correct 4-author stamp seeded 7 authors: the four display names plus sort-form fragments riding along as phantom authors in the manifest seeds. The OPF and the stamp_epub verifier were both correct in the live case, and the hand-corrected signed manifest stands. The fix is the display-segment shape stamp_epub's `_display_author` already compares for single authors: the single-author `Name [Sort, Form]` form seeds exactly 1, and the Unknown-placeholder drop still works in both its bare and bracketed forms.
+- **stamp_pdf recovers the exiftool parse-crash class mechanically, exactly once** (the 2026-09-26 C++23 STL Cookbook PDF): when the exiftool write exits nonzero WITH a Perl-space parse error in its output (today's shape: `Can't find Root object` off a malformed catalog Names array, on a file `qpdf --check` passes), the script attempts one `qpdf --replace-input` rebuild whose page count must be preserved (qpdf missing, an unreadable side, or a changed count restores the backup copy already made and no retry runs), then retries the stamp ONCE, re-reading the raw calibre author_sort property after any rebuild because the rebuild rewrote the XMP packet. A retry that still fails lands in the existing STAMP_FAILED path, and the stubborn-XMP class (write reports success, read-back disagrees) is untouched and keeps failing immediately. The live file was rebuilt by hand first, 496 pages preserved, the retry verified.
+- **Docs and tests**: both roadmap boxes are ticked with the fix notes; CLAUDE.md gains the 3.54.0 contract-notes section; the phase-1 library skill names the one-recovery exception in its stamp_pdf prose. New tests (9): the seeder's 4-author bracket cut, single-author suffix cut, and Unknown drop; and the parse-crash battery (rebuild verified and retried once, retry-still-failing STAMP_FAILED with no second rebuild, a page-count change restoring the backup byte-for-byte and failing without retry, missing qpdf and non-Perl failures never recovering, and the `_is_parse_crash` shape table). 681 tests, one skip on ebook-meta-less environments.
+
 # 3.53.0 (2026-09-22)
 
 ### stamp_epub: the pre-stamp ritual gets its EPUB tool (mandatory for ALL filetypes)

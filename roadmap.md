@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.53.0.
+What's done, what's next. Updated as of v3.54.0.
 
 ---
 
@@ -1620,6 +1620,15 @@ note; every integration ships with a dry-run before any write.
       including a real-ebook-meta seam class that skips on ebook-meta-less
       machines.)*
 
-- [2026-09-26] Phase-1 stamp seeder (`_stamps_from_embedded`) mis-parses ebook-meta's MULTI-author rendering `A & B [SortA & SortB]`: splitting the display line on `" & "` before cutting the ` [...]` bracket leaks the sort-form names inside the bracket as phantom authors in manifest seeds (found on the HFT 2nd-ed EPUB, 4 stamped authors seeded as 7; the OPF and the stamp_epub verifier were both correct; hand-corrected in the signed manifest). Fix direction: cut the whole author line at the FIRST ` [` before splitting on ` & ` (the same shape `_display_author` already handles for single authors). Unblocks: any multi-author EPUB stamp seeding.
+- [x] (2026-09-26) Phase-1 stamp seeder (`_stamps_from_embedded`) mis-parses ebook-meta's MULTI-author rendering `A & B [SortA & SortB]`: splitting the display line on `" & "` before cutting the ` [...]` bracket leaks the sort-form names inside the bracket as phantom authors in manifest seeds (found on the HFT 2nd-ed EPUB, 4 stamped authors seeded as 7; the OPF and the stamp_epub verifier were both correct; hand-corrected in the signed manifest). Fix direction: cut the whole author line at the FIRST ` [` before splitting on ` & ` (the same shape `_display_author` already handles for single authors). Unblocks: any multi-author EPUB stamp seeding.
+      *(3.54.0: the cut lands before the split, so the 4-author HFT line
+      seeds exactly 4; the single-author `Name [Sort, Form]` form seeds 1
+      and the Unknown drop is unchanged, both pinned by tests.)*
 
-- [2026-09-26] stamp_pdf: when the exiftool write dies with a PARSE error (today's shape: "Can't find Root object" from a malformed catalog Names array - qpdf --check passes but exiftool cannot even read the file), STAMP_FAILED is correct but the remedy is known and mechanical: detect parse-crash signatures (exiftool rc!=0 with a Perl-space error, vs the write-succeeded-read-back-failed shape the stubborn-XMP class describes), attempt one `qpdf --replace-input` rebuild (page count verified preserved) and retry the stamp once before failing. Found on the C++23 STL Cookbook PDF; rebuilt by hand, page count 496 preserved, retry verified. Unblocks: hands-free recovery of the parse-crash class.
+- [x] (2026-09-26) stamp_pdf: when the exiftool write dies with a PARSE error (today's shape: "Can't find Root object" from a malformed catalog Names array - qpdf --check passes but exiftool cannot even read the file), STAMP_FAILED is correct but the remedy is known and mechanical: detect parse-crash signatures (exiftool rc!=0 with a Perl-space error, vs the write-succeeded-read-back-failed shape the stubborn-XMP class describes), attempt one `qpdf --replace-input` rebuild (page count verified preserved) and retry the stamp once before failing. Found on the C++23 STL Cookbook PDF; rebuilt by hand, page count 496 preserved, retry verified. Unblocks: hands-free recovery of the parse-crash class.
+      *(3.54.0: `_is_parse_crash` gates on rc!=0 plus a Perl-space error,
+      `_rebuild_in_place` verifies the page count across the rebuild and
+      restores the already-made backup on any refusal, and a verified
+      rebuild retries the stamp exactly once, re-reading the raw
+      author_sort property afterward; the stubborn-XMP class keeps failing
+      immediately.)*

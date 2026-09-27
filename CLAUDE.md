@@ -5,6 +5,32 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.54.0 onward, the seed-and-recover batch)
+
+- **The phase-1 author seed cuts the bracket BEFORE the split.**
+  `_stamps_from_embedded` partitions the whole `Author(s)` display line at
+  the FIRST ` [` and only then splits on `" & "`: calibre renders N authors
+  as `A & B & C & D [SortA & SortB & ...]` with the bracket wrapping the
+  LIST, and the old split-first order seeded the sort forms as phantom
+  authors (live case: a correct 4-author stamp seeded 7). The single-author
+  `Name [Sort, Form]` form and the Unknown drop are unchanged. A display
+  name carrying a literal ` [` loses its tail by design, the same recorded
+  trade as stamp_epub's `_display_author`; the manifest is the review
+  step's to correct.
+- **stamp_pdf's parse-crash class gets exactly one mechanical recovery.**
+  When the exiftool write exits nonzero AND the output carries a Perl-space
+  parse error (`_PARSE_CRASH_RE`; the live shape: "Can't find Root object"
+  off a malformed catalog Names array, on a file `qpdf --check` passes),
+  `_rebuild_in_place` runs one `qpdf --replace-input` rebuild gated on the
+  page count (qpdf missing, unreadable either side, or a changed count:
+  the already-made backup is restored and None comes back), and only a
+  verified rebuild retries the stamp ONCE, re-reading
+  `_has_calibre_authorsort` afterward because the rebuild rewrote the
+  packet. The stubborn-XMP class (write rc 0, read-back disagrees) is
+  untouched and never retries; any other nonzero exit (no Perl-space
+  signature) never recovers either. `_run_qpdf` is a seam like the other
+  subprocess helpers.
+
 ## Programmer-facing contract notes (3.53.0 onward, the EPUB stamp tool)
 
 - **`scripts/stamp_epub.py` is stamp_pdf's EPUB sibling, CLI-shaped identically**
