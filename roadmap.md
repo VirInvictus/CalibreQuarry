@@ -1313,7 +1313,7 @@ note; every integration ships with a dry-run before any write.
 - [x] LOW — Code tail: integrate apply-path WritableCalibreDB blocks unwrapped (raw tracebacks); run_cover counts already-so as applied; run_flush ignores --format json; dead nested quiet-guard; pgrep guard triplicated with drift (only integrate catches OSError); _backup_db triplicated with divergent types; per-mode --format corners silently ignored; fts preview caps at 10 with no "and N more". *(3.45.0: run_cover counting fixed, run_flush json and the FTS preview tails done, the dead guard unwound, the OSError arms added everywhere; _backup_db unification and the per-mode --format corners stay open below.)*
 - [x] LOW — Comment LOWs: _fetch_metadata docstring omits "failed"; "do not race it with calibredb" names an unused tool; integrate docstring "every verb drives external programs" (cover/merge drive none); export's one-failure exhaustiveness claim stale; setwrite json shape omits ids; treeaudit "never extras" overbroad; four "Stdlib only" script headers importing vir_tui; five dead [DRY RUN] conditionals on an undefined flag; audit_isbns exit contract predates the B.8 advisory; spot_check 99 means two things; compress_pdf names half the size sync; cli.py/tui.py lack module docstrings. *(3.45.0: every named site truthed, the dead [DRY RUN] conditionals removed, the module docstrings written.)*
 - [x] LOW — Prose: live em-dash layer (README 21 chars/18 lines, spec 4, both title lines, plus 11 rendered CLI strings incl. the DRY RUN destructive-op line and the catalog header frozen into README sample output); patchnotes 3.40.0 carries four ASCII "--" sites in a live entry; the "not crying wolf" frame duplicated across adjacent sections; "CalibreQuarry (cquarry-cli)'s" rename-injection grammar break; the "X, not Y" definitional frame at high density (signature rhythm, author's call). *(3.45.0: the live em-dash layer eliminated (all rendered strings, the titles, README and spec lines, the catalog header frozen into the sample output); the 3.40.0 ASCII dashes recast; the crying-wolf echo reduced to one; the rename grammar break fixed. The "X, not Y" rhythm stays by author's call.)*
-- [ ] Feature candidates logged (FINAL-REPORT L4, ranked): --search QUERY --format md (the 3.42 emitter over any query); restrict-scoped get_tag_counts; --rename-entity + sort setters over the shipped-but-unconsumed 1.19.0 riders (the floor has carried them two releases); trash surface (listing + empty/expire under the integrate guards); swap the audit's inline duplicate grouping for cquarry's find_duplicate_books; --health --format json + annotations-dirtied line + opt-in --fail-on-findings; run fts-index verb (matures when FTS is first enabled); tag-tree rolled-up subtree counts (consumes consumerless tag_rollup); addition_timeline year granularity; identifierless advisory (flood-caveated). GATED: TUI set-write batch session (risk surface), dirtied_formats promotion (fts-index prep). *(Executed 3.45.0 on Brandon's gate: --rename-entity + the sort setters over the 1.19.0 riders, and the trash surface (listing + empty/expire). Roadmap-boxed: TUI set-write batch session.)*
+- [ ] Feature candidates logged (FINAL-REPORT L4, ranked): --search QUERY --format md (the 3.42 emitter over any query); restrict-scoped get_tag_counts; --rename-entity + sort setters over the shipped-but-unconsumed 1.19.0 riders (the floor has carried them two releases); trash surface (listing + empty/expire under the integrate guards); swap the audit's inline duplicate grouping for cquarry's find_duplicate_books; --health --format json + annotations-dirtied line + opt-in --fail-on-findings; run fts-index verb (matures when FTS is first enabled); tag-tree rolled-up subtree counts (consumes consumerless tag_rollup); addition_timeline year granularity; identifierless advisory (flood-caveated). GATED: TUI set-write batch session (risk surface), dirtied_formats promotion (fts-index prep). *(Executed 3.45.0 on Brandon's gate: --rename-entity + the sort setters over the 1.19.0 riders, and the trash surface (listing + empty/expire). Roadmap-boxed: TUI set-write batch session. 2026-09-29 correction from the parity scoping: restrict-scoped get_tag_counts shipped 3.43.0 and --identifierless ships (cli.py:1257-1270, via cquarry.integrity.find_identifierless), so two more candidates on this list are already done; the rest stays ranked.)*
 
 **CONFIRMED-prior (final-audit verification):** the TUI screenshot TODO (decision-60 placeholder form), the pre-v3.37.0 Release cutoff (deliberately scoped, never recorded as decided), spec-floor recurrence class. SUPERSEDED (verified shipped/fixed): ALL SIXTEEN Wave-14 code findings at their named sites, the entire Wave-14 GITHUB block (verified live), the recon litter items, the lane em-dash findings. Audit-side corrections: the sheet's floors (real >=1.21.0) and test count (real 525) are stale. Slop-reader verdict: genuinely human-voiced ("the 2147483649 integer-overflow constant wearing an ISBN's clothes"); the live em-dash layer is the one systemic defect.
 
@@ -1632,3 +1632,74 @@ note; every integration ships with a dry-run before any write.
       rebuild retries the stamp exactly once, re-reading the raw
       author_sort property afterward; the stubborn-XMP class keeps failing
       immediately.)*
+
+## Phase 20: the Calibre-automation parity lane (opened 2026-09-29)
+
+Brandon opened the ecosystem parity program on 2026-09-29 (cquarry roadmap.md, "The
+parity program"): every Calibre capability covered natively or by orchestration of
+Calibre's own headless tools, so Calibre work can be fully automated. CalibreQuarry is
+the ecosystem's orchestration lane, and this phase commits the headless upstream verbs
+that have no ecosystem wiring. Parity claims count native + owned-gap + orchestrated
+coverage; process-bound and declined surface is excluded with recorded reasons (the
+ledger lives in cquarry's roadmap). Sequenced, undated; ship order within the phase is
+free; every verb ships behind the standing rails (closed-Calibre pgrep guard,
+out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract).
+
+### The unwired headless verbs (each a `run` verb around a Calibre binary; all headless upstream today, src/calibre/linux.py:23-42)
+
+- [ ] **run backup-metadata**: calibredb backup_metadata regenerates per-book OPF
+      sidecars for the dirtied queue; the headless form of the daemon job cquarry's
+      `metadata_dirtied` feed exists for. Pairs with run flush: flush embeds into the
+      format files, this refreshes the sidecars.
+- [ ] **run restore-database**: calibredb restore_database rebuilds a metadata.db from
+      stored OPFs (upstream src/calibre/db/restore.py). Refuses to write an existing
+      metadata.db without an explicit --target/--force; the NATIVE rebuild stays
+      declined in cquarry, the O-lane covers it.
+- [ ] **run clone**: calibredb clone (fresh-schema library copy); cquarry's
+      `backup_to()` is the consistent-copy half, this is the schema-fresh half.
+- [ ] **run fts-index**: calibredb fts_index (extraction and Calibre's own tokenizer
+      into the sidecar; cquarry contractually never touches the FTS5 tables). Consumes
+      the dirtied_formats queue; adopts cquarry's `get_dirtied_formats()` (cquarry
+      Phase 14) so --fts-status retires its raw sidecar read (modes/fts.py:85-97, the
+      one recorded exception) and the L4 dirtied_formats promotion fires with it.
+      Supersedes the L4 "run fts-index verb" candidate.
+- [ ] **run catalog-epub / run catalog-bibtex**: calibredb catalog through the EPUB_MOBI
+      and BIBTEX catalog plugins (customize/builtins.py:704); the CSV/XML half is
+      already native (--catalog over export_rows).
+- [ ] **run customize**: calibre-customize install/enable/disable/list
+      (src/calibre/customize/ui.py); the missing automation for installing the Bindery
+      Repair plugin (and any other plugin) headlessly.
+- [ ] **run debug-tools** (curated subset, not a passthrough): calibre-debug
+      explode/implode/diff/kepubify/un-kepubify/inspect-mobi (src/calibre/debug.py:60-206).
+      The -e/--exec-file surface stays out: arbitrary code execution is not a verb.
+- [ ] **run device** (USBMS subset): ebook-device ls/df/books/mkdir/cp/cat/rm/touch
+      (src/calibre/devices/cli.py:247-390). MTP and the wireless Calibre-Companion
+      stack are process-bound and stay excluded from parity.
+- [ ] **--saved-search add/delete/rename**: the calibredb saved_searches CRUD parity
+      item; needs cquarry Phase 15's typed `set_preference` writer first.
+- [ ] **--add-custom-column / --remove-custom-column**: the calibredb schema-CRUD
+      parity item; cquarry.write has shipped create/delete_custom_column since 1.20,
+      so only the frontend verb is missing (set_custom is already covered by
+      --set-column).
+
+### Open unowned surface, owners-wanted (not committed; recorded in cquarry's ledger)
+
+- [ ] **run news** (candidate): wrap `ebook-convert <recipe> out.epub` for the 1,094
+      upstream recipes (recipes/; web/feeds/news.py; the 2026 anti-bot infra rides
+      upstream). Becomes committed work only when Brandon wants recipe fetching in the
+      automation surface.
+
+### Adopted from the existing queue (committed by the program; the boxes stay in place above)
+
+- [ ] reconcile verify-after-embed for EPUB pubdate (the 2026-09-16 box): a one-line
+      post-embed read-back per written field, so `run flush` cannot silently no-op;
+      parity-relevant flush honesty.
+- [ ] docs truth: spec.md:232 still says "Not a converter. It does not touch book files
+      themselves" while §3 ships run convert/polish/cover and the §5 scripts rewrite
+      files (found 2026-09-29 during the parity scoping). Fix the sentence to name the
+      orchestration posture (the verb shells Calibre's own tools; the native surface
+      stays read-only).
+- [ ] The L4 TUI set-write batch session stays GATED (risk surface); the program does
+      not ungate it. The per-mode --format corners, the pypi tag policy, the
+      fetch_library_codes SRU fallback, the run approve design, and the
+      validate_library allowlist also keep their existing open boxes and gates.
