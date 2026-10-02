@@ -125,7 +125,7 @@ cquarry run backup-metadata --all --apply --backup-dir ~/backups --db ~/Calibre/
 # Rebuild a corrupt metadata.db from the stored OPFs under an explicit
 # target (an existing database there demands --force; saved searches,
 # user categories, plugboards, and conversion overrides do not survive)
-cquarry run restore-database --target ~/damaged-library --dry-run
+cquarry run restore-database --target ~/damaged-library   # dry run: the plan
 cquarry run restore-database --target ~/damaged-library --apply
 
 # Review what the merges moved aside, then expire what is older than
