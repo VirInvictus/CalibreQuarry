@@ -1437,10 +1437,23 @@ class TestFtsIndex(_IntegrateCase):
         con.close()
 
     def test_missing_binary_is_a_setup_refusal(self):
+        # The refusal lives with the spawns: --fts-status executes
+        # immediately, so it refuses; the dry runs and honest no-ops do not
+        # (a runner without calibredb still gets plans).
         with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
-            code, _, err = self.run_cli("run", "fts-index", "--db", str(self.db_path))
+            code, _, err = self.run_cli(
+                "run", "fts-index", "--fts-status", "--db", str(self.db_path)
+            )
         self.assertEqual(code, 2)
         self.assertIn("calibredb is not on PATH", err)
+
+    def test_dry_run_runs_without_the_binary(self):
+        # The CI shape: no calibredb anywhere, and the plan still prints.
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            self._sidecar_queue((1, "EPUB"))
+            code, out, _ = self.run_cli("run", "fts-index", "--db", str(self.db_path))
+        self.assertEqual(code, 0)
+        self.assertIn("fts-index plan", out)
 
     def test_status_and_enable_are_exclusive(self):
         code, _, err = self.run_cli(
@@ -1523,6 +1536,88 @@ class TestFtsIndex(_IntegrateCase):
         )
         self.assertEqual(code, 0)
         self.assertIn("enable plan", out)
+
+
+class TestCatalogVerbs(_IntegrateCase):
+    """`run catalog-epub` / `run catalog-bibtex`: calibredb catalog through
+    the catalog plugins. calibredb picks the plugin from the output
+    extension and SILENTLY falls back to EPUB, so the extension is
+    enforced here; the verb reads the library and never writes it."""
+
+    def test_missing_dest_refused(self):
+        code, _, err = self.run_cli("run", "catalog-epub", "--db", str(self.db_path))
+        self.assertEqual(code, 2)
+        self.assertIn("--dest FILE", err)
+
+    def test_wrong_extension_refused(self):
+        # The silent plugin fallback is exactly what this refuses.
+        code, _, err = self.run_cli(
+            "run",
+            "catalog-bibtex",
+            "--dest",
+            "catalog.epub",
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn(".bib file", err)
+
+    def test_unknown_id_refused(self):
+        code, _, err = self.run_cli(
+            "run",
+            "catalog-epub",
+            "--dest",
+            "catalog.epub",
+            "--ids",
+            "999",
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("unknown book id 999", err)
+
+    def test_dry_run_plans_the_whole_library_without_a_selection(self):
+        code, out, _ = self.run_cli(
+            "run",
+            "catalog-epub",
+            "--dest",
+            "catalog.epub",
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("3 book(s)", out)
+        self.assertIn("Dry run", out)
+
+    def test_apply_drives_calibredb_catalog_with_ids(self):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "catalog-bibtex",
+                "--dest",
+                "refs.bib",
+                "--ids",
+                "1,2",
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        cmd = calls[0]
+        self.assertEqual(cmd[:2], ["calibredb", "catalog"])
+        self.assertIn("refs.bib", cmd)
+        self.assertIn("1,2", cmd)
 
 
 if __name__ == "__main__":

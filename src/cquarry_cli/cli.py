@@ -825,6 +825,8 @@ def build_parser() -> argparse.ArgumentParser:
             "restore-database",
             "clone",
             "fts-index",
+            "catalog-epub",
+            "catalog-bibtex",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -838,7 +840,8 @@ def build_parser() -> argparse.ArgumentParser:
         "sidecar OPFs over the dirtied queue), restore-database (rebuild a "
         "metadata.db from stored OPFs under --target), clone (a fresh-schema "
         "empty copy under --target), fts-index (Calibre's extractor over "
-        "the dirtied queue; --status, --enable)",
+        "the dirtied queue; --status, --enable), catalog-epub / "
+        "catalog-bibtex (calibredb's catalog plugins over --dest)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),

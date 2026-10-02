@@ -1537,6 +1537,8 @@ INTEGRATE_PHASES = (
     "restore-database",
     "clone",
     "fts-index",
+    "catalog-epub",
+    "catalog-bibtex",
 )
 
 

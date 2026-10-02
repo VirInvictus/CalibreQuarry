@@ -963,12 +963,15 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
             file=sys.stderr,
         )
         return 2
-    if not shutil.which("calibredb"):
-        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
-        return 2
     library = str(Path(db.db_path).resolve().parent)
 
     if status:
+        # The missing-binary refusal sits with the spawns, never ahead of
+        # the dry runs (the run_export shape): a runner without calibredb
+        # still gets plans and honest no-ops.
+        if not shutil.which("calibredb"):
+            print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+            return 2
         proc = subprocess.run(
             ["calibredb", "fts_index", "--library", library, "status"],
             capture_output=True,
@@ -1009,6 +1012,9 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
         except ValueError as e:
             print(f"ERROR: {e}", file=sys.stderr)
             return 2
+        if not shutil.which("calibredb"):
+            print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+            return 2
         proc = subprocess.run(
             ["calibredb", "fts_index", "--library", library, "enable"],
             capture_output=True,
@@ -1043,6 +1049,9 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
             "reindex over exactly these pairs (Calibre closed)."
         )
         return 0
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
     proc = subprocess.run(
         ["calibredb", "fts_index", "--library", library, "reindex", *items],
         capture_output=True,
@@ -1058,6 +1067,76 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
         )
         return 1
     print(f"Queued {len(items)} (book:format) pair(s) for extraction.")
+    return 0
+
+
+#: calibredb catalog picks its plugin from the output file's extension and
+#: SILENTLY falls back to the EPUB plugin on anything it does not recognize,
+#: so each verb enforces its own extension: a .bib request must never
+#: quietly produce an EPUB.
+_CATALOG_EXTS = {"catalog-epub": ".epub", "catalog-bibtex": ".bib"}
+
+
+def run_catalog(db, args, *, apply: bool, take_backup=None) -> int:
+    """`run catalog-epub` / `run catalog-bibtex`: calibredb catalog through
+    the EPUB_MOBI and BIBTEX catalog plugins (the CSV/XML half of catalog
+    output is already native, `--catalog --format csv`). Targets resolve
+    read-only first (no selection means the whole library, upstream's
+    default). The verb touches nothing in the library: no backup, ever."""
+    phase = args.phase
+    ext = _CATALOG_EXTS[phase]
+    dest_raw = getattr(args, "dest", None)
+    if not dest_raw:
+        print(f"ERROR: run {phase} needs --dest FILE (a {ext} path).", file=sys.stderr)
+        return 2
+    dest = Path(dest_raw).expanduser()
+    if dest.suffix.lower() != ext:
+        print(
+            f"ERROR: run {phase} writes a {ext} file; got {dest.name}. calibredb "
+            "catalog picks its plugin from the extension and silently falls "
+            "back to EPUB on anything else, so the extension is enforced.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        ids = resolve_targets(db, args)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    if not ids:
+        ids = sorted(db.all_ids())
+    if not ids:
+        print("The library has no books: nothing to catalog.")
+        return 0
+    library = str(Path(db.db_path).resolve().parent)
+    if not apply:
+        print(
+            f"{phase} plan: {len(ids)} book(s) -> {dest} (calibredb catalog "
+            "through the plugin; the library is only read)"
+        )
+        print("Dry run: nothing executed. --apply runs calibredb catalog.")
+        return 0
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
+    proc = subprocess.run(
+        [
+            "calibredb",
+            "catalog",
+            "--library",
+            library,
+            str(dest),
+            "--ids",
+            ",".join(str(i) for i in ids),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=3600,
+    )
+    if proc.returncode != 0:
+        print(f"ERROR: calibredb catalog failed: {proc.stderr[:300]}", file=sys.stderr)
+        return 1
+    print(f"Wrote {dest} ({len(ids)} book(s)).")
     return 0
 
 
@@ -1291,6 +1370,8 @@ def dispatch_integrate(args) -> int:
             "restore-database": run_restore_database,
             "clone": run_clone,
             "fts-index": run_fts_index,
+            "catalog-epub": run_catalog,
+            "catalog-bibtex": run_catalog,
         }[args.phase]
         backup = take_backup if (apply and args.phase in needs_backup) else None
         return verb(db, args, apply=apply, take_backup=backup)
