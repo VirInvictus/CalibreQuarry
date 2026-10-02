@@ -126,9 +126,12 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       extension decides the plugin and is enforced, because calibredb silently falls
       back to EPUB on an unrecognized one; targets resolve read-only, no selection
       meaning the whole library; the verb never writes the library.)*
-- [ ] **run customize**: calibre-customize install/enable/disable/list
+- [x] **run customize**: calibre-customize install/enable/disable/list
       (src/calibre/customize/ui.py); the missing automation for installing the Bindery
-      Repair plugin (and any other plugin) headlessly.
+      Repair plugin (and any other plugin) headlessly. *(Shipped 2026-10-02: needs no
+      library (routed before any database resolution), exactly one action per
+      invocation, mutators dry-run by default with --apply behind the closed-Calibre
+      guard.)*
 - [ ] **run debug-tools** (curated subset, not a passthrough): calibre-debug
       explode/implode/diff/kepubify/un-kepubify/inspect-mobi (src/calibre/debug.py:60-206).
       The -e/--exec-file surface stays out: arbitrary code execution is not a verb.

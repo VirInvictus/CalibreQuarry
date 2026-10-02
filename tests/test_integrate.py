@@ -1620,5 +1620,122 @@ class TestCatalogVerbs(_IntegrateCase):
         self.assertIn("1,2", cmd)
 
 
+class TestCustomize(unittest.TestCase):
+    """`run customize`: calibre-customize headless. Needs no library: main()
+    routes it before any database resolution, so these tests build none."""
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with contextlib.redirect_stdout(out):
+                code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def setUp(self):
+        # Everything runs closed-Calibre; the guard tests override.
+        pg = mock.patch("cquarry_cli.integrate._calibre_running", return_value=False)
+        pg.start()
+        self.addCleanup(pg.stop)
+
+    def test_no_action_is_a_usage_error(self):
+        code, _, err = self.run_cli("run", "customize")
+        self.assertEqual(code, 2)
+        self.assertIn("needs one of", err)
+
+    def test_two_actions_refused(self):
+        code, _, err = self.run_cli(
+            "run", "customize", "--list-plugins", "--enable-plugin", "X"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("exactly one action", err)
+
+    def test_list_drives_calibre_customize(self):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="Type|Name|Version", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/calibre-customize",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli("run", "customize", "--list-plugins")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls[0], ["calibre-customize", "-l"])
+
+    def test_add_plugin_dry_run_touches_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "plugin.zip"
+            zip_path.write_bytes(b"zip")
+            code, out, _ = self.run_cli(
+                "run", "customize", "--add-plugin", str(zip_path)
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("customize plan: install", out)
+        self.assertIn("Dry run", out)
+
+    def test_add_plugin_missing_zip_refused(self):
+        code, _, err = self.run_cli(
+            "run", "customize", "--add-plugin", "/no/such/plugin.zip"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not found", err)
+
+    def test_apply_drives_calibre_customize(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "bindery_repair.zip"
+            zip_path.write_bytes(b"zip")
+
+            def fake_run(cmd, capture_output, text, timeout):
+                calls.append(cmd)
+                return mock.Mock(
+                    returncode=0, stdout="Plugin added: Bindery", stderr=""
+                )
+
+            with (
+                mock.patch(
+                    "cquarry_cli.integrate.shutil.which",
+                    return_value="/usr/bin/calibre-customize",
+                ),
+                mock.patch("subprocess.run", side_effect=fake_run),
+            ):
+                code, out, _ = self.run_cli(
+                    "run",
+                    "customize",
+                    "--add-plugin",
+                    str(zip_path),
+                    "--apply",
+                )
+        self.assertEqual(code, 0, out)
+        cmd = calls[0]
+        self.assertEqual(cmd[0], "calibre-customize")
+        self.assertEqual(cmd[1], "-a")
+        self.assertEqual(cmd[2], str(zip_path))
+
+    def test_apply_refuses_a_live_calibre(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "plugin.zip"
+            zip_path.write_bytes(b"zip")
+            with mock.patch(
+                "cquarry_cli.integrate._calibre_running", return_value=True
+            ):
+                code, _, err = self.run_cli(
+                    "run", "customize", "--add-plugin", str(zip_path), "--apply"
+                )
+        self.assertEqual(code, 1)
+        self.assertIn("Calibre is running", err)
+
+    def test_missing_binary_at_spawn_refused(self):
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli("run", "customize", "--list-plugins")
+        self.assertEqual(code, 2)
+        self.assertIn("calibre-customize is not on PATH", err)
+
+
 if __name__ == "__main__":
     unittest.main()

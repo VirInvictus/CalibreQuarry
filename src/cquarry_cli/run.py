@@ -1559,6 +1559,12 @@ def dispatch_run(args) -> int:
         )
         return 2
 
+    if args.phase == "customize":
+        # The no-library verb: routed before any database resolution.
+        from cquarry_cli.integrate import dispatch_headless
+
+        return dispatch_headless(args)
+
     if args.phase in INTEGRATE_PHASES:
         from cquarry_cli.integrate import dispatch_integrate
 

@@ -827,6 +827,7 @@ def build_parser() -> argparse.ArgumentParser:
             "fts-index",
             "catalog-epub",
             "catalog-bibtex",
+            "customize",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -841,7 +842,9 @@ def build_parser() -> argparse.ArgumentParser:
         "metadata.db from stored OPFs under --target), clone (a fresh-schema "
         "empty copy under --target), fts-index (Calibre's extractor over "
         "the dirtied queue; --status, --enable), catalog-epub / "
-        "catalog-bibtex (calibredb's catalog plugins over --dest)",
+        "catalog-bibtex (calibredb's catalog plugins over --dest), "
+        "customize (calibre-customize: headless plugin install/enable/"
+        "disable/list)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
@@ -854,6 +857,41 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="backup-metadata: regenerate sidecar OPFs for EVERY book "
         "(the default is the dirtied queue only)",
+    )
+    run_p.add_argument(
+        "--list-plugins",
+        dest="list_plugins",
+        action="store_true",
+        help="customize: list the installed plugins (read-only)",
+    )
+    run_p.add_argument(
+        "--add-plugin",
+        dest="add_plugin",
+        default=None,
+        metavar="ZIP",
+        help="customize: install a plugin zip (dry run by default; --apply "
+        "with Calibre closed)",
+    )
+    run_p.add_argument(
+        "--remove-plugin",
+        dest="remove_plugin",
+        default=None,
+        metavar="NAME",
+        help="customize: remove a custom plugin by name (builtins are unaffected)",
+    )
+    run_p.add_argument(
+        "--enable-plugin",
+        dest="enable_plugin",
+        default=None,
+        metavar="NAME",
+        help="customize: enable the named plugin",
+    )
+    run_p.add_argument(
+        "--disable-plugin",
+        dest="disable_plugin",
+        default=None,
+        metavar="NAME",
+        help="customize: disable the named plugin",
     )
     run_p.add_argument(
         "--enable",

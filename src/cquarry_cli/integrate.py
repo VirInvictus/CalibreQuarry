@@ -1077,6 +1077,131 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
 _CATALOG_EXTS = {"catalog-epub": ".epub", "catalog-bibtex": ".bib"}
 
 
+# --- headless Calibre-automation verbs (no library; dispatch_run routes
+# them before any database resolution) -------------------------------
+
+
+_CUSTOMIZE_ACTIONS = (
+    "list-plugins",
+    "add-plugin",
+    "remove-plugin",
+    "enable-plugin",
+    "disable-plugin",
+)
+
+
+def run_customize(args) -> int:
+    """`run customize`: calibre-customize, the headless plugin surface (the
+    motivating case: installing the Bindery Repair plugin zip without the
+    GUI). --list-plugins reads; the four mutators are dry-run by default
+    and take the closed-Calibre guard at --apply, because a live GUI keeps
+    its plugin state in memory and writes its config on exit."""
+    chosen = [
+        action
+        for action, value in (
+            ("list-plugins", getattr(args, "list_plugins", False)),
+            ("add-plugin", getattr(args, "add_plugin", None)),
+            ("remove-plugin", getattr(args, "remove_plugin", None)),
+            ("enable-plugin", getattr(args, "enable_plugin", None)),
+            ("disable-plugin", getattr(args, "disable_plugin", None)),
+        )
+        if value
+    ]
+    if not chosen:
+        print(
+            "ERROR: run customize needs one of --list-plugins, --add-plugin "
+            "ZIP, --remove-plugin NAME, --enable-plugin NAME, "
+            "--disable-plugin NAME.",
+            file=sys.stderr,
+        )
+        return 2
+    if len(chosen) > 1:
+        print(
+            f"ERROR: run customize takes exactly one action, got: "
+            f"{', '.join('--' + c for c in chosen)}.",
+            file=sys.stderr,
+        )
+        return 2
+    action = chosen[0]
+    apply = bool(getattr(args, "apply", False))
+
+    if action == "list-plugins":
+        if not shutil.which("calibre-customize"):
+            print("ERROR: calibre-customize is not on PATH.", file=sys.stderr)
+            return 2
+        proc = subprocess.run(
+            ["calibre-customize", "-l"], capture_output=True, text=True, timeout=300
+        )
+        if proc.returncode != 0:
+            print(
+                f"ERROR: calibre-customize -l failed: {proc.stderr[:300]}",
+                file=sys.stderr,
+            )
+            return 1
+        print(proc.stdout.strip())
+        return 0
+
+    value = {
+        "add-plugin": getattr(args, "add_plugin", None),
+        "remove-plugin": getattr(args, "remove_plugin", None),
+        "enable-plugin": getattr(args, "enable_plugin", None),
+        "disable-plugin": getattr(args, "disable_plugin", None),
+    }[action]
+    flag = {
+        "add-plugin": "-a",
+        "remove-plugin": "-r",
+        "enable-plugin": "--enable-plugin",
+        "disable-plugin": "--disable-plugin",
+    }[action]
+    if action == "add-plugin":
+        zip_path = Path(value).expanduser()
+        if not zip_path.is_file():
+            print(f"ERROR: --add-plugin zip not found: {zip_path}", file=sys.stderr)
+            return 2
+    verb = {
+        "add-plugin": "install",
+        "remove-plugin": "remove",
+        "enable-plugin": "enable",
+        "disable-plugin": "disable",
+    }[action]
+    if not apply:
+        print(f"customize plan: {verb} {value} (calibre-customize {flag})")
+        print(
+            "Dry run: nothing executed. --apply runs it (Calibre closed: a "
+            "live GUI keeps its plugin state in memory and writes its "
+            "config on exit)."
+        )
+        return 0
+    if _calibre_running():
+        # Lock-class refusal (exit 1), matching the other write doors.
+        print("ERROR: Calibre is running; close it before --apply.", file=sys.stderr)
+        return 1
+    if not shutil.which("calibre-customize"):
+        print("ERROR: calibre-customize is not on PATH.", file=sys.stderr)
+        return 2
+    proc = subprocess.run(
+        ["calibre-customize", flag, str(value)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if proc.returncode != 0:
+        print(
+            f"ERROR: calibre-customize {flag} failed: {proc.stderr[:300]}",
+            file=sys.stderr,
+        )
+        return 1
+    print(proc.stdout.strip() or f"{verb.capitalize()}d: {value}")
+    return 0
+
+
+def dispatch_headless(args) -> int:
+    """The no-library run verbs: routed by dispatch_run before any database
+    resolution, because none of them opens one. customize today;
+    debug-tools and device land with their verbs."""
+    return run_customize(args)
+
+
 def run_catalog(db, args, *, apply: bool, take_backup=None) -> int:
     """`run catalog-epub` / `run catalog-bibtex`: calibredb catalog through
     the EPUB_MOBI and BIBTEX catalog plugins (the CSV/XML half of catalog

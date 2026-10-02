@@ -141,6 +141,12 @@ cquarry run clone --target ~/fresh-schema --apply
 cquarry run fts-index --db ~/Calibre/metadata.db
 cquarry run fts-index --apply --db ~/Calibre/metadata.db
 
+# Install a plugin zip headlessly (the Bindery Repair plugin's front
+# door; --list-plugins lists, and the mutators are dry-run by default
+# with --apply demanding a closed Calibre)
+cquarry run customize --add-plugin ~/Downloads/Bindery\ Repair.zip --apply
+cquarry run customize --list-plugins
+
 # Catalog through calibredb's own plugins (the CSV/XML half is the
 # native --catalog; the extension decides the plugin and is enforced,
 # because calibredb silently falls back to EPUB otherwise)
