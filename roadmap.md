@@ -138,9 +138,11 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       *(Shipped 2026-10-02: the parser never offers the exec surface, the mutators
       are dry-run by default with --apply behind the closed-Calibre guard, and the
       reads (diff, inspect-mobi) run immediately.)*
-- [ ] **run device** (USBMS subset): ebook-device ls/df/books/mkdir/cp/cat/rm/touch
+- [x] **run device** (USBMS subset): ebook-device ls/df/books/mkdir/cp/cat/rm/touch
       (src/calibre/devices/cli.py:247-390). MTP and the wireless Calibre-Companion
-      stack are process-bound and stay excluded from parity.
+      stack are process-bound and stay excluded from parity. *(Shipped 2026-10-02:
+      reads execute immediately, writes are dry-run by default with --apply, and no
+      closed-Calibre guard exists because the verb never opens a database.)*
 - [ ] **--saved-search add/delete/rename**: the calibredb saved_searches CRUD parity
       item; needs cquarry Phase 15's typed `set_preference` writer first.
 - [ ] **--add-custom-column / --remove-custom-column**: the calibredb schema-CRUD

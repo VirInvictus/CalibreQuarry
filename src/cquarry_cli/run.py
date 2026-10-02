@@ -1559,7 +1559,7 @@ def dispatch_run(args) -> int:
         )
         return 2
 
-    if args.phase in ("customize", "debug-tools"):
+    if args.phase in ("customize", "debug-tools", "device"):
         # The no-library verbs: routed before any database resolution.
         from cquarry_cli.integrate import dispatch_headless
 

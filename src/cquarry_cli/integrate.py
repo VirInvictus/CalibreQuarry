@@ -1290,13 +1290,94 @@ def run_debug_tools(args) -> int:
     return 0
 
 
+#: The ebook-device USBMS subset: (flag, write?) — reads execute
+#: immediately, writes are dry-run by default. MTP and the wireless
+#: Calibre-Companion stack stay out of parity by roadmap decision.
+_DEVICE_ACTIONS = (
+    ("device_ls", False),
+    ("device_df", False),
+    ("device_books", False),
+    ("device_cat", False),
+    ("device_mkdir", True),
+    ("device_cp", True),
+    ("device_rm", True),
+    ("device_touch", True),
+)
+
+
+def run_device(args) -> int:
+    """`run device`: the ebook-device USBMS subset (ls/df/books/cat/mkdir/
+    cp/rm/touch). No library, no database, and therefore no closed-Calibre
+    guard: the guard protects metadata.db and this verb never opens it.
+    Reads execute immediately; the writes are dry-run by default. MTP and
+    the wireless Calibre-Companion stack stay excluded from parity."""
+    # df/books are store_true reads (False when absent); the rest carry a
+    # positional list (None when absent). Both shapes detect with the same
+    # "present" rule.
+    chosen = []
+    for dest, writes in _DEVICE_ACTIONS:
+        value = getattr(args, dest, None)
+        if value is not None and value is not False:
+            chosen.append((dest, writes))
+    if not chosen:
+        print(
+            "ERROR: run device needs exactly one of --device-ls PATH, "
+            "--device-df, --device-books, --device-cat PATH, --device-mkdir "
+            "PATH, --device-cp SRC DST, --device-rm PATH, --device-touch PATH.",
+            file=sys.stderr,
+        )
+        return 2
+    if len(chosen) > 1:
+        print(
+            f"ERROR: run device takes exactly one action, got {len(chosen)}.",
+            file=sys.stderr,
+        )
+        return 2
+    dest, writes = chosen[0]
+    value = getattr(args, dest)
+    targets = list(value) if isinstance(value, (list, tuple)) else []
+    command = dest.removeprefix("device_")
+    apply = bool(getattr(args, "apply", False))
+
+    if writes and not apply:
+        print(f"device plan: ebook-device {command} {' '.join(targets)}")
+        print(
+            "Dry run: nothing executed. --apply runs it against the connected device."
+        )
+        return 0
+    if not shutil.which("ebook-device"):
+        print("ERROR: ebook-device is not on PATH.", file=sys.stderr)
+        return 2
+    proc = subprocess.run(
+        ["ebook-device", command, *targets],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    if proc.returncode != 0:
+        # Upstream's own "Unable to find a connected ebook reader." rides out.
+        print(
+            f"ERROR: ebook-device {command} failed: "
+            f"{(proc.stderr or proc.stdout).strip()[:300]}",
+            file=sys.stderr,
+        )
+        return 1
+    if proc.stdout.strip():
+        print(proc.stdout.strip())
+    else:
+        print(f"ebook-device {command} completed.")
+    return 0
+
+
 def dispatch_headless(args) -> int:
     """The no-library run verbs: routed by dispatch_run before any database
     resolution, because none of them opens one. customize and debug-tools
     today; device lands with its verb."""
     if args.phase == "customize":
         return run_customize(args)
-    return run_debug_tools(args)
+    if args.phase == "debug-tools":
+        return run_debug_tools(args)
+    return run_device(args)
 
 
 def run_catalog(db, args, *, apply: bool, take_backup=None) -> int:

@@ -152,6 +152,11 @@ cquarry run customize --list-plugins
 cquarry run debug-tools --kepubify book.epub          # dry run: the command
 cquarry run debug-tools --kepubify book.epub --apply
 
+# The ebook-device USBMS subset (ls/df/books/cat read immediately;
+# mkdir/cp/rm/touch are dry-run by default). MTP and wireless stay out.
+cquarry run device --device-ls /
+cquarry run device --device-cp book.epub carda:/books/ --apply
+
 # Catalog through calibredb's own plugins (the CSV/XML half is the
 # native --catalog; the extension decides the plugin and is enforced,
 # because calibredb silently falls back to EPUB otherwise)

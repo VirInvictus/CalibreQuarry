@@ -1848,5 +1848,98 @@ class TestDebugTools(unittest.TestCase):
         self.assertIn("Calibre is running", err)
 
 
+class TestDevice(unittest.TestCase):
+    """`run device`: the ebook-device USBMS subset. Reads execute
+    immediately; writes are dry-run by default. No database anywhere, so
+    no closed-Calibre guard exists to mock."""
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with contextlib.redirect_stdout(out):
+                code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_no_action_is_a_usage_error(self):
+        code, _, err = self.run_cli("run", "device")
+        self.assertEqual(code, 2)
+        self.assertIn("exactly one of", err)
+
+    def test_two_actions_refused(self):
+        code, _, err = self.run_cli("run", "device", "--device-df", "--device-ls", "/")
+        self.assertEqual(code, 2)
+        self.assertIn("exactly one action", err)
+
+    def test_read_drives_ebook_device_immediately(self):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="/books", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/ebook-device",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli("run", "device", "--device-ls", "/")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls[0], ["ebook-device", "ls", "/"])
+
+    def test_write_dry_run_touches_nothing(self):
+        code, out, _ = self.run_cli("run", "device", "--device-mkdir", "/books/new")
+        self.assertEqual(code, 0)
+        self.assertIn("device plan: ebook-device mkdir /books/new", out)
+        self.assertIn("Dry run", out)
+
+    def test_write_apply_drives_ebook_device(self):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/ebook-device",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, _ = self.run_cli(
+                "run", "device", "--device-rm", "/books/old", "--apply"
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0], ["ebook-device", "rm", "/books/old"])
+
+    def test_missing_binary_at_spawn_refused(self):
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli("run", "device", "--device-df")
+        self.assertEqual(code, 2)
+        self.assertIn("ebook-device is not on PATH", err)
+
+    def test_upstreams_no_device_error_is_exit_one(self):
+        def fake_run(cmd, capture_output, text, timeout):
+            return mock.Mock(
+                returncode=1,
+                stdout="",
+                stderr="Unable to find a connected ebook reader.",
+            )
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/ebook-device",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, err = self.run_cli("run", "device", "--device-df")
+        self.assertEqual(code, 1)
+        # Upstream's own no-device answer rides out on stderr.
+        self.assertIn("Unable to find", err)
+
+
 if __name__ == "__main__":
     unittest.main()

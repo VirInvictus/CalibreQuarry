@@ -829,6 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
             "catalog-bibtex",
             "customize",
             "debug-tools",
+            "device",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -847,7 +848,8 @@ def build_parser() -> argparse.ArgumentParser:
         "customize (calibre-customize: headless plugin install/enable/"
         "disable/list), debug-tools (the curated calibre-debug subset: "
         "explode/implode/diff/kepubify/un-kepubify/inspect-mobi; never "
-        "-e/--exec-file)",
+        "-e/--exec-file), device (the ebook-device USBMS subset: ls/df/"
+        "books/cat/mkdir/cp/rm/touch; MTP and wireless stay excluded)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
@@ -945,6 +947,49 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         default=None,
         help="debug-tools: MOBI structure dump",
+    )
+    for _dflag, _dhelp in (
+        ("--device-ls", "list PATH on the connected device"),
+        ("--device-cat", "print PATH from the device"),
+    ):
+        run_p.add_argument(
+            _dflag,
+            dest=_dflag[2:].replace("-", "_"),
+            nargs=1,
+            metavar="PATH",
+            default=None,
+            help="device: " + _dhelp,
+        )
+    for _dflag, _dhelp in (
+        ("--device-df", "show the device's filesystem usage"),
+        ("--device-books", "list the books on the device"),
+    ):
+        run_p.add_argument(
+            _dflag,
+            dest=_dflag[2:].replace("-", "_"),
+            action="store_true",
+            help="device: " + _dhelp,
+        )
+    for _dflag, _dhelp in (
+        ("--device-mkdir", "create a folder on the device"),
+        ("--device-rm", "DELETE a file or empty folder from the device"),
+        ("--device-touch", "create an empty file on the device"),
+    ):
+        run_p.add_argument(
+            _dflag,
+            dest=_dflag[2:].replace("-", "_"),
+            nargs=1,
+            metavar="PATH",
+            default=None,
+            help="device: " + _dhelp + " (dry run by default; --apply executes)",
+        )
+    run_p.add_argument(
+        "--device-cp",
+        dest="device_cp",
+        nargs=2,
+        metavar=("SRC", "DST"),
+        default=None,
+        help="device: copy to/from the device (one side is a device path; dry run by default; --apply executes)",
     )
     run_p.add_argument(
         "--enable",
