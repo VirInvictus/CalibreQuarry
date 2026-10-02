@@ -5,6 +5,24 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.55.1 onward, the audit batch)
+
+- **Spawn-point refusals are now uniform**: run flush and run export moved
+  their shutil.which checks after the dry-run return, so every verb's
+  missing-binary refusal sits at its spawn (fts-index's --fts-status still
+  refuses immediately because that action IS a spawn).
+- **debug-tools' existence rules are per action**: explode checks its FILE
+  and implode checks its DIR only (the other operand is upstream's output,
+  created on demand); the other four tools check every path.
+- **The schemawrite company guard consults all five dest lists** (book
+  verbs, set sources, and both batch tuples); a batch flag beside a schema
+  verb is a usage refusal, never a silent drop.
+- **The SRU fallback fires on cached-out misses too**: the block sits at
+  the top level of the target loop, not inside the network branch, so a
+  resume re-run gets the work-level retry. work_query strips double quotes
+  (a quoted CQL string cannot contain them, and a malformed query burns
+  three retries plus abort-counter headroom).
+
 ## Programmer-facing contract notes (3.55.0 onward, the Phase 20 parity lane)
 
 - **The headless verbs are subprocess seams with spawn-point refusals.**

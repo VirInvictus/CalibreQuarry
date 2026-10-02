@@ -1,5 +1,53 @@
 # CalibreQuarry Patch Notes
 
+# 3.55.1 (2026-10-02)
+
+### The seven-agent audit batch: verified bug fixes, doc truth, and 33 gap tests
+
+- **run debug-tools no longer refuses its own documented first run**: the
+  plan-door existence loop checked every path, including --explode's OUTPUT
+  directory and --implode's output FILE, which upstream creates on demand
+  (calibre's tweak.explode runs os.makedirs). Only the input side of each is
+  checked now; diff/kepubify/un-kepubify/inspect-mobi keep the full check.
+- **The schema-write company guard sees the batch verbs**: --saved-search-*
+  beside a --batch-* flag used to run the schema write, exit 0, and silently
+  drop the batch verb (the user believes the tag landed). The refusal now
+  consults all five dest lists; SCHEMA_WRITE_DESTS joins the parser-membership
+  pin in test_dests.py.
+- **plan_clone refuses a file --target cleanly** (the old check iterated it
+  and died on NotADirectoryError, a raw traceback past every handler), and
+  **run restore-database catches its own timeout** (a whole-library rebuild
+  is the likeliest hour-plus calibredb call; a hung one is exit 1, not a
+  traceback).
+- **run flush and run export moved their missing-binary refusals to the
+  spawn points**, honoring the rule 3.55.0's own CLAUDE.md section recorded
+  (both still checked ahead of their dry runs; CI's calibredb-less runner
+  would have refused the plans).
+- **The SRU work-level fallback fires for cached-out misses too** (found by
+  the new flow tests, not by review): the fallback block sat inside the
+  network branch, so a resume re-run whose ISBN miss was already cached
+  never got the title/author retry. work_query also strips double quotes
+  instead of emitting malformed CQL that burned three retries per lookup,
+  and the customize success fallback no longer prints "Installd".
+- **Docs truth**: the phantom --status flag on run fts-index is renamed to
+  the real --fts-status across the parser help, the verb's error message,
+  README, and a test docstring (argparse has no prefix match, so every
+  documented --status was an unrecognized-argument error); README's
+  "filename-derived stamps" claims corrected to the 3.49 embedded-metadata
+  reality; dests.py's partition docstring counts five lists; the roadmap's
+  dead modes/fts.py line pointer recast; spec's --format choices lose the
+  nonexistent "text"; the audit_isbns count drift, a spec comma splice, the
+  nominalized 2.1 opener, and a duplicated sentence fixed; CLAUDE.md gains
+  the superseding note for the two stale raw-SQL contract notes.
+- **33 new tests** close the gap-analysis top five: the subprocess failure
+  arms of every calibredb-driving verb, fts-index's enable apply path and
+  unpinned spawn refusals, customize's remove/enable/disable argv mapping,
+  debug-tools' explode/implode shapes and missing-binary refusal, the
+  schemawrite empty-string/lock arms, the SRU fallback flow, reconcile's
+  RESIDUAL wiring through main(), and the appended-classes guard repair in
+  test_modes.py and test_tui_degrades.py. 809 green.
+
+
 # 3.55.0 (2026-10-02)
 
 ### The Phase 20 parity lane: every unwired headless Calibre verb, plus the record-integrity batch
