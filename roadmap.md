@@ -113,9 +113,9 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
 - [x] **run fts-index**: calibredb fts_index (extraction and Calibre's own tokenizer
       into the sidecar; cquarry contractually never touches the FTS5 tables). Consumes
       the dirtied_formats queue; adopts cquarry's `get_dirtied_formats()` (cquarry
-      Phase 14) so --fts-status retires its raw sidecar read (modes/fts.py:85-97, the
-      one recorded exception) and the L4 dirtied_formats promotion fires with it.
-      Supersedes the L4 "run fts-index verb" candidate. *(Shipped 2026-10-02: the raw
+      Phase 14) so --fts-status retires its raw sidecar read (the one recorded
+      exception, formerly modes/fts.py) and the L4 dirtied_formats promotion fires
+      with it. Supersedes the L4 "run fts-index verb" candidate. *(Shipped 2026-10-02: the raw
       sidecar read is retired (the tier is clean of raw SQL again), the default
       action reindexes exactly the queued book:FORMAT pairs, --fts-status reads
       upstream's disabled answer as a report, --enable carries its own backup rule

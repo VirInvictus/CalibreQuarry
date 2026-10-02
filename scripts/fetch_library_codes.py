@@ -135,8 +135,14 @@ def isbn_query(isbn: str) -> str:
 def work_query(title: str, author: str) -> str:
     """The work-level CQL the September 2026 hand pass used to recover 15 of
     17 ISBN misses: the title and first author against LoC's title/author
-    indexes."""
-    return f'bath.title="{title}" and bath.author="{author}"'
+    indexes. Double quotes are stripped, never escaped: they cannot appear
+    inside a quoted CQL string, and a malformed query burns three retries
+    plus a slot in the consecutive-failure abort counter."""
+
+    def strip(s: str) -> str:
+        return (s or "").replace('"', "")
+
+    return f'bath.title="{strip(title)}" and bath.author="{strip(author)}"'
 
 
 def work_cache_key(title: str, author: str) -> str:
@@ -648,41 +654,42 @@ def main() -> int:
                     cache[isbn] = codes
                     if queried % 25 == 0:
                         save_cache(args.cache, cache)
-                if not codes and args.sru_fallback and t.get("authors"):
-                    # A clean ISBN miss: one paced title/author query (the
-                    # 2026-09 hand pass recovered 15 of 17 misses this way).
-                    # A fallback failure counts toward the abort counter, but
-                    # the book itself stays a miss, never an ERR row.
-                    wtitle, wauthor = t["title"], t["authors"][0]
-                    wkey = work_cache_key(wtitle, wauthor)
-                    wcached = None if args.no_cache else cache.get(wkey)
-                    if wcached is not None:
-                        if wcached:
-                            codes = wcached
-                            src = "cache-work"
+            if not codes and args.sru_fallback and t.get("authors"):
+                # A clean ISBN miss, fresh OR cached-out (a resume re-run
+                # must get the work-level retry too): one paced title/author
+                # query (the 2026-09 hand pass recovered 15 of 17 misses
+                # this way). A fallback failure counts toward the abort
+                # counter, but the book itself stays a miss, never an ERR.
+                wtitle, wauthor = t["title"], t["authors"][0]
+                wkey = work_cache_key(wtitle, wauthor)
+                wcached = None if args.no_cache else cache.get(wkey)
+                if wcached is not None:
+                    if wcached:
+                        codes = wcached
+                        src = "cache-work"
+                else:
+                    time.sleep(args.delay)
+                    wcodes = fetch_codes(work_query(wtitle, wauthor), args.timeout)
+                    queried += 1
+                    if wcodes is None:
+                        consecutive_failures += 1
+                        if consecutive_failures >= ABORT_AFTER_CONSECUTIVE_FAILURES:
+                            ui.tqdm.write(
+                                ui.error(
+                                    f"\nSTOPPING: {consecutive_failures} "
+                                    "consecutive failures. LoC is refusing "
+                                    "us; writing what we have, resume later."
+                                ),
+                                file=sys.stderr,
+                            )
+                            aborted = True
+                            break
                     else:
-                        time.sleep(args.delay)
-                        wcodes = fetch_codes(work_query(wtitle, wauthor), args.timeout)
-                        queried += 1
-                        if wcodes is None:
-                            consecutive_failures += 1
-                            if consecutive_failures >= ABORT_AFTER_CONSECUTIVE_FAILURES:
-                                ui.tqdm.write(
-                                    ui.error(
-                                        f"\nSTOPPING: {consecutive_failures} "
-                                        "consecutive failures. LoC is refusing "
-                                        "us; writing what we have, resume later."
-                                    ),
-                                    file=sys.stderr,
-                                )
-                                aborted = True
-                                break
-                        else:
-                            if not args.no_cache:
-                                cache[wkey] = wcodes
-                            if wcodes:
-                                codes = wcodes
-                                src = "loc-work"
+                        if not args.no_cache:
+                            cache[wkey] = wcodes
+                        if wcodes:
+                            codes = wcodes
+                            src = "loc-work"
 
             lcc, ddc = codes.get("lcc"), codes.get("ddc")
             via = "work" if src in ("loc-work", "cache-work") else "isbn"

@@ -340,10 +340,6 @@ class TestAuditConversionOverrides(unittest.TestCase):
             self.assertIn("conversion dialog", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 _VALID_UUID = "c9bf9e57-1685-4c89-bafb-ff5af830be8a"
 
 
@@ -678,3 +674,7 @@ class TestCatalogMarkdown(unittest.TestCase):
             self.assertIn(
                 "- **Dune**", open(os.path.join(tmp, "Wing_Library.md")).read()
             )
+
+
+if __name__ == "__main__":
+    unittest.main()

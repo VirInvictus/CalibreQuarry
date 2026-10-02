@@ -2,7 +2,12 @@
 and the per-format field diff. No DB or subprocess; the script lives in
 scripts/, so it is imported by path."""
 
+import contextlib
 import importlib.util
+import io
+import sys
+import sqlite3
+import pathlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -311,6 +316,117 @@ class TestVerifyEmbedded(unittest.TestCase):
             residuals = rfm.verify_embedded([(db_record(), Path("/x/a.epub"), "EPUB")])
         self.assertEqual(len(residuals), 1)
         self.assertEqual(residuals[0][3], ["<unreadable after embed>"])
+
+
+class TestVerifyWiring(unittest.TestCase):
+    """main()'s verify-after-embed wiring: the function tests pin
+    verify_embedded's branches; these drive main() past a mocked rc-0
+    embed whose read-back still (or no longer) drifts, which is the
+    #9177 shape the whole feature exists for."""
+
+    def _library(self, tmp):
+        root = pathlib.Path(tmp)
+        con = sqlite3.connect(root / "metadata.db")
+        con.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT,
+                author_sort TEXT, timestamp TEXT, pubdate TEXT, series_index REAL,
+                path TEXT, uuid TEXT);
+            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT, link TEXT);
+            CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT);
+            CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
+            CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT, item_order INT);
+            CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
+            CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT);
+            CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
+            CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT);
+            CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT, val TEXT);
+            CREATE TABLE comments (id INTEGER PRIMARY KEY, book INT, text TEXT);
+            CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT,
+                uncompressed_size INT);
+            """
+        )
+        con.execute(
+            "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+            "series_index,path,uuid) VALUES (1,'The Hobbit','Hobbit, The','T',"
+            "'2024-01-01','1937-09-21 00:00:00+00:00',1.0,'a/b','u1')"
+        )
+        con.execute("INSERT INTO authors (id,name) VALUES (1,'J.R.R. Tolkien')")
+        con.execute("INSERT INTO books_authors_link (book,author) VALUES (1,1)")
+        con.execute("INSERT INTO languages (id,lang_code) VALUES (1,'eng')")
+        con.execute(
+            "INSERT INTO books_languages_link (book,lang_code,item_order) VALUES (1,1,0)"
+        )
+        # Match the module-level file_meta() helper's tag and isbn, so its
+        # default dict reads as fully in-sync against this fixture.
+        con.execute("INSERT INTO tags (id,name) VALUES (1,'Fic.Fantasy.Classic')")
+        con.execute("INSERT INTO books_tags_link (book,tag) VALUES (1,1)")
+        con.execute(
+            "INSERT INTO identifiers (book,type,val) VALUES (1,'isbn','9780000000001')"
+        )
+        con.execute("INSERT INTO series (id,name) VALUES (1,'Middle-earth')")
+        con.execute("INSERT INTO books_series_link (book,series) VALUES (1,1)")
+        con.execute("INSERT INTO publishers (id,name) VALUES (1,'Allen & Unwin')")
+        con.execute("INSERT INTO books_publishers_link (book,publisher) VALUES (1,1)")
+        con.execute(
+            "INSERT INTO comments (book,text) VALUES (1,'<p>A hobbit''s tale.</p>')"
+        )
+        con.execute(
+            "INSERT INTO data (book,format,name,uncompressed_size) "
+            "VALUES (1,'EPUB','The Hobbit',10)"
+        )
+        con.commit()
+        con.close()
+        book_dir = root / "a" / "b"
+        book_dir.mkdir(parents=True)
+        (book_dir / "The Hobbit.epub").write_bytes(b"epub")
+        return root
+
+    def _run_main(self, tmp, read_backs):
+        root = self._library(tmp)
+        argv = [
+            "reconcile_file_metadata.py",
+            str(root),
+            "--apply",
+        ]
+        out = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(rfm, "shutil") as _sh,
+            mock.patch.object(rfm, "file_metadata", side_effect=read_backs),
+            mock.patch.object(rfm, "embed_calibredb", return_value=True) as embed,
+            mock.patch.object(rfm, "calibre_running", return_value=False),
+            contextlib.redirect_stdout(out),
+        ):
+            rc = rfm.main()
+        return rc, out.getvalue(), embed.call_count
+
+    def test_in_sync_read_back_is_done(self):
+        # First read (the drift scan) sees the old date; the post-embed
+        # read-back sees the corrected one: a clean DONE, exit 0.
+        drifted = file_meta(published="2010-10-25")
+        fixed = file_meta()
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, embeds = self._run_main(tmp, [drifted, fixed])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("DONE", out)
+        self.assertIn("verified by read-back", out)
+        self.assertEqual(embeds, 1)
+
+    def test_still_drifted_read_back_is_a_residual_and_fails(self):
+        # The #9177 shape: embed_metadata exits 0, the EPUB keeps its own
+        # dc:date. The read-back catches it; the run fails with a RESIDUAL.
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, embeds = self._run_main(
+                tmp, [drifted, file_meta(published="2010-10-25")]
+            )
+        self.assertEqual(rc, 1, out)
+        self.assertIn("RESIDUAL", out)
+        self.assertIn("pubdate", out)
+        self.assertEqual(embeds, 1)
 
 
 if __name__ == "__main__":

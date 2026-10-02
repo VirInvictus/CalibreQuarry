@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -1939,6 +1940,383 @@ class TestDevice(unittest.TestCase):
         self.assertEqual(code, 1)
         # Upstream's own no-device answer rides out on stderr.
         self.assertIn("Unable to find", err)
+
+
+class TestVerbFailureArms(_IntegrateCase):
+    """The subprocess failure arm of every calibredb-driving verb: a nonzero
+    exit is exit 1 with the tool's own stderr, never a traceback and never
+    silence. One shape, four verbs."""
+
+    def _dirty(self, *ids):
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS metadata_dirtied (book INT, "
+            "seq INTEGER PRIMARY KEY AUTOINCREMENT, format TEXT, "
+            "timestamp TIMESTAMP)"
+        )
+        for bid in ids:
+            con.execute("INSERT INTO metadata_dirtied (book) VALUES (?)", (bid,))
+        con.commit()
+        con.close()
+
+    def _assert_failure_arm(self, *argv):
+        def fake_run(cmd, capture_output, text, timeout):
+            return mock.Mock(returncode=3, stdout="", stderr="tool exploded")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/tool"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, err = self.run_cli(*argv, "--db", str(self.db_path))
+        self.assertEqual(code, 1)
+        self.assertIn("tool exploded", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_backup_metadata_failure_arm(self):
+        self._dirty(1)
+        self._assert_failure_arm(
+            "run", "backup-metadata", "--apply", "--backup-dir", str(self.backups)
+        )
+
+    def test_restore_database_failure_arm(self):
+        self._assert_failure_arm(
+            "run",
+            "restore-database",
+            "--target",
+            str(self._restore_target()),
+            "--apply",
+        )
+
+    def _restore_target(self):
+        d = self.tmpdir / "restore_target"
+        d.mkdir(exist_ok=True)
+        (d / "Author - Book (1)").mkdir(exist_ok=True)
+        (d / "Author - Book (1)" / "metadata.opf").write_text("<opf/>")
+        return d
+
+    def test_clone_failure_arm(self):
+        target = Path(tempfile.mkdtemp(prefix="cquarry_arm_")) / "t"
+        self.addCleanup(_rm, target.parent)
+        target.mkdir()
+        self._assert_failure_arm("run", "clone", "--target", str(target), "--apply")
+
+    def test_catalog_failure_arm(self):
+        self._assert_failure_arm("run", "catalog-epub", "--dest", "out.epub", "--apply")
+
+    def test_restore_database_timeout_is_an_exit_not_a_traceback(self):
+        def hang(cmd, capture_output, text, timeout):
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=hang),
+        ):
+            code, _, err = self.run_cli(
+                "run",
+                "restore-database",
+                "--target",
+                str(self._restore_target()),
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("timed out", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_clone_refuses_a_file_target_without_a_traceback(self):
+        target = Path(tempfile.mkdtemp(prefix="cquarry_file_")) / "a_file"
+        self.addCleanup(_rm, target.parent)
+        target.write_text("x")
+        code, _, err = self.run_cli(
+            "run", "clone", "--target", str(target), "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not a directory", err)
+        self.assertNotIn("Traceback", err)
+
+
+class TestFtsIndexGaps(_IntegrateCase):
+    """The remaining fts-index arms: enable's full apply path (preference
+    row behind a backup), the reindex failure arm, and the two spawn-point
+    refusals 339cb06 added but only one of which was pinned."""
+
+    def _sidecar_queue(self, *pairs):
+        con = sqlite3.connect(self.tmpdir / "full-text-search.db")
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS books_text (book INTEGER, "
+            "format TEXT, format_size INTEGER, format_hash TEXT, "
+            "searchable_text TEXT, text_size INTEGER, text_hash TEXT, "
+            "err_msg TEXT, timestamp TEXT)"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS dirtied_formats (book INTEGER, "
+            "format TEXT, timestamp TEXT)"
+        )
+        for book, fmt in pairs:
+            con.execute(
+                "INSERT INTO dirtied_formats (book, format) VALUES (?, ?)",
+                (book, fmt),
+            )
+        con.commit()
+        con.close()
+
+    def test_enable_apply_writes_the_preference_behind_a_backup(self):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="enabled", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "fts-index",
+                "--enable",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        self.assertIn("FTS indexing enabled", out)
+        self.assertEqual(calls[0][1:4], ["fts_index", "--library", str(self.tmpdir)])
+        self.assertEqual(calls[0][4], "enable")
+        self.assertTrue(any(self.backups.glob("metadata-*.db")))
+
+    def test_reindex_failure_arm_surfaces_calibres_message(self):
+        self._sidecar_queue((1, "EPUB"))
+
+        def fake_run(cmd, capture_output, text, timeout):
+            return mock.Mock(
+                returncode=1,
+                stdout="",
+                stderr="Full text indexing is not enabled on this library",
+            )
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, err = self.run_cli(
+                "run", "fts-index", "--apply", "--db", str(self.db_path)
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("not enabled", err)
+
+    def test_reindex_spawn_refuses_without_the_binary(self):
+        self._sidecar_queue((1, "EPUB"))
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli(
+                "run", "fts-index", "--apply", "--db", str(self.db_path)
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("calibredb is not on PATH", err)
+
+    def test_enable_spawn_refuses_without_the_binary(self):
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli(
+                "run",
+                "fts-index",
+                "--enable",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("calibredb is not on PATH", err)
+
+
+class TestCustomizeMapping(_IntegrateCase):
+    """The remove/enable/disable flag-to-argv mapping and the failure arm;
+    only --add-plugin was pinned before."""
+
+    def _apply(self, *argv, stdout=""):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout=stdout, stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/calibre-customize",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli("run", "customize", *argv, "--apply")
+        return code, out, calls
+
+    def test_remove_plugin_maps_to_r(self):
+        code, out, calls = self._apply("--remove-plugin", "Zap")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls[0], ["calibre-customize", "-r", "Zap"])
+
+    def test_enable_plugin_maps_long(self):
+        code, out, calls = self._apply("--enable-plugin", "Zap")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls[0], ["calibre-customize", "--enable-plugin", "Zap"])
+
+    def test_disable_plugin_maps_long(self):
+        code, out, calls = self._apply("--disable-plugin", "Zap")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls[0], ["calibre-customize", "--disable-plugin", "Zap"])
+
+    def test_empty_stdout_conjugates_installed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "plugin.zip"
+            zip_path.write_bytes(b"zip")
+            code, out, _ = self._apply("--add-plugin", str(zip_path))
+        self.assertEqual(code, 0, out)
+        self.assertIn("Installed:", out)
+
+    def test_failure_arm_is_exit_one_with_stderr(self):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=1, stdout="", stderr="no such plugin")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/calibre-customize",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, err = self.run_cli(
+                "run", "customize", "--remove-plugin", "Zap", "--apply"
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("no such plugin", err)
+
+
+class TestDebugToolsGaps(_IntegrateCase):
+    """The explode/implode command shapes (the output side is created by
+    upstream, so the plan door must not refuse it), and the one
+    missing-binary refusal no test pinned."""
+
+    def _book(self):
+        book = self.tmpdir / "book.epub"
+        book.write_bytes(b"epub")
+        return book
+
+    def test_explode_refuses_only_a_missing_input(self):
+        code, _, err = self.run_cli(
+            "run",
+            "debug-tools",
+            "--explode",
+            "/no/book.epub",
+            str(self.tmpdir / "parts"),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("no such path", err)
+
+    def test_explode_plans_with_a_new_output_dir(self):
+        # The canonical first run: the output folder does not exist yet.
+        book = self._book()
+        code, out, _ = self.run_cli(
+            "run",
+            "debug-tools",
+            "--explode",
+            str(book),
+            str(self.tmpdir / "fresh_parts"),
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("debug-tools plan: calibre-debug --explode-book", out)
+
+    def test_implode_plans_with_a_new_output_file(self):
+        parts = self.tmpdir / "parts"
+        parts.mkdir()
+        code, out, _ = self.run_cli(
+            "run",
+            "debug-tools",
+            "--implode",
+            str(parts),
+            str(self.tmpdir / "rebuilt.epub"),
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("--implode-book", out)
+
+    def test_explode_apply_drives_calibre_debug(self):
+        calls = []
+        book = self._book()
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/calibre-debug",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, _ = self.run_cli(
+                "run",
+                "debug-tools",
+                "--explode",
+                str(book),
+                str(self.tmpdir / "parts"),
+                "--apply",
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            calls[0],
+            ["calibre-debug", "--explode-book", str(book), str(self.tmpdir / "parts")],
+        )
+
+    def test_missing_binary_refuses_at_the_spawn(self):
+        book = self._book()
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli(
+                "run", "debug-tools", "--diff", str(book), str(book)
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("calibre-debug is not on PATH", err)
+
+
+class TestDeviceCpShape(_IntegrateCase):
+    def test_cp_maps_two_positionals(self):
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which",
+                return_value="/usr/bin/ebook-device",
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, _, _ = self.run_cli(
+                "run",
+                "device",
+                "--device-cp",
+                "book.epub",
+                "carda:/books/",
+                "--apply",
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0], ["ebook-device", "cp", "book.epub", "carda:/books/"])
 
 
 if __name__ == "__main__":

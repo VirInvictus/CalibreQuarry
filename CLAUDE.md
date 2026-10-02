@@ -43,6 +43,12 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   replaces the pairing cross-check with the derived-vs-listed comparison,
   which covers BOTH divergence directions and names approve as the fix.
   Phase 2/3 loads keep the full validator.
+- **Supersedes two stale notes below**: the 3.37.0 `--fts` route decision
+  ("the one table cquarry 1.20 does not expose... read directly") and the
+  3.44.0 "exactly one raw-SQL read left" note both describe the retired
+  modes/fts.py sidecar read; the tier has zero raw-SQL reads since the
+  get_dirtied_formats() adoption, and the floor line in the 3.44.0 section
+  (cquarry >= 1.22.0) is superseded by pyproject's.
 - **reconcile's verify-after-embed**: `verify_embedded` re-diffs every file
   a writer claimed; residuals fail the run (exit 1, the class phase 3's
   seam already tolerates). `run flush` reports `queue_remaining` in JSON.

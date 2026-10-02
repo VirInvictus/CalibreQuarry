@@ -896,7 +896,7 @@ def build_parser() -> argparse.ArgumentParser:
         "sidecar OPFs over the dirtied queue), restore-database (rebuild a "
         "metadata.db from stored OPFs under --target), clone (a fresh-schema "
         "empty copy under --target), fts-index (Calibre's extractor over "
-        "the dirtied queue; --status, --enable), catalog-epub / "
+        "the dirtied queue; --fts-status, --enable), catalog-epub / "
         "catalog-bibtex (calibredb's catalog plugins over --dest), "
         "customize (calibre-customize: headless plugin install/enable/"
         "disable/list), debug-tools (the curated calibre-debug subset: "
@@ -1133,7 +1133,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="dest",
         default=None,
         metavar="DIR",
-        help="export: destination directory",
+        help="export: destination directory; catalog-epub/catalog-bibtex: "
+        "the destination FILE (extension enforced: .epub / .bib)",
     )
     run_p.add_argument(
         "--template",

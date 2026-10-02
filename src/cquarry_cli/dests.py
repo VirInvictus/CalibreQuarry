@@ -12,7 +12,9 @@ Partition (disjoint by construction, tested):
 - SET_MODE_SOURCES    set mode's exactly-one target sources
 - BATCH_VALUE_DESTS   --batch-* verbs carrying a value (counted by presence)
 - BATCH_BOOL_DESTS    store_true --batch-clear-* verbs (counted by truthiness)
-- WRITE_FLAG_DESTS    the restrict-refusal aggregate over all four
+- SCHEMA_WRITE_DESTS  the library-schema writes (schemawrite.py: saved
+                      searches, custom-column CRUD; no book targets)
+- WRITE_FLAG_DESTS    the restrict-refusal aggregate over all five
 """
 
 from __future__ import annotations

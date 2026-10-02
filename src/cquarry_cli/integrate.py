@@ -359,9 +359,6 @@ def run_export(db, args, *, apply: bool, take_backup=None) -> int:
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
-    if not shutil.which("calibredb"):
-        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
-        return 2
     ids = ",".join(str(p["book"]) for p in plans)
     library = str(Path(db.db_path).resolve().parent)
     cmd = [
@@ -382,6 +379,9 @@ def run_export(db, args, *, apply: bool, take_backup=None) -> int:
             f"(template {plans[0]['template']!r})"
         )
         return 0
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
     if proc.returncode != 0:
         print(f"ERROR: calibredb export failed: {proc.stderr[:300]}", file=sys.stderr)
@@ -493,9 +493,6 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
         else:
             print("The OPF queue is empty: nothing to flush.")
         return 0
-    if not shutil.which("calibredb"):
-        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
-        return 2
     chunk = max(1, args.chunk or 50)
     chunks = [ids[i : i + chunk] for i in range(0, len(ids), chunk)]
     as_json = getattr(args, "format", None) == "json"
@@ -516,6 +513,9 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
                 f"chunk(s) of up to {chunk}: embed_metadata each"
             )
         return 0
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
     if take_backup and (rc := take_backup()):
         return rc
     done = 0
@@ -853,18 +853,27 @@ def run_restore_database(db, args, *, apply: bool, take_backup=None) -> int:
     if not shutil.which("calibredb"):
         print("ERROR: calibredb is not on PATH.", file=sys.stderr)
         return 2
-    proc = subprocess.run(
-        [
-            "calibredb",
-            "restore_database",
-            "--library",
-            plan["target"],
-            "--really-do-it",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=3600,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "calibredb",
+                "restore_database",
+                "--library",
+                plan["target"],
+                "--really-do-it",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3600,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            "ERROR: restore_database timed out after 3600s; a "
+            "whole-library rebuild can be slow, but a hung calibredb is a "
+            "failure, not a wait.",
+            file=sys.stderr,
+        )
+        return 1
     if proc.returncode != 0:
         print(
             f"ERROR: restore_database failed: {proc.stderr[:300]}",
@@ -897,6 +906,8 @@ def plan_clone(db, args) -> dict:
             f"--target ({resolved}) sits inside the library ({library}): a "
             "clone nested in its source would be scanned as library content"
         )
+    if target.exists() and not target.is_dir():
+        raise ValueError(f"--target is not a directory: {target}")
     if target.exists() and any(target.iterdir()):
         raise ValueError(
             f"--target is not empty: {target}. calibredb clone refuses to "
@@ -958,7 +969,7 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
     enable = bool(getattr(args, "enable", False))
     if status and enable:
         print(
-            "ERROR: run fts-index takes --status or --enable, not both "
+            "ERROR: run fts-index takes --fts-status or --enable, not both "
             "(no flags means: reindex the dirtied queue).",
             file=sys.stderr,
         )
@@ -1191,7 +1202,8 @@ def run_customize(args) -> int:
             file=sys.stderr,
         )
         return 1
-    print(proc.stdout.strip() or f"{verb.capitalize()}d: {value}")
+    past = {"install": "installed"}.get(verb, f"{verb}d")
+    print(proc.stdout.strip() or f"{past.capitalize()}: {value}")
     return 0
 
 
@@ -1243,9 +1255,14 @@ def run_debug_tools(args) -> int:
     apply = bool(getattr(args, "apply", False))
     mutating = action in ("explode", "implode", "kepubify", "un-kepubify")
 
-    # Existence checks at the plan door: a typo'd path is a usage error
-    # however the verb is run.
-    for path in targets:
+    # Existence checks at the plan door: a typo'd INPUT path is a usage
+    # error however the verb is run. explode's DIR and implode's FILE are
+    # OUTPUTS upstream creates on demand (calibre's tweak.explode runs
+    # os.makedirs; implode writes the new file), so only the input side of
+    # each is checked: the canonical first run ("--explode book.epub
+    # ./parts") must not refuse on the folder it is about to create.
+    checked = targets[:1] if action in ("explode", "implode") else targets
+    for path in checked:
         if not Path(path).exists():
             print(f"ERROR: {action}: no such path: {path}", file=sys.stderr)
             return 2

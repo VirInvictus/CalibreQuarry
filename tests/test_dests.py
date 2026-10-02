@@ -29,7 +29,7 @@ class DestListsMatchTheParserTests(unittest.TestCase):
         for dest in dests.BATCH_VALUE_DESTS + dests.BATCH_BOOL_DESTS:
             self.assertIn(dest, parser_dests, dest)
 
-    def test_the_four_lists_are_disjoint(self):
+    def test_the_five_lists_are_disjoint(self):
         single = set(dests.SINGLE_BOOK_DESTS)
         sources = set(dests.SET_MODE_SOURCES)
         batch = set(dests.BATCH_VALUE_DESTS) | set(dests.BATCH_BOOL_DESTS)
@@ -43,6 +43,12 @@ class DestListsMatchTheParserTests(unittest.TestCase):
         self.assertFalse(single & schema)
         self.assertFalse(sources & schema)
         self.assertFalse(batch & schema)
+
+    def test_schema_dests_exist_in_the_parser(self):
+        # The fourth membership loop: same promise as the other three.
+        parser_dests = _parser_dests()
+        for dest in dests.SCHEMA_WRITE_DESTS:
+            self.assertIn(dest, parser_dests, dest)
 
     def test_the_refusal_aggregate_is_the_composition(self):
         self.assertEqual(

@@ -119,10 +119,6 @@ class TestMenuDegrade(unittest.TestCase):
         self.assertIn("database unchanged", messages)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestMenuSections(unittest.TestCase):
     """The menu structure: the Phase 19 read surfaces have entries, and
     the Settings coordinates the s/q aliases pin are unchanged."""
@@ -224,3 +220,7 @@ class TestRestrictedPrompt(unittest.TestCase):
             view = tui._restricted(self.db)
         self.assertIs(view, self.db)
         self.assertTrue(notify_mock.called)
+
+
+if __name__ == "__main__":
+    unittest.main()

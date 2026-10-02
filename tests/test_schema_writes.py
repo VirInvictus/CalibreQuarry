@@ -422,5 +422,96 @@ class TestSavedSearchWrites(_SchemaWriteCase):
         self.assertIn("--restrict", err)
 
 
+class TestSchemaWriteArms(_SchemaWriteCase):
+    """The arms the first pass missed: empty-string refusals, the
+    batch-verb combination guard (the silent-drop class), a successful
+    is_multiple create, and the lock arm."""
+
+    def test_empty_name_or_expression_refused(self):
+        for argv in (
+            ("--saved-search-add", "", "tags:Fic"),
+            ("--saved-search-add", "Fic", "  "),
+            ("--saved-search-delete", " "),
+            ("--saved-search-rename", "Recent", ""),
+        ):
+            code, _, err = self.run_cli(*argv, "--db", self.db_path)
+            self.assertEqual(code, 2, argv)
+            self.assertIn("empty", err)
+
+    def test_batch_verb_company_refused_not_silently_dropped(self):
+        # The silent-drop class: a schema verb beside a --batch-* flag used
+        # to run the schema write, exit 0, and quietly ignore the batch
+        # flag, so the user believed the tag landed.
+        code, _, err = self.run_cli(
+            "--saved-search-add",
+            "Fic",
+            "tags:Fic",
+            "--batch-add-tag",
+            "Curated",
+            "--ids",
+            "1",
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("refuse company", err)
+        self.assertEqual(self.stored(), _SEED_SEARCHES)
+
+    def test_clear_rating_bool_dest_company_refused(self):
+        code, _, err = self.run_cli(
+            "--saved-search-add",
+            "Fic",
+            "tags:Fic",
+            "--batch-clear-tags",
+            "--ids",
+            "1",
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("refuse company", err)
+
+    def test_add_column_with_is_multiple_creates_it(self):
+        code, out, _ = self.run_cli(
+            "--add-custom-column",
+            "audiences",
+            "Audiences",
+            "text",
+            "--column-is-multiple",
+            "--apply",
+            "--backup-dir",
+            self.backups(),
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 0, out)
+        con = sqlite3.connect(self.db_path)
+        row = con.execute(
+            "SELECT is_multiple FROM custom_columns WHERE label = 'audiences'"
+        ).fetchone()
+        con.close()
+        self.assertEqual(row, (1,))
+
+    def test_lock_error_maps_to_exit_one(self):
+        import sqlite3 as s3
+
+        with mock.patch(
+            "cquarry.write.WritableCalibreDB.saved_search_add",
+            side_effect=s3.OperationalError("database is locked"),
+        ):
+            code, _, err = self.run_cli(
+                "--saved-search-add",
+                "Fic",
+                "tags:Fic",
+                "--apply",
+                "--backup-dir",
+                self.backups(),
+                "--db",
+                self.db_path,
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("write lock", err)
+
+
 if __name__ == "__main__":
     unittest.main()

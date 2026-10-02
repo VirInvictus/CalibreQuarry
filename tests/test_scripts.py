@@ -2717,5 +2717,122 @@ class TestDrmCsvCarriesNaRows(unittest.TestCase):
         self.assertEqual(rows[0]["kind"], "djvu")
 
 
+class TestFetchWorkFallbackFlow(unittest.TestCase):
+    """The --sru-fallback flow through main(): the work-level hit (tagged,
+    cached under its work: key), the cached work hit (no network), the
+    cached-empty miss that stays a miss and lands in the worklist, and a
+    fallback failure counting toward the abort counter. fetch_codes is
+    mocked; the cache is a temp file; main() reads sys.argv."""
+
+    def _library(self, tmp):
+        db = pathlib.Path(tmp) / "metadata.db"
+        con = sqlite3.connect(db)
+        con.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT);
+            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT);
+            CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT, val TEXT);
+            """
+        )
+        con.execute("INSERT INTO books VALUES (1, 'Discourses')")
+        con.execute("INSERT INTO authors VALUES (1, 'Epictetus')")
+        con.execute("INSERT INTO books_authors_link (book, author) VALUES (1, 1)")
+        con.execute("INSERT INTO tags VALUES (1, 'NonFic.Philosophy')")
+        con.execute("INSERT INTO books_tags_link (book, tag) VALUES (1, 1)")
+        con.execute(
+            "INSERT INTO identifiers (book, type, val) VALUES (1, 'isbn', '9780465032001')"
+        )
+        con.commit()
+        con.close()
+        return db
+
+    def _run(self, tmp, *, fetch_results=None, seed_cache=None):
+        f = fetch_library_codes
+        db = self._library(tmp)
+        cache = str(pathlib.Path(tmp) / "cache.json")
+        misses = str(pathlib.Path(tmp) / "misses.txt")
+        if seed_cache is not None:
+            f.save_cache(cache, seed_cache)
+        argv = [
+            "fetch_library_codes.py",
+            "--db",
+            str(db),
+            "--cache",
+            cache,
+            "--misses-file",
+            misses,
+            "--sru-fallback",
+        ]
+        out = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(
+                f,
+                "fetch_codes",
+                side_effect=fetch_results
+                if fetch_results is not None
+                else AssertionError("network used"),
+            ),
+            mock.patch.object(f.time, "sleep"),
+            contextlib.redirect_stdout(out),
+        ):
+            rc = f.main()
+        return (
+            rc,
+            out.getvalue(),
+            f.load_cache(cache),
+            pathlib.Path(misses).exists(),
+        )
+
+    def test_work_level_hit_is_tagged_and_cached_under_its_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # First query: the clean ISBN miss (empty dict). Second: the hit.
+            rc, out, cached, _ = self._run(tmp, fetch_results=[{}, {"lcc": "B563"}])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("(work-level)", out)
+        self.assertIn("title/author fallback", out)
+        work_keys = [k for k in cached if k.startswith("work:")]
+        self.assertEqual(len(work_keys), 1)
+        self.assertEqual(cached[work_keys[0]]["lcc"], "B563")
+
+    def test_cached_work_hit_skips_the_network(self):
+        f = fetch_library_codes
+        key = f.work_cache_key("Discourses", "Epictetus")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, _ = self._run(
+                tmp,
+                seed_cache={"9780465032001": {}, key: {"lcc": "B563"}},
+            )
+        self.assertEqual(rc, 0, out)
+        self.assertIn("(work-level)", out)
+
+    def test_cached_empty_work_stays_a_miss(self):
+        f = fetch_library_codes
+        key = f.work_cache_key("Discourses", "Epictetus")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, misses = self._run(
+                tmp,
+                seed_cache={"9780465032001": {}, key: {}},
+            )
+        self.assertEqual(rc, 0)
+        self.assertNotIn("(work-level)", out)
+        self.assertTrue(misses, "the book must land in the worklist")
+
+    def test_fallback_failure_leaves_the_book_a_miss(self):
+        # A fallback network failure is not an ERR row and not a crash: the
+        # book stays a miss (it lands in the worklist), the failure counts
+        # toward the abort counter with the ISBN failures, and the pass
+        # ends clean. Reaching the abort itself needs 8 consecutive
+        # failures; the counter arithmetic is shared with the ISBN path.
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, misses = self._run(tmp, fetch_results=[{}, None])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("ERR", out)
+        self.assertTrue(misses)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,9 +18,9 @@ Design philosophy: **replace every `calibredb list | jq | awk` pipeline with a s
 ## 2. Architecture
 
 ### 2.1 Decoupled Shared Library Architecture
-The CalibreQuarry architecture relies on a strict separation of concerns, decoupling the CLI/TUI frontend from the database and search logic. 
+The CLI/TUI frontend is decoupled from the database and search logic: 
 
-**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package. This ensures parity across the ecosystem.
+**`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package.
 
 The floor is `cquarry >= 1.24.0`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, and 1.21). A test pins the floor against `pyproject.toml`.
 
@@ -123,7 +123,7 @@ The path is saved to config on first successful resolution.
 | `--show-id` | Prefix books with Calibre ID (for scripting) |
 | `--show-custom COL` | Load and display a Calibre custom column |
 | `--primary-only` | Collapse multi-author entries to first author |
-| `--format {text,json,csv,ai,md}` | Output format for `--export` (json/csv/ai; default json) and `--search` (json/csv/ai; default: text listing); `md` renders the Markdown catalog shape for `--catalog`, `--wing`, and the sweeps |
+| `--format {json,csv,ai,md}` | Output format for `--export` (json/csv/ai; default json) and `--search` (json/csv/ai; default: text listing); `md` renders the Markdown catalog shape for `--catalog`, `--wing`, and the sweeps |
 | `--plugin-data NAME` | Append a `books_plugin_data` value (e.g. `goodreads_id`, `wordcount`) to catalog/search book lines |
 | `--output PATH` | Write to a file instead of stdout |
 | `--quiet` | Suppress decorative output |
@@ -142,7 +142,7 @@ to a true clear since 3.29.0), `--set-pubdate`/`--clear-pubdate`,
 `--confirm-remove`), the curation verbs `--rename-entity KIND OLD NEW`
 (everywhere, merging into an existing row) and `--set-author-sort` /
 `--set-title-sort BOOK SORT` (verbatim passthroughs a later
-`--set-authors`/`--set-title` recomputes over), Several verbs in one invocation share one `batch()`
+`--set-authors`/`--set-title` recomputes over). Several verbs in one invocation share one `batch()`
 transaction.
 
 Set mode: exactly one target source per invocation (`--ids`,

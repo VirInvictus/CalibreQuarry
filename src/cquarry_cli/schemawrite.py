@@ -16,7 +16,13 @@ import subprocess
 import sys
 
 from cquarry_cli.backups import make_backup
-from cquarry_cli.dests import SCHEMA_WRITE_DESTS, SET_MODE_SOURCES, SINGLE_BOOK_DESTS
+from cquarry_cli.dests import (
+    BATCH_BOOL_DESTS,
+    BATCH_VALUE_DESTS,
+    SCHEMA_WRITE_DESTS,
+    SET_MODE_SOURCES,
+    SINGLE_BOOK_DESTS,
+)
 from cquarry_cli.writeops import FORBIDDEN_COLUMNS
 
 _PGREP_TIMEOUT = 15
@@ -84,9 +90,15 @@ def dispatch_schema_write(args, db_path: str) -> int | None:
     if not present:
         return None
     try:
-        combos = [d for d in SET_MODE_SOURCES if getattr(args, d, None)] + [
-            d for d in SINGLE_BOOK_DESTS if getattr(args, d, None)
-        ]
+        combos = (
+            [d for d in SET_MODE_SOURCES if getattr(args, d, None)]
+            + [d for d in SINGLE_BOOK_DESTS if getattr(args, d, None)]
+            + [
+                d
+                for d in BATCH_VALUE_DESTS + BATCH_BOOL_DESTS
+                if getattr(args, d, None)
+            ]
+        )
         if combos:
             raise _UsageError(
                 "saved-search writes refuse company: they change "
