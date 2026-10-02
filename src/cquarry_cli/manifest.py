@@ -201,6 +201,33 @@ def approve(manifest: dict[str, Any], paths: list[str]) -> None:
     )
 
 
+def approved_from_verdicts(manifest: dict[str, Any]) -> list[str]:
+    """The approved set the per-file verdicts imply, sorted.
+
+    The verdict field is the single source of truth; this is the derivation
+    the sign verb enforces and ``run approve`` applies, so a reviewer verdict
+    flip has a sanctioned propagation path instead of a hand-rebuilt list."""
+    return sorted(
+        entry["path"]
+        for entry in manifest.get("files", [])
+        if isinstance(entry, dict) and entry.get("verdict") == "approved_for_import"
+    )
+
+
+def approve_from_verdicts(manifest: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Re-derive ``approved_for_import`` from the per-file verdicts.
+
+    REPLACE, not the union approve() grows: a reviewer flipping a file
+    FROM approved back to rejected must lose it from the list, or the flip
+    is a lie. Returns (added, removed) for the caller's report."""
+    derived = approved_from_verdicts(manifest)
+    current = sorted(manifest.get("approved_for_import") or [])
+    added = [p for p in derived if p not in current]
+    removed = [p for p in current if p not in derived]
+    manifest["approved_for_import"] = derived
+    return added, removed
+
+
 def add_decision(manifest: dict[str, Any], kind: str, **detail: Any) -> dict[str, Any]:
     """Record a decisions_needed entry; the run continues, never guesses."""
     if kind not in DECISION_KINDS:
@@ -266,13 +293,25 @@ def file_by_path(manifest: dict[str, Any], path: str) -> dict[str, Any] | None:
     return None
 
 
-def validate(data: Any, *, check_seal: bool = True) -> list[str]:
+def validate(
+    data: Any,
+    *,
+    check_seal: bool = True,
+    check_approval_pairing: bool = True,
+) -> list[str]:
     """Return every structural problem with ``data`` (empty list = valid).
 
     With ``check_seal`` (the default, and how every consumer loads), a
     signed manifest must also carry a seal matching its content. The sign
     verb passes ``check_seal=False`` so a deliberate post-sign edit can be
-    loaded, re-approved, and re-signed instead of dead-ending."""
+    loaded, re-approved, and re-signed instead of dead-ending.
+
+    ``check_approval_pairing=False`` suspends the approved_for_import vs
+    per-file-verdict cross-check. Only the sign/approve pair passes it
+    False: approve exists to REPAIR exactly that pairing (a reviewer verdict
+    flip leaves the list divergent, and the manifest cannot be loaded to fix
+    itself otherwise), and sign replaces the check with the stronger
+    derived-vs-listed comparison that covers both divergence directions."""
     errors: list[str] = []
     if not isinstance(data, dict):
         return ["manifest must be a JSON object"]
@@ -322,15 +361,16 @@ def validate(data: Any, *, check_seal: bool = True) -> list[str]:
             errors.append("every decisions_needed entry needs a kind")
         elif decision["kind"] not in DECISION_KINDS:
             errors.append(f"unknown decision kind {decision['kind']!r}")
-    for path in data.get("approved_for_import", []):
-        if path not in known_paths:
-            errors.append(f"approved_for_import names an unlisted file: {path!r}")
-        elif verdicts.get(path) != "approved_for_import":
-            errors.append(
-                f"{path}: listed in approved_for_import but its verdict is "
-                f"{verdicts.get(path)!r}; phase 2 imports only what the "
-                "verdict approved"
-            )
+    if check_approval_pairing:
+        for path in data.get("approved_for_import", []):
+            if path not in known_paths:
+                errors.append(f"approved_for_import names an unlisted file: {path!r}")
+            elif verdicts.get(path) != "approved_for_import":
+                errors.append(
+                    f"{path}: listed in approved_for_import but its verdict is "
+                    f"{verdicts.get(path)!r}; phase 2 imports only what the "
+                    "verdict approved"
+                )
     if check_seal and data.get("signed"):
         if not data.get("signature"):
             errors.append(

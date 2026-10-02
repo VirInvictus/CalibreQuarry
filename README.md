@@ -126,7 +126,10 @@ cquarry run trash --expire 14 --apply --db ~/Calibre/metadata.db
 ### The acquisition run verbs (Phase 17)
 
 `run phase1 DIR` vets a downloads directory and emits the batch manifest;
-`run sign --manifest F` seals it for phase 2; `run phase2 --manifest F
+`run sign --manifest F` seals it for phase 2 (and refuses to seal when the
+approved list disagrees with the per-file verdicts: re-derive the list with
+`run approve --manifest F`, the sanctioned propagation for a reviewer
+verdict flip); `run phase2 --manifest F
 --backup-dir D` imports the approved files as one transaction; `run
 phase3 --manifest F [--answer-file A]` curates and mechanically finishes
 the pass. Phase 1 seeds each file's manifest record with filename-derived

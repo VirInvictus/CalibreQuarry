@@ -36,6 +36,7 @@ from cquarry_cli.run import (
     _screen_duplicates,
     _stamps_from_embedded,
     _stamps_from_filename,
+    approve_manifest,
     run_phase1,
     run_phase2,
     run_phase3,
@@ -1988,6 +1989,122 @@ class TestRunSign(RunCase):
 
     def test_missing_manifest_exits_two(self):
         self.assertEqual(sign_manifest(os.path.join(self.temp_dir, "nope.json")), 2)
+
+
+class TestRunApprove(RunCase):
+    """`cquarry run approve`: the sanctioned propagation for a reviewer
+    verdict flip. The 2026-09-19 hole: flipping `verdict` by hand left
+    `approved_for_import` rebuilt by hand too -- two places, no warning on
+    divergence, and sign sealed whatever the list said."""
+
+    def _manifest(self, verdicts):
+        man = manifest.new_manifest(self.downloads)
+        approved = []
+        for name, verdict in verdicts.items():
+            path = self._make_file(name)
+            entry = manifest.new_file_entry(path)
+            entry["size"] = os.path.getsize(path)
+            entry["verdict"] = verdict
+            entry["stamps"] = {"title": "T", "authors": ["Ann Leckie"]}
+            manifest.add_file(man, entry)
+            if verdict == "approved_for_import":
+                approved.append(path)
+        manifest.approve(man, approved)
+        man_path = os.path.join(self.temp_dir, "batch.json")
+        manifest.save(man, man_path)
+        return man_path
+
+    def test_flip_to_refused_propagates_as_removal(self):
+        a = "Fifth Head.epub"
+        man_path = self._manifest({a: "approved_for_import"})
+        with open(man_path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["files"][0]["verdict"] = "rejected"
+        with open(man_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        rc = approve_manifest(man_path)
+        self.assertEqual(rc, 0)
+        man = manifest.load(man_path)
+        self.assertEqual(man["approved_for_import"], [])
+
+    def test_flip_to_approved_propagates_as_addition(self):
+        a = "Fifth Head.epub"
+        man_path = self._manifest({a: "rejected"})
+        self.assertEqual(manifest.load(man_path)["approved_for_import"], [])
+        with open(man_path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["files"][0]["verdict"] = "approved_for_import"
+        with open(man_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        rc = approve_manifest(man_path)
+        self.assertEqual(rc, 0)
+        man = manifest.load(man_path)
+        self.assertEqual(len(man["approved_for_import"]), 1)
+
+    def test_consistent_manifest_is_a_no_op(self):
+        man_path = self._manifest({"Fifth Head.epub": "approved_for_import"})
+        before = manifest.load(man_path)["approved_for_import"]
+        rc = approve_manifest(man_path)
+        self.assertEqual(rc, 0)
+        self.assertEqual(manifest.load(man_path)["approved_for_import"], before)
+
+    def test_missing_manifest_exits_two(self):
+        self.assertEqual(approve_manifest(os.path.join(self.temp_dir, "nope.json")), 2)
+
+
+class TestSignRejectsVerdictDivergence(RunCase):
+    """sign is the door that seals the approved set; since the approve verb
+    exists, a list that disagrees with the verdicts refuses instead of
+    sealing the lie (the verdict field is the single source of truth)."""
+
+    def _divergent_manifest(self, verdict="rejected"):
+        man = manifest.new_manifest(self.downloads)
+        path = self._make_file("Fifth Head.epub")
+        entry = manifest.new_file_entry(path)
+        entry["size"] = os.path.getsize(path)
+        entry["verdict"] = verdict
+        entry["stamps"] = {"title": "T", "authors": ["Ann Leckie"]}
+        manifest.add_file(man, entry)
+        man_path = os.path.join(self.temp_dir, "batch.json")
+        if verdict == "rejected":
+            # The over-listed lie: listed as approved while the verdict says
+            # rejected. validate() refuses this pairing, so it is written as
+            # raw JSON -- the shape a hand editor produces and the sign verb
+            # (which reads raw, no seal check) must still judge.
+            man["approved_for_import"] = [path]
+            with open(man_path, "w", encoding="utf-8") as f:
+                json.dump(man, f)
+        else:
+            # The under-listed lie: the verdict says approved but the list
+            # never names the file. save() cannot catch this direction;
+            # phase 2 would silently import less than the verdicts approve.
+            with open(man_path, "w", encoding="utf-8") as f:
+                json.dump(man, f)
+        return man_path
+
+    def test_sign_refuses_and_approve_then_sign_works(self):
+        man_path = self._divergent_manifest()
+        self.assertEqual(sign_manifest(man_path), 2)
+        # The sanctioned propagation closes the gap; then sign seals.
+        self.assertEqual(approve_manifest(man_path), 0)
+        self.assertEqual(sign_manifest(man_path), 0)
+        man = manifest.load(man_path)
+        self.assertTrue(man["signed"])
+        self.assertEqual(man["approved_for_import"], [])
+
+    def test_under_listed_approval_refuses_and_approve_closes_it(self):
+        man_path = self._divergent_manifest(verdict="approved_for_import")
+        # The approved-verdict file is missing from the list entirely: the
+        # divergence validate() cannot see (over-listing is refused at save,
+        # this direction is not), so phase 2 would import less than the
+        # verdicts approve.
+        self.assertEqual(manifest.load(man_path)["approved_for_import"], [])
+        self.assertEqual(sign_manifest(man_path), 2)
+        self.assertEqual(approve_manifest(man_path), 0)
+        self.assertEqual(sign_manifest(man_path), 0)
+        man = manifest.load(man_path)
+        self.assertTrue(man["signed"])
+        self.assertEqual(len(man["approved_for_import"]), 1)
 
 
 class TestRunPhase3(RunCase):

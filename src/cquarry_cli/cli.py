@@ -810,6 +810,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "phase1",
             "sign",
+            "approve",
             "phase2",
             "phase3",
             "convert",
@@ -822,13 +823,14 @@ def build_parser() -> argparse.ArgumentParser:
             "trash",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
-        "reviewed manifest for phase 2; phase2: import the signed "
-        "manifest; phase3: curate + mechanical pass; the Phase 19 C "
-        "verbs (dry-run by default, --apply executes): convert "
-        "(ebook-convert), polish (ebook-polish), cover (set/remove "
-        "cover), export (calibredb), merge (duplicate into keeper), "
-        "flush (embed the OPF queue), backfill (metadata source), trash "
-        "(list/empty/expire .caltrash)",
+        "reviewed manifest for phase 2; approve: re-derive the approved set "
+        "from the per-file verdicts (the sanctioned verdict-flip "
+        "propagation); phase2: import the signed manifest; phase3: curate + "
+        "mechanical pass; the Phase 19 C verbs (dry-run by default, --apply "
+        "executes): convert (ebook-convert), polish (ebook-polish), cover "
+        "(set/remove cover), export (calibredb), merge (duplicate into "
+        "keeper), flush (embed the OPF queue), backfill (metadata source), "
+        "trash (list/empty/expire .caltrash)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
@@ -963,7 +965,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--manifest",
         metavar="FILE",
-        help="sign/phase2/phase3: the batch manifest",
+        help="sign/approve/phase2/phase3: the batch manifest",
     )
     run_p.add_argument(
         "--backup-dir",

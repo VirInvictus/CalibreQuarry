@@ -1421,12 +1421,18 @@ def run_phase3(
     return 0 if validator_clean and not mechanical_trouble else 1
 
 
-def sign_manifest(manifest_path: str) -> int:
-    """Seal the reviewed manifest for phase 2 (``cquarry run sign``).
+def approve_manifest(manifest_path: str) -> int:
+    """Re-derive the approved set from the per-file verdicts (``cquarry run
+    approve``), the sanctioned propagation for a reviewer verdict flip.
 
-    Loads the raw JSON and checks structure but NOT the seal, so both the
-    first sign and a re-sign after a deliberate post-sign edit work; the
-    human re-signing IS the approval of the new content."""
+    The 2026-09-19 hole: a flip required editing ``verdict`` AND rebuilding
+    ``approved_for_import`` by hand -- two places, no warning on divergence,
+    and sign sealed whatever the list said. The verdict field is the single
+    source of truth; this verb re-derives the list from it (REPLACE, so a
+    flip back to a refusal also propagates) and saves. Loads like sign
+    (structure checks, no seal check) so a deliberate post-sign edit can be
+    re-approved instead of dead-ending; save() re-seals a signed manifest
+    over its new content."""
     try:
         with open(manifest_path, encoding="utf-8") as f:
             man = json.load(f)
@@ -1436,9 +1442,71 @@ def sign_manifest(manifest_path: str) -> int:
     if not isinstance(man, dict):
         print("ERROR: the manifest is not a JSON object.", file=sys.stderr)
         return 2
-    problems = manifest.validate(man, check_seal=False)
+    problems = manifest.validate(man, check_seal=False, check_approval_pairing=False)
     if problems:
         print("ERROR: invalid manifest: " + "; ".join(problems), file=sys.stderr)
+        return 2
+    added, removed = manifest.approve_from_verdicts(man)
+    try:
+        manifest.save(man, manifest_path)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    print(
+        f"Approved set re-derived from the verdicts: "
+        f"{len(man['approved_for_import'])} approved "
+        f"(+{len(added)} / -{len(removed)})."
+    )
+    for path in added:
+        print(f"  + {path}")
+    for path in removed:
+        print(f"  - {path}")
+    if man.get("signed"):
+        print(
+            "The manifest was signed; the save re-sealed it over the new "
+            "list. Re-run `cquarry run sign` to refresh the signature "
+            "timestamp."
+        )
+    return 0
+
+
+def sign_manifest(manifest_path: str) -> int:
+    """Seal the reviewed manifest for phase 2 (``cquarry run sign``).
+
+    Loads the raw JSON and checks structure but NOT the seal, so both the
+    first sign and a re-sign after a deliberate post-sign edit work; the
+    human re-signing IS the approval of the new content. One derivation is
+    enforced at this door: the approved list must match what the per-file
+    verdicts imply. A divergence is the 2026-09-19 flip-without-propagation
+    hole -- sign refuses and names `run approve` as the fix, instead of
+    sealing a list that disagrees with the verdicts it also seals."""
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            man = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"ERROR: cannot read the manifest: {e}", file=sys.stderr)
+        return 2
+    if not isinstance(man, dict):
+        print("ERROR: the manifest is not a JSON object.", file=sys.stderr)
+        return 2
+    problems = manifest.validate(man, check_seal=False, check_approval_pairing=False)
+    if problems:
+        print("ERROR: invalid manifest: " + "; ".join(problems), file=sys.stderr)
+        return 2
+    # The pairing cross-check is replaced by this stronger derivation: it
+    # covers BOTH divergence directions (over-listed and under-listed),
+    # and the refusal names the verb that repairs it.
+    derived = manifest.approved_from_verdicts(man)
+    listed = sorted(man.get("approved_for_import") or [])
+    if derived != listed:
+        print(
+            "ERROR: approved_for_import disagrees with the per-file verdicts "
+            f"({len(derived)} file(s) carry the approved verdict, "
+            f"{len(listed)} are listed). Verdicts are the single source of "
+            "truth: re-derive the list with `cquarry run approve --manifest "
+            "FILE`, then sign again.",
+            file=sys.stderr,
+        )
         return 2
     again = bool(man.get("signed"))
     manifest.sign(man)
@@ -1502,9 +1570,11 @@ def dispatch_run(args) -> int:
     if args.phase == "phase1" and not args.dir:
         print("ERROR: run phase1 needs the downloads directory.", file=sys.stderr)
         return 2
-    if args.phase in ("phase2", "phase3") and not args.manifest:
+    if args.phase in ("approve", "phase2", "phase3") and not args.manifest:
         print(f"ERROR: run {args.phase} needs --manifest FILE.", file=sys.stderr)
         return 2
+    if args.phase == "approve":
+        return approve_manifest(args.manifest)
     db_path = find_db(getattr(args, "db", None))
     if args.phase == "phase1":
         return run_phase1(
