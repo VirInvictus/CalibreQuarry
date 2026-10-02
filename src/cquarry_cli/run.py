@@ -1535,6 +1535,7 @@ INTEGRATE_PHASES = (
     "trash",
     "backup-metadata",
     "restore-database",
+    "clone",
 )
 
 

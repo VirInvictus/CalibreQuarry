@@ -1303,5 +1303,109 @@ class TestRestoreDatabase(_IntegrateCase):
         self.assertIn("calibredb is not on PATH", err)
 
 
+class TestClone(_IntegrateCase):
+    """`run clone`: calibredb clone, the schema-fresh half of a library copy.
+    The clone carries the columns and settings but NO books, so the target
+    guards and the dry-run honesty are the point."""
+
+    def _target(self, *, files=0):
+        # Outside the fixture library: a nested empty target is refused by
+        # the very guard this class pins.
+        d = Path(tempfile.mkdtemp(prefix="cquarry_clone_tgt_")) / "clone_target"
+        self.addCleanup(_rm, d.parent)
+        d.mkdir(exist_ok=True)
+        for i in range(files):
+            (d / f"junk{i}.txt").write_text("x")
+        return d
+
+    def test_missing_target_is_a_usage_error(self):
+        code, _, err = self.run_cli("run", "clone", "--db", str(self.db_path))
+        self.assertEqual(code, 2)
+        self.assertIn("--target DIR", err)
+
+    def test_target_may_not_be_the_library(self):
+        code, _, err = self.run_cli(
+            "run",
+            "clone",
+            "--target",
+            str(self.tmpdir),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("current library", err)
+
+    def test_nonempty_target_refused(self):
+        target = self._target(files=2)
+        code, _, err = self.run_cli(
+            "run", "clone", "--target", str(target), "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not empty", err)
+
+    def test_library_subdirectory_target_refused(self):
+        target = self.tmpdir / "nested_empty"
+        target.mkdir()
+        code, _, err = self.run_cli(
+            "run", "clone", "--target", str(target), "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("sits inside the library", err)
+
+    def test_dry_run_says_no_books_copy(self):
+        target = self._target()
+        code, out, _ = self.run_cli(
+            "run", "clone", "--target", str(target), "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("NO books", out)
+        self.assertIn("Dry run", out)
+
+    def test_apply_drives_calibredb_clone(self):
+        target = self._target()
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "clone",
+                "--target",
+                str(target),
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        cmd = calls[0]
+        self.assertEqual(cmd[:2], ["calibredb", "clone"])
+        self.assertEqual(cmd[-1], str(target))
+        # The clone's --library is the source library DIRECTORY.
+        self.assertEqual(cmd[cmd.index("--library") + 1], str(self.tmpdir))
+
+    def test_missing_calibredb_is_a_setup_refusal(self):
+        target = self._target()
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli(
+                "run",
+                "clone",
+                "--target",
+                str(target),
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("calibredb is not on PATH", err)
+
+
 if __name__ == "__main__":
     unittest.main()

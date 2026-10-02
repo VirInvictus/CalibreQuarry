@@ -879,6 +879,71 @@ def run_restore_database(db, args, *, apply: bool, take_backup=None) -> int:
     return 0
 
 
+def plan_clone(db, args) -> dict:
+    """The clone plan and its guards. calibredb clone creates a FRESH-SCHEMA
+    EMPTY library (same custom columns, virtual libraries, saved searches,
+    and other settings; no books), so the target must not exist or must be
+    empty, and must never collide with the source library."""
+    raw = getattr(args, "target", None)
+    if not raw:
+        raise ValueError("run clone needs --target DIR")
+    target = Path(raw).expanduser()
+    library = Path(db.db_path).resolve().parent
+    resolved = target.resolve()
+    if resolved == library:
+        raise ValueError(f"--target is the current library ({library})")
+    if resolved.is_relative_to(library):
+        raise ValueError(
+            f"--target ({resolved}) sits inside the library ({library}): a "
+            "clone nested in its source would be scanned as library content"
+        )
+    if target.exists() and any(target.iterdir()):
+        raise ValueError(
+            f"--target is not empty: {target}. calibredb clone refuses to "
+            "clone over content (an empty folder or a new path only)"
+        )
+    return {"target": str(target), "source": str(library)}
+
+
+def run_clone(db, args, *, apply: bool, take_backup=None) -> int:
+    """`run clone`: calibredb clone, the schema-fresh half of a library copy
+    (cquarry's backup_to() is the consistent-with-books half). The clone
+    carries the column schema and settings but NO books; the dry run says
+    so loudly, because the verb's name promises more than it does. No
+    backup: the source database is never opened writable."""
+    try:
+        plan = plan_clone(db, args)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    if not apply:
+        print(
+            f"clone plan: {plan['source']} -> {plan['target']} "
+            "(fresh schema: custom columns, virtual libraries, saved "
+            "searches, and settings; NO books)"
+        )
+        print(
+            "Dry run: nothing executed. --apply runs calibredb clone "
+            "(Calibre closed). For a full duplicate including books, copy "
+            "the library folder with filesystem tools."
+        )
+        return 0
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
+    proc = subprocess.run(
+        ["calibredb", "clone", "--library", plan["source"], plan["target"]],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    if proc.returncode != 0:
+        print(f"ERROR: calibredb clone failed: {proc.stderr[:300]}", file=sys.stderr)
+        return 1
+    print(f"Cloned the schema of {plan['source']} into {plan['target']} (no books).")
+    return 0
+
+
 def _print_plan(plans: list[dict], args, title: str) -> int:
     if getattr(args, "format", None) == "json":
         print(json.dumps({"plan": plans}, indent=2, ensure_ascii=False))
@@ -1049,6 +1114,13 @@ def dispatch_integrate(args) -> int:
     if args.phase == "merge" and not (args.keeper and args.duplicate):
         print("ERROR: run merge needs --keeper ID and --duplicate ID.", file=sys.stderr)
         return 2
+    if args.phase == "clone" and not getattr(args, "target", None):
+        print(
+            "ERROR: run clone needs --target DIR (the empty folder that "
+            "receives the fresh schema).",
+            file=sys.stderr,
+        )
+        return 2
     if args.phase == "restore-database" and not getattr(args, "target", None):
         print(
             "ERROR: run restore-database needs --target DIR (this verb "
@@ -1100,6 +1172,7 @@ def dispatch_integrate(args) -> int:
             "backfill": run_backfill,
             "backup-metadata": run_backup_metadata,
             "restore-database": run_restore_database,
+            "clone": run_clone,
         }[args.phase]
         backup = take_backup if (apply and args.phase in needs_backup) else None
         return verb(db, args, apply=apply, take_backup=backup)

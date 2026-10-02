@@ -105,8 +105,11 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       is never guessed (required --target), an existing metadata.db is replaced only
       under --force, an OPF-less target refuses, and the dry run names what the
       rebuild loses.)*
-- [ ] **run clone**: calibredb clone (fresh-schema library copy); cquarry's
+- [x] **run clone**: calibredb clone (fresh-schema library copy); cquarry's
       `backup_to()` is the consistent-copy half, this is the schema-fresh half.
+      *(Shipped 2026-10-02: the dry run says NO BOOKS copy, loudly; the target
+      must not exist or must be empty and never collides with the source; no
+      backup, the source database is never opened writable.)*
 - [ ] **run fts-index**: calibredb fts_index (extraction and Calibre's own tokenizer
       into the sidecar; cquarry contractually never touches the FTS5 tables). Consumes
       the dirtied_formats queue; adopts cquarry's `get_dirtied_formats()` (cquarry

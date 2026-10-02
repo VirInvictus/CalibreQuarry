@@ -823,6 +823,7 @@ def build_parser() -> argparse.ArgumentParser:
             "trash",
             "backup-metadata",
             "restore-database",
+            "clone",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -834,7 +835,8 @@ def build_parser() -> argparse.ArgumentParser:
         "keeper), flush (embed the OPF queue), backfill (metadata source), "
         "trash (list/empty/expire .caltrash), backup-metadata (regenerate "
         "sidecar OPFs over the dirtied queue), restore-database (rebuild a "
-        "metadata.db from stored OPFs under --target)",
+        "metadata.db from stored OPFs under --target), clone (a fresh-schema "
+        "empty copy under --target)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),

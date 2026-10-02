@@ -128,6 +128,11 @@ cquarry run backup-metadata --all --apply --backup-dir ~/backups --db ~/Calibre/
 cquarry run restore-database --target ~/damaged-library   # dry run: the plan
 cquarry run restore-database --target ~/damaged-library --apply
 
+# Clone a library's SCHEMA into an empty folder (custom columns, virtual
+# libraries, saved searches, settings; no books -- for a full copy, copy
+# the folder with filesystem tools)
+cquarry run clone --target ~/fresh-schema --apply
+
 # Review what the merges moved aside, then expire what is older than
 # 14 days (the dry run is the listing)
 cquarry run trash --db ~/Calibre/metadata.db
