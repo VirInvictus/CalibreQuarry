@@ -5,12 +5,22 @@ on:
   pull_request:
 permissions:
   contents: read
+
+# A newer push to the same branch supersedes the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The suite itself finishes in seconds; 15 minutes bounds a hung
+    # pip resolve or runner, not the tests.
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      # Same SHA pins publish.yml uses, so dependabot bumps both together.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
       - run: pip install "git+https://github.com/VirInvictus/cquarry.git@main"
