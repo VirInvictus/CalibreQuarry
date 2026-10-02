@@ -52,6 +52,7 @@ from cquarry_cli.modes.stats import show_stats
 from cquarry_cli.modes.tags import show_tag_dump
 from cquarry_cli.modes.trash import show_trash
 from cquarry_cli.tui import interactive_menu
+from cquarry_cli.schemawrite import dispatch_schema_write
 from cquarry_cli.setwrite import dispatch_set_write
 from cquarry_cli.writeops import dispatch_write
 
@@ -566,6 +567,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Rename an authors/series/publishers/tags entity everywhere "
         "(merges into NEW when that row already exists)",
+    )
+    w.add_argument(
+        "--saved-search-add",
+        dest="saved_search_add",
+        nargs=2,
+        metavar=("NAME", "EXPR"),
+        default=None,
+        help="Add (or replace) a saved search (dry run by default; --apply "
+        "with --backup-dir and Calibre closed)",
+    )
+    w.add_argument(
+        "--saved-search-delete",
+        dest="saved_search_delete",
+        metavar="NAME",
+        default=None,
+        help="Delete a saved search by its stored spelling",
+    )
+    w.add_argument(
+        "--saved-search-rename",
+        dest="saved_search_rename",
+        nargs=2,
+        metavar=("OLD", "NEW"),
+        default=None,
+        help="Rename a saved search (refuses to overwrite an existing "
+        "name, where upstream silently does)",
     )
     w.add_argument(
         "--set-author-sort",
@@ -1239,6 +1265,12 @@ def main(argv: list[str] | None = None) -> int:
         # dispatched before any read mode opens the database read-only;
         # writeops owns WritableCalibreDB and the error-to-exit-code
         # mapping (validation -> 2, lock/write -> 1).
+        # Schema writes dispatch first: mixing a library-wide preference
+        # write with a book-targeting verb is refused, never sorted out.
+        handled = dispatch_schema_write(args, db_path)
+        if handled is not None:
+            return handled
+
         handled = dispatch_set_write(args, db_path)
         if handled is not None:
             return handled

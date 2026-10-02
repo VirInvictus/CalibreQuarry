@@ -143,8 +143,12 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       stack are process-bound and stay excluded from parity. *(Shipped 2026-10-02:
       reads execute immediately, writes are dry-run by default with --apply, and no
       closed-Calibre guard exists because the verb never opens a database.)*
-- [ ] **--saved-search add/delete/rename**: the calibredb saved_searches CRUD parity
-      item; needs cquarry Phase 15's typed `set_preference` writer first.
+- [x] **--saved-search add/delete/rename**: the calibredb saved_searches CRUD parity
+      item; needs cquarry Phase 15's typed `set_preference` writer first. *(Shipped
+      2026-10-02 over cquarry 1.24's writer (floor already at 1.24.0): the
+      schemawrite dispatcher, one write per invocation, refused company with book
+      verbs, and the full rails. The rename refuses to overwrite an existing name,
+      where upstream silently does.)*
 - [ ] **--add-custom-column / --remove-custom-column**: the calibredb schema-CRUD
       parity item; cquarry.write has shipped create/delete_custom_column since 1.20,
       so only the frontend verb is missing (set_custom is already covered by

@@ -89,9 +89,21 @@ BATCH_BOOL_DESTS: tuple[str, ...] = (
     "batch_clear_series",
 )
 
+# Library-schema write dests (schemawrite.py): one preferences row, no
+# book targets, so they refuse the company of any book verb.
+SCHEMA_WRITE_DESTS: tuple[str, ...] = (
+    "saved_search_add",
+    "saved_search_delete",
+    "saved_search_rename",
+)
+
 # --restrict is a read-surface scoping modifier: write targets are chosen
 # by --ids/--from-search, not by scoping, so the combination is refused
 # rather than silently ignored. Every dest a write could ride.
 WRITE_FLAG_DESTS: tuple[str, ...] = (
-    tuple(SINGLE_BOOK_DESTS) + SET_MODE_SOURCES + BATCH_VALUE_DESTS + BATCH_BOOL_DESTS
+    tuple(SINGLE_BOOK_DESTS)
+    + SET_MODE_SOURCES
+    + BATCH_VALUE_DESTS
+    + BATCH_BOOL_DESTS
+    + SCHEMA_WRITE_DESTS
 )

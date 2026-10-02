@@ -33,9 +33,16 @@ class DestListsMatchTheParserTests(unittest.TestCase):
         single = set(dests.SINGLE_BOOK_DESTS)
         sources = set(dests.SET_MODE_SOURCES)
         batch = set(dests.BATCH_VALUE_DESTS) | set(dests.BATCH_BOOL_DESTS)
+        schema = set(dests.SCHEMA_WRITE_DESTS)
         self.assertFalse(single & sources)
         self.assertFalse(single & batch)
         self.assertFalse(sources & batch)
+        # The schema writes are library-wide, not book-targeted: disjoint
+        # from everything else is the property their combination guard
+        # relies on.
+        self.assertFalse(single & schema)
+        self.assertFalse(sources & schema)
+        self.assertFalse(batch & schema)
 
     def test_the_refusal_aggregate_is_the_composition(self):
         self.assertEqual(
@@ -43,7 +50,8 @@ class DestListsMatchTheParserTests(unittest.TestCase):
             tuple(dests.SINGLE_BOOK_DESTS)
             + dests.SET_MODE_SOURCES
             + dests.BATCH_VALUE_DESTS
-            + dests.BATCH_BOOL_DESTS,
+            + dests.BATCH_BOOL_DESTS
+            + dests.SCHEMA_WRITE_DESTS,
         )
 
 
