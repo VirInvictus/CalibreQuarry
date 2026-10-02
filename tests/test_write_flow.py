@@ -318,8 +318,11 @@ class TestWriteVerbs(_TempDBCase):
         asort = con.execute("SELECT author_sort FROM books WHERE id=1").fetchone()[0]
         dirtied = [r[0] for r in con.execute("SELECT book FROM metadata_dirtied")]
         con.close()
-        self.assertEqual(names, ["Leckie, Ann", "Second Author"])
-        self.assertEqual(asort, "Leckie, Ann & Second Author")
+        # 1.26 cquarry stores NEW author rows comma-as-pipe (upstream's
+        # creation path) and the author_sort joins each row's flipped
+        # sort key, so even the comma-less author sorts "Author, Second".
+        self.assertEqual(names, ["Leckie| Ann", "Second Author"])
+        self.assertEqual(asort, "Leckie, Ann & Author, Second")
         self.assertEqual(dirtied, [1])
 
     def test_set_rating_and_range_check(self):
