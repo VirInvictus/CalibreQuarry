@@ -5,6 +5,27 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.55.2 onward, the live-seam drill)
+
+- **calibredb catalog's argv contract is unique and live-verified**: the
+  output filename is the FIRST token after the subcommand and every
+  option follows it, the library via `--library-path` (calibre 9.15).
+  The placement every other calibredb command accepts (`--library` after
+  the command) dies with "Must specify the catalog output filename
+  before any options". tests/test_integrate.py asserts the full command.
+- **Live-drill facts, calibre 9.15**: ebook-device's no-device answer
+  ("Unable to find a connected ebook reader.") rides stderr with rc 0 and
+  run device surfaces it; the BIBTEX catalog plugin omits any book
+  missing title/authors/publisher/pubdate (README caveat); `calibredb
+  fts_index reindex` only QUEUES extraction -- headless completion needs
+  upstream's --wait-for-completion (a `--wait` passthrough is the
+  recorded improvement candidate) or Calibre's next start. The drill ran
+  every other Phase 20 verb against real binaries (scratch libraries,
+  CALIBRE_CONFIG_DIRECTORY sandbox): clone, backup-metadata,
+  restore-database, fts-index, catalog-epub, customize, debug-tools all
+  verified end to end; run device without hardware is the one uncovered
+  seam.
+
 ## Programmer-facing contract notes (3.55.1 onward, the audit batch)
 
 - **Spawn-point refusals are now uniform**: run flush and run export moved

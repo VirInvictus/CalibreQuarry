@@ -1,5 +1,39 @@
 # CalibreQuarry Patch Notes
 
+# 3.55.2 (2026-10-02)
+
+### The live-seam drill: catalog's real argv contract, and device's hidden answer
+
+- **run catalog-epub and run catalog-bibtex could not work at all**: the
+  unit mocks proved our logic, but the live drill (real calibre 9.15
+  binaries, scratch libraries) showed calibredb catalog's hand-written
+  parser requires the output filename as the FIRST token after the
+  subcommand with every option after it, the library via --library-path.
+  Any option before the filename, including the --library placement every
+  other calibredb command accepts, dies with "Must specify the catalog
+  output filename before any options". Both verbs were verified end to end
+  against real libraries after the fix: a 21-entry EPUB catalog and a .bib
+  with the drill library's books. The unit pin now asserts the full
+  command shape. The drill also surfaced the BIBTEX plugin's own filter
+  (books missing title, authors, publisher, or pubdate are silently
+  absent from the .bib); that is upstream behavior, now a README caveat.
+- **run device no longer papers over upstream's answer**: ebook-device
+  exits 0 with "Unable to find a connected ebook reader." on stderr, and
+  the verb's empty-stdout fallback line was printing over it. The message
+  surfaces now. (A connected device remains the one seam the drill cannot
+  cover; no hardware was attached.)
+- Recorded, not fixed: fts-index reindex queues Calibre's extractor, and
+  headless extraction completes only via upstream's --wait-for-completion
+  or Calibre's next start (a --wait passthrough is the recorded
+  improvement candidate). The drill otherwise passed against real
+  binaries: clone (schema-only clone, non-empty refusal), backup-metadata
+  (the sidecar regenerated with the renamed title), restore-database (a
+  real rebuild that recreated the custom column and honored the sidecars
+  the backup-metadata run had just refreshed), fts-index enable/status/
+  queue, customize install/list/remove in a sandboxed config, and
+  debug-tools' kepubify/explode/implode round-trip.
+
+
 # 3.55.1 (2026-10-02)
 
 ### The seven-agent audit batch: verified bug fixes, doc truth, and 33 gap tests
