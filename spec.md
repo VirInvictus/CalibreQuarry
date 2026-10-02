@@ -229,7 +229,13 @@ it are never reported as never indexed. A missing sidecar is the
 
 - **Not a Calibre replacement.** It reads the database; it does not manage it.
 - **Read-only by default; writes are explicit, opt-in verbs only.** Every read mode (`--catalog`, `--stats`, `--search`, `--export`, …) opens `metadata.db` strictly `mode=ro`. The only write paths are the explicit `--set-*` / `--remove-book` verbs and the set-mode `--batch-*` verbs (§3.2), which route through cquarry's separate `WritableCalibreDB` module and require Calibre to be closed. Nothing in the read path can ever mutate the database.
-- **Not a converter.** It does not touch book files themselves.
+- **Not a converter in its own right.** The package's native surface never
+  rewrites a book file: every read mode and every in-package write verb touches
+  only `metadata.db` and its reports. What the toolkit does ship is
+  orchestration of Calibre's own headless tools: `run convert` drives
+  `ebook-convert` and registers the output through cquarry, `run polish` drives
+  `ebook-polish`, and the §5 companion scripts rewrite book files directly, all
+  explicitly outside the package guarantees this section states.
 - **Not a server.** It has no web interface, and the read surface has no network access. The one network-touching verb is `run backfill` at `--apply` (it drives `fetch-ebook-metadata`, an external calibre tool, per book); everything else runs entirely offline.
 
 These guarantees apply to the `cquarry_cli` package only. The companion scripts in §5 are explicitly outside this contract.

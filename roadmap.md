@@ -138,11 +138,12 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
 - [ ] reconcile verify-after-embed for EPUB pubdate (the 2026-09-16 box): a one-line
       post-embed read-back per written field, so `run flush` cannot silently no-op;
       parity-relevant flush honesty.
-- [ ] docs truth: spec.md:232 still says "Not a converter. It does not touch book files
+- [x] docs truth: spec.md:232 still says "Not a converter. It does not touch book files
       themselves" while §3 ships run convert/polish/cover and the §5 scripts rewrite
       files (found 2026-09-29 during the parity scoping). Fix the sentence to name the
       orchestration posture (the verb shells Calibre's own tools; the native surface
-      stays read-only).
+      stays read-only). *(Fixed 2026-10-02: §4 now draws the line as package
+      guarantees versus orchestration and script capabilities.)*
 - [ ] The L4 TUI set-write batch session stays GATED (risk surface); the program does
       not ungate it. The per-mode --format corners, the pypi tag policy, the
       fetch_library_codes SRU fallback, the run approve design, and the
