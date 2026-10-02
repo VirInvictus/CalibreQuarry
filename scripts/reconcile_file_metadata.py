@@ -34,6 +34,14 @@ With --apply (only the drifted books are touched):
   * DJVU: `djvused` sets the title and author (all DJVU's flat metadata holds);
     Calibre cannot embed DJVU.
 
+Verify after embed (2026-09-16 lesson, the #9177 Discourses book): a writer
+that exits 0 is not proof the file changed. `calibredb embed_metadata`
+reported success while the book's EPUB kept its original EPUB3 `dc:date`, so
+the file stayed drifted forever with nothing on the record. Every file an
+embed claimed is read back and re-diffed after the pass; files still drifted
+are reported as RESIDUAL rows (and fail the run), converting the silent no-op
+into an actionable finding.
+
 Usage:
     python3 reconcile_file_metadata.py                 # dry-run report, ./metadata.db
     python3 reconcile_file_metadata.py ~/Calibre       # a library directory
@@ -653,6 +661,34 @@ def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
     return False
 
 
+# --- verify -----------------------------------------------------------------
+
+
+def verify_embedded(
+    written: list[tuple[dict, Path, str]],
+) -> list[tuple[int, str, str, list[str]]]:
+    """Post-embed read-back: re-diff every file a writer claimed.
+
+    A zero exit is not proof of a write (the #9177 class: embed_metadata
+    exited 0 while the EPUB kept its own dc:date). Each claimed file is read
+    back and re-diffed against the same curated record; rows still drifted
+    come back as (book_id, title, fmt, fields) residuals for the report. An
+    unreadable read-back is itself a residual: silence would stand in for a
+    file whose post-write state nobody saw."""
+    residuals: list[tuple[int, str, str, list[str]]] = []
+    for rec, fpath, fmt in written:
+        fm = file_metadata(fpath, fmt)
+        if fm is None:
+            residuals.append(
+                (rec["id"], rec["title"], fmt, ["<unreadable after embed>"])
+            )
+            continue
+        drift = diff_fields(rec, fm, fmt)
+        if drift:
+            residuals.append((rec["id"], rec["title"], fmt, drift))
+    return residuals
+
+
 # --- driver ----------------------------------------------------------------
 
 
@@ -784,6 +820,7 @@ def main() -> int:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     drifted_calibredb: list[int] = []
+    calibredb_rows: list[tuple[dict, Path, str]] = []
     drifted_pdf: list[tuple[dict, Path]] = []
     drifted_djvu: list[tuple[dict, Path]] = []
     n_checked = n_insync = n_missing = 0
@@ -808,6 +845,7 @@ def main() -> int:
             drift_rows.append((rec["id"], rec["title"], fmt, drift))
             if fmt in CALIBREDB_FORMATS:
                 drifted_calibredb.append(rec["id"])
+                calibredb_rows.append((rec, fpath, fmt))
             elif fmt in EXIFTOOL_FORMATS:
                 drifted_pdf.append((rec, fpath))
             elif fmt in DJVUSED_FORMATS:
@@ -844,22 +882,51 @@ def main() -> int:
     # apply (only drifted)
     print(f"\n{BOLD}Applying{RESET} (database -> file)...")
     ok = True
+    # Files whose embed reported success get read back and re-diffed below;
+    # a writer's rc 0 is not proof the file changed.
+    verify_rows: list[tuple[dict, Path, str]] = []
     unique_ids = sorted(set(drifted_calibredb))
     if unique_ids:
         print(f"  embedding {len(unique_ids)} book(s) via calibredb...")
         ok = embed_calibredb(unique_ids, library_root) and ok
+        # Every attempted row verifies, not just the chunks that exited 0: a
+        # failed chunk may still have embedded some of its books, and the
+        # ones it missed are exactly the silent no-op class.
+        verify_rows.extend(calibredb_rows)
     if drifted_pdf:
         via = "exiftool, qpdf-repairing broken ones" if args.repair_pdf else "exiftool"
         print(f"  embedding {len(drifted_pdf)} PDF(s) via {via}...")
         for rec, fpath in drifted_pdf:
-            ok = embed_pdf(rec, fpath, repair=args.repair_pdf) and ok
+            if embed_pdf(rec, fpath, repair=args.repair_pdf):
+                verify_rows.append((rec, fpath, "PDF"))
+            else:
+                ok = False
     for rec, fpath in drifted_djvu:
         print(f"  djvused #{rec['id']} {fpath.name}")
-        ok = embed_djvu(rec, fpath) and ok
+        if embed_djvu(rec, fpath):
+            verify_rows.append((rec, fpath, "DJVU"))
+        else:
+            ok = False
+
+    residuals = verify_embedded(verify_rows) if verify_rows else []
+    if residuals:
+        ok = False
+        print(
+            f"\n{YELLOW}{BOLD}RESIDUAL ({len(residuals)}){RESET}: embed reported "
+            "success, but the file still differs (read-back re-diff):"
+        )
+        shown = residuals if not args.quiet else residuals[:40]
+        for bid, title, fmt, drift in shown:
+            print(f"  {CYAN}#{bid}{RESET} [{fmt}] {title[:48]}")
+            print(f"      still differs: {', '.join(drift)}")
+        if args.quiet and len(residuals) > len(shown):
+            print(f"  ... and {len(residuals) - len(shown)} more")
+
     if ok:
         print(
             f"\n{GREEN}DONE{RESET}: embedded {len(unique_ids)} via calibredb, "
-            f"{len(drifted_pdf)} PDF via exiftool, {len(drifted_djvu)} DJVU via djvused."
+            f"{len(drifted_pdf)} PDF via exiftool, {len(drifted_djvu)} DJVU via djvused; "
+            f"{len(verify_rows)} file(s) verified by read-back."
         )
         return 0
     print(f"\n{RED}COMPLETED WITH ERRORS{RESET}: some operations failed (see above).")

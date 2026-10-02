@@ -281,5 +281,37 @@ class TestPdfRepairCleanup(unittest.TestCase):
         self.assertTrue(ok)
 
 
+class TestVerifyEmbedded(unittest.TestCase):
+    """The post-embed read-back (the #9177 class): embed_metadata exited 0
+    while the EPUB kept its own dc:date, so the file stayed drifted forever
+    with nothing on the record. verify_embedded re-diffs every claimed file."""
+
+    def test_in_sync_after_embed_has_no_residual(self):
+        with mock.patch.object(rfm, "file_metadata", return_value=file_meta()) as fm:
+            residuals = rfm.verify_embedded([(db_record(), Path("/x/a.epub"), "EPUB")])
+        self.assertEqual(residuals, [])
+        fm.assert_called_once_with(Path("/x/a.epub"), "EPUB")
+
+    def test_pubdate_still_old_is_a_residual(self):
+        # The live shape: the writer reported success, the file kept its
+        # original EPUB3 dc:date, the pubdate still differs.
+        with mock.patch.object(
+            rfm, "file_metadata", return_value=file_meta(published="2010-10-25")
+        ):
+            residuals = rfm.verify_embedded([(db_record(), Path("/x/a.epub"), "EPUB")])
+        self.assertEqual(len(residuals), 1)
+        bid, title, fmt, drift = residuals[0]
+        self.assertEqual(bid, 1)
+        self.assertEqual(fmt, "EPUB")
+        self.assertEqual(drift, ["pubdate"])
+
+    def test_unreadable_read_back_is_a_residual(self):
+        # Silence must not stand in for a file nobody could re-read.
+        with mock.patch.object(rfm, "file_metadata", return_value=None):
+            residuals = rfm.verify_embedded([(db_record(), Path("/x/a.epub"), "EPUB")])
+        self.assertEqual(len(residuals), 1)
+        self.assertEqual(residuals[0][3], ["<unreadable after embed>"])
+
+
 if __name__ == "__main__":
     unittest.main()

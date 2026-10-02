@@ -890,6 +890,78 @@ class TestFlushIdTargets(unittest.TestCase):
         self.assertIn("could not parse", err)
         self.assertNotIn("Traceback", err)
 
+    def test_empty_intersection_is_named_apart_from_an_empty_queue(self):
+        # Flush honesty: with a target set and a non-empty queue holding none
+        # of the targets, the old cut printed "The OPF queue is empty", a lie
+        # about the queue's state.
+        self._dirty(1)
+        code, out, _ = self.run_cli(
+            "run", "flush", "--ids", "2", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("No targeted book is in the OPF queue", out)
+
+    def test_empty_queue_still_says_so(self):
+        code, out, _ = self.run_cli("run", "flush", "--db", str(self.db_path))
+        self.assertEqual(code, 0)
+        self.assertIn("The OPF queue is empty", out)
+
+    def test_apply_reports_queue_remaining(self):
+        # The test fixture's fake embed never drains metadata_dirtied, so the
+        # post-apply re-read must report what is still queued instead of
+        # silence.
+        self._dirty(1)
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch(
+                "subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        self.assertIn("Flushed 1 book(s)", out)
+        self.assertIn("still queued", out)
+
+    def test_apply_json_carries_queue_remaining(self):
+        self._dirty(1)
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch(
+                "subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--format",
+                "json",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        payload = json.loads(out)
+        self.assertEqual(payload["results"]["flushed"], 1)
+        self.assertEqual(payload["results"]["queue_remaining"], 1)
+
 
 class TestBackfillHardening(unittest.TestCase):
     """3.41.0: a backfill book that cannot apply is a COUNTED failure

@@ -485,7 +485,13 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
             return 2
         ids = [i for i in ids if i in selected]
     if not ids:
-        print("The OPF queue is empty: nothing to flush.")
+        # Two different empty states, named apart (the flush-honesty fix):
+        # an empty queue and an empty intersection with a target set read
+        # as the same old line, which lied about the queue's state.
+        if getattr(args, "ids", None) or getattr(args, "search", None):
+            print("No targeted book is in the OPF queue: nothing to flush.")
+        else:
+            print("The OPF queue is empty: nothing to flush.")
         return 0
     if not shutil.which("calibredb"):
         print("ERROR: calibredb is not on PATH.", file=sys.stderr)
@@ -533,10 +539,24 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
             )
             return 1
         done += len(c)
+    # Post-apply honesty: re-read the queue so a calibredb run that exited 0
+    # without draining it (or dirtied work that raced the run) is reported,
+    # not silent.
+    remaining = db.get_dirtied_books()
     if as_json:
-        print(json.dumps({"results": {"flushed": done}}, indent=1))
+        print(
+            json.dumps(
+                {"results": {"flushed": done, "queue_remaining": len(remaining)}},
+                indent=1,
+            )
+        )
     else:
         print(f"Flushed {done} book(s): embedded metadata regenerated.")
+        if remaining:
+            print(
+                f"Queue after flush: {len(remaining)} book(s) still queued "
+                "(the queue drains on Calibre's next start too)."
+            )
     return 0
 
 

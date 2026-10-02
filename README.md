@@ -98,9 +98,12 @@ metadata-mutating verbs) a `--backup-dir` outside the library. A
 book that already has the requested conversion target is skipped at
 plan time ("already has TARGET"; the file stands untouched), the
 flush passes ids to `calibredb embed_metadata` space-separated (a
-hyphen range would cover every book between its endpoints), and the
-closed-Calibre pgrep guard is fail-closed: a timeout counts as
-Calibre running.
+hyphen range would cover every book between its endpoints), flush
+names its two empty states apart ("The OPF queue is empty" versus
+"No targeted book is in the OPF queue") and reports the queue it
+leaves behind after `--apply` (`queue_remaining` in the JSON form),
+and the closed-Calibre pgrep guard is fail-closed: a timeout counts
+as Calibre running.
 
 ```bash
 # Plan conversions for a wing, then run them
