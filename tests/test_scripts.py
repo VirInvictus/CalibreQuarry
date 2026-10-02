@@ -652,6 +652,54 @@ class TestFetchMissesWorklist(unittest.TestCase):
             self.assertFalse(path.exists())
 
 
+class TestFetchWorkFallback(unittest.TestCase):
+    """The title/author SRU fallback (--sru-fallback): the query form the
+    September 2026 hand pass used to recover 15 of 17 ISBN misses, a cache
+    key that cannot collide with an ISBN entry, and targets that carry the
+    author the fallback query needs."""
+
+    def test_work_query_shape(self):
+        self.assertEqual(
+            fetch_library_codes.work_query("Discourses", "Epictetus"),
+            'bath.title="Discourses" and bath.author="Epictetus"',
+        )
+
+    def test_work_cache_key_normalizes_and_never_collides_with_isbn(self):
+        f = fetch_library_codes
+        key = f.work_cache_key("  The   Hobbit ", "J.R.R. Tolkien")
+        self.assertEqual(key, f.work_cache_key("The Hobbit", "j.r.r. tolkien"))
+        self.assertNotEqual(key, "9780261102214")
+        self.assertTrue(key.startswith("work:"))
+
+    def test_load_targets_carries_authors_in_link_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = pathlib.Path(tmp) / "metadata.db"
+            con = sqlite3.connect(db)
+            con.executescript(
+                """
+                CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT);
+                CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+                CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
+                CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+                CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT);
+                CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT, val TEXT);
+                """
+            )
+            con.execute("INSERT INTO books VALUES (1, 'Discourses')")
+            con.execute("INSERT INTO authors VALUES (1, 'Epictetus')")
+            con.execute("INSERT INTO books_authors_link (book, author) VALUES (1, 1)")
+            con.execute("INSERT INTO tags VALUES (1, 'NonFic.Philosophy')")
+            con.execute("INSERT INTO books_tags_link (book, tag) VALUES (1, 1)")
+            con.execute(
+                "INSERT INTO identifiers (book, type, val) VALUES (1, 'isbn', '9780465032001')"
+            )
+            con.commit()
+            con.close()
+            targets = fetch_library_codes.load_targets(str(db), [1], None)
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0]["authors"], ["Epictetus"])
+
+
 class TestFetchWriteIdentifiers(unittest.TestCase):
     """The write path goes through cquarry's write module (dirtied queue,
     last_modified) and waits out concurrent writers."""

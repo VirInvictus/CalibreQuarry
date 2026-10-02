@@ -30,6 +30,15 @@ and small-press releases, translations and TTRPG material often have no record.
 Run in the default dry-run mode first and read the per-branch hit rate before
 committing to a full pass.
 
+Title/author fallback (`--sru-fallback`): the ISBN index is the narrowest door
+into the catalogue. The September 2026 hand pass showed most "no LoC record"
+ISBN misses were nothing of the kind: 15 of 17 misses resolved at work level
+through a `bath.title=` + `bath.author=` query (only a German Analysis 3 and a
+Chinese Kodaira title have no LoC record at all). With the flag, a clean ISBN
+miss gets one paced title/author query; hits are tagged work-level in the
+report because the classification belongs to the matched work, not necessarily
+this edition, and deserve a glance before they are trusted.
+
 Run from the library directory:
     python3 fetch_library_codes.py                    # dry run, whole library
     python3 fetch_library_codes.py --sample 200       # dry run, random sample
@@ -111,12 +120,33 @@ def save_cache(path: str, cache: dict[str, dict]) -> None:
 # --------------------------------------------------------------------------
 # LoC SRU
 # --------------------------------------------------------------------------
-def sru_url(isbn: str, max_records: int = 5) -> str:
-    query = urllib.parse.quote(f"bath.isbn={isbn}")
+def sru_url(cql: str, max_records: int = 5) -> str:
+    query = urllib.parse.quote(cql)
     return (
         f"{SRU_BASE}?version=1.1&operation=searchRetrieve&recordSchema=mods"
         f"&maximumRecords={max_records}&query={query}"
     )
+
+
+def isbn_query(isbn: str) -> str:
+    return f"bath.isbn={isbn}"
+
+
+def work_query(title: str, author: str) -> str:
+    """The work-level CQL the September 2026 hand pass used to recover 15 of
+    17 ISBN misses: the title and first author against LoC's title/author
+    indexes."""
+    return f'bath.title="{title}" and bath.author="{author}"'
+
+
+def work_cache_key(title: str, author: str) -> str:
+    """Cache key for a work-level lookup. Distinct from any ISBN key, and
+    normalized so the same title asked twice shares one entry."""
+
+    def norm(s: str) -> str:
+        return " ".join((s or "").split()).lower()
+
+    return f"work:{norm(title)}|{norm(author)}"
 
 
 def parse_mods(raw: bytes) -> dict[str, str]:
@@ -149,9 +179,10 @@ class SRUDiagnostic(Exception):
 
 
 def fetch_codes(
-    isbn: str, timeout: int, retries: int = 3, *, strict: bool = False
+    cql: str, timeout: int, retries: int = 3, *, strict: bool = False
 ) -> dict[str, str] | None:
-    """Query LoC for one ISBN. Returns a dict (possibly empty) or None on failure.
+    """Query LoC with one CQL string. Returns a dict (possibly empty) or None
+    on failure.
 
     SRU diagnostics are retried like network errors rather than treated as fatal.
     LoC intermittently answers a perfectly good query with "Query feature
@@ -169,7 +200,7 @@ def fetch_codes(
     delay = 5.0
     for attempt in range(retries):
         try:
-            with urllib.request.urlopen(sru_url(isbn), timeout=timeout) as resp:
+            with urllib.request.urlopen(sru_url(cql), timeout=timeout) as resp:
                 raw = resp.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise SRUDiagnostic(
@@ -227,6 +258,13 @@ def load_targets(
             "SELECT bt.book, t.name FROM books_tags_link bt JOIN tags t ON t.id = bt.tag"
         ):
             booktags.setdefault(bid, []).append(tname)
+        # First author (link order) drives the work-level SRU fallback.
+        bookauthors: dict[int, list[str]] = {}
+        for bid, aname in con.execute(
+            "SELECT bal.book, a.name FROM books_authors_link bal "
+            "JOIN authors a ON a.id = bal.author"
+        ):
+            bookauthors.setdefault(bid, []).append(aname)
     finally:
         con.close()
 
@@ -243,6 +281,7 @@ def load_targets(
                 "id": r[0],
                 "title": r[1],
                 "isbn": r[2],
+                "authors": bookauthors.get(r[0], []),
                 "tag": display_tag(tags, prefixes),
                 "tags": tags,
                 "has_lcc": bool(r[3]),
@@ -404,6 +443,13 @@ def report(results: list[dict], quiet: bool, want_ddc: bool = False) -> None:
         if n
         else "nothing queried"
     )
+    work_hits = sum(1 for r in results if r.get("lcc") and r.get("via") == "work")
+    if work_hits:
+        print(
+            f"  of the {got} LCC hit(s), {work_hits} came via the title/author "
+            "fallback (work-level: the matched work's class; verify against "
+            "this edition)"
+        )
     if want_ddc and n:
         ddc_got = sum(1 for r in results if r.get("ddc"))
         print(f"DDC found for {ddc_got} ({ddc_got / n:.0%})")
@@ -457,6 +503,14 @@ def main() -> int:
     ap.add_argument("--limit", type=int, help="stop after N queries")
     ap.add_argument(
         "--refresh", action="store_true", help="re-query books that already have lcc"
+    )
+    ap.add_argument(
+        "--sru-fallback",
+        dest="sru_fallback",
+        action="store_true",
+        help="after a clean ISBN miss, try one title/author SRU query "
+        "(work-level: the matched work's classification, not necessarily "
+        "this edition's; hit lines and the report say so)",
     )
     ap.add_argument(
         "--delay",
@@ -552,7 +606,9 @@ def main() -> int:
                 src = "cache"
             else:
                 try:
-                    codes = fetch_codes(isbn, args.timeout, strict=(queried == 0))
+                    codes = fetch_codes(
+                        isbn_query(isbn), args.timeout, strict=(queried == 0)
+                    )
                 except SRUDiagnostic as e:
                     ui.tqdm.write(
                         ui.error(
@@ -592,9 +648,45 @@ def main() -> int:
                     cache[isbn] = codes
                     if queried % 25 == 0:
                         save_cache(args.cache, cache)
+                if not codes and args.sru_fallback and t.get("authors"):
+                    # A clean ISBN miss: one paced title/author query (the
+                    # 2026-09 hand pass recovered 15 of 17 misses this way).
+                    # A fallback failure counts toward the abort counter, but
+                    # the book itself stays a miss, never an ERR row.
+                    wtitle, wauthor = t["title"], t["authors"][0]
+                    wkey = work_cache_key(wtitle, wauthor)
+                    wcached = None if args.no_cache else cache.get(wkey)
+                    if wcached is not None:
+                        if wcached:
+                            codes = wcached
+                            src = "cache-work"
+                    else:
+                        time.sleep(args.delay)
+                        wcodes = fetch_codes(work_query(wtitle, wauthor), args.timeout)
+                        queried += 1
+                        if wcodes is None:
+                            consecutive_failures += 1
+                            if consecutive_failures >= ABORT_AFTER_CONSECUTIVE_FAILURES:
+                                ui.tqdm.write(
+                                    ui.error(
+                                        f"\nSTOPPING: {consecutive_failures} "
+                                        "consecutive failures. LoC is refusing "
+                                        "us; writing what we have, resume later."
+                                    ),
+                                    file=sys.stderr,
+                                )
+                                aborted = True
+                                break
+                        else:
+                            if not args.no_cache:
+                                cache[wkey] = wcodes
+                            if wcodes:
+                                codes = wcodes
+                                src = "loc-work"
 
             lcc, ddc = codes.get("lcc"), codes.get("ddc")
-            results.append({**t, "lcc": lcc, "ddc": ddc})
+            via = "work" if src in ("loc-work", "cache-work") else "isbn"
+            results.append({**t, "lcc": lcc, "ddc": ddc, "via": via})
 
             if lcc:
                 writes.append((t["id"], "lcc", lcc))
@@ -607,9 +699,11 @@ def main() -> int:
             shown = lcc or (ddc if want_ddc else None)
             if shown:
                 if not args.quiet:
+                    marker = " (work-level)" if via == "work" else ""
                     ui.tqdm.write(
                         ui.success(
-                            f"  [{i}/{len(targets)}] HIT  {shown:<24} #{t['id']} {t['title'][:40]}"
+                            f"  [{i}/{len(targets)}] HIT  {shown:<24}{marker} "
+                            f"#{t['id']} {t['title'][:40]}"
                         )
                     )
             elif not args.quiet:
@@ -619,7 +713,7 @@ def main() -> int:
                     )
                 )
 
-            if src == "loc":
+            if src in ("loc", "loc-work"):
                 time.sleep(args.delay)
     except KeyboardInterrupt:
         ui.tqdm.write(
