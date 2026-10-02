@@ -828,6 +828,7 @@ def build_parser() -> argparse.ArgumentParser:
             "catalog-epub",
             "catalog-bibtex",
             "customize",
+            "debug-tools",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -844,7 +845,9 @@ def build_parser() -> argparse.ArgumentParser:
         "the dirtied queue; --status, --enable), catalog-epub / "
         "catalog-bibtex (calibredb's catalog plugins over --dest), "
         "customize (calibre-customize: headless plugin install/enable/"
-        "disable/list)",
+        "disable/list), debug-tools (the curated calibre-debug subset: "
+        "explode/implode/diff/kepubify/un-kepubify/inspect-mobi; never "
+        "-e/--exec-file)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
@@ -892,6 +895,56 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="NAME",
         help="customize: disable the named plugin",
+    )
+    run_p.add_argument(
+        "--explode",
+        dest="explode",
+        nargs=2,
+        metavar=("FILE", "DIR"),
+        default=None,
+        help="debug-tools: explode a book into editable parts (creates DIR; "
+        "the file is untouched)",
+    )
+    run_p.add_argument(
+        "--implode",
+        dest="implode",
+        nargs=2,
+        metavar=("DIR", "FILE"),
+        default=None,
+        help="debug-tools: rebuild FILE from a previous explode's DIR",
+    )
+    run_p.add_argument(
+        "--diff",
+        dest="diff",
+        nargs=2,
+        metavar=("OLD", "NEW"),
+        default=None,
+        help="debug-tools: calibre's diff tool over two files",
+    )
+    run_p.add_argument(
+        "--kepubify",
+        dest="kepubify",
+        nargs="+",
+        metavar="FILE",
+        default=None,
+        help="debug-tools: KEPUB conversion without a full conversion "
+        "(writes FILE.kepub.epub beside it)",
+    )
+    run_p.add_argument(
+        "--un-kepubify",
+        dest="un_kepubify",
+        nargs="+",
+        metavar="FILE",
+        default=None,
+        help="debug-tools: the reverse KEPUB conversion",
+    )
+    run_p.add_argument(
+        "--inspect-mobi",
+        dest="inspect_mobi",
+        nargs="+",
+        metavar="FILE",
+        default=None,
+        help="debug-tools: MOBI structure dump",
     )
     run_p.add_argument(
         "--enable",

@@ -147,6 +147,11 @@ cquarry run fts-index --apply --db ~/Calibre/metadata.db
 cquarry run customize --add-plugin ~/Downloads/Bindery\ Repair.zip --apply
 cquarry run customize --list-plugins
 
+# The curated calibre-debug subset (explode/implode/diff/kepubify/
+# un-kepubify/inspect-mobi; -e/--exec-file is not a verb and never will be)
+cquarry run debug-tools --kepubify book.epub          # dry run: the command
+cquarry run debug-tools --kepubify book.epub --apply
+
 # Catalog through calibredb's own plugins (the CSV/XML half is the
 # native --catalog; the extension decides the plugin and is enforced,
 # because calibredb silently falls back to EPUB otherwise)

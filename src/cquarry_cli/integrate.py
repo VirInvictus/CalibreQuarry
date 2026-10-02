@@ -1195,11 +1195,108 @@ def run_customize(args) -> int:
     return 0
 
 
+_DEBUG_TOOLS = (
+    "explode",
+    "implode",
+    "diff",
+    "kepubify",
+    "un-kepubify",
+    "inspect-mobi",
+)
+
+
+def run_debug_tools(args) -> int:
+    """`run debug-tools`: the curated calibre-debug subset (explode, implode,
+    diff, kepubify, un-kepubify, inspect-mobi). The -e/--exec-file surface
+    stays out on purpose: arbitrary code execution is not a verb. The file
+    mutators are dry-run by default with the closed-Calibre guard at
+    --apply; explode/kepubify/un-kepubify create new files (originals
+    untouched) and implode's source dir is the content of record, so no
+    --backup-dir is demanded (the trash precedent for verb-owned backup
+    rules). diff and inspect-mobi are reads and run immediately."""
+    actions = {
+        "explode": getattr(args, "explode", None),
+        "implode": getattr(args, "implode", None),
+        "diff": getattr(args, "diff", None),
+        "kepubify": getattr(args, "kepubify", None),
+        "un-kepubify": getattr(args, "un_kepubify", None),
+        "inspect-mobi": getattr(args, "inspect_mobi", None),
+    }
+    chosen = [name for name, value in actions.items() if value]
+    if not chosen:
+        print(
+            "ERROR: run debug-tools needs exactly one of --explode FILE DIR, "
+            "--implode DIR FILE, --diff OLD NEW, --kepubify FILE, "
+            "--un-kepubify FILE, --inspect-mobi FILE.",
+            file=sys.stderr,
+        )
+        return 2
+    if len(chosen) > 1:
+        print(
+            "ERROR: run debug-tools takes exactly one action, got: "
+            f"{', '.join('--' + c for c in chosen)}.",
+            file=sys.stderr,
+        )
+        return 2
+    action = chosen[0]
+    targets = list(actions[action])
+    apply = bool(getattr(args, "apply", False))
+    mutating = action in ("explode", "implode", "kepubify", "un-kepubify")
+
+    # Existence checks at the plan door: a typo'd path is a usage error
+    # however the verb is run.
+    for path in targets:
+        if not Path(path).exists():
+            print(f"ERROR: {action}: no such path: {path}", file=sys.stderr)
+            return 2
+    cmd = ["calibre-debug"]
+    if action == "explode":
+        cmd += ["--explode-book", targets[0], targets[1]]
+    elif action == "implode":
+        cmd += ["--implode-book", targets[0], targets[1]]
+    elif action == "diff":
+        cmd += ["--diff", targets[0], targets[1]]
+    elif action == "kepubify":
+        cmd += ["--kepubify", *targets]
+    elif action == "un-kepubify":
+        cmd += ["--un-kepubify", *targets]
+    else:
+        cmd += ["--inspect-mobi", *targets]
+
+    if mutating and not apply:
+        print(f"debug-tools plan: {' '.join(cmd)}")
+        print(
+            "Dry run: nothing executed. --apply runs it (Calibre closed "
+            "when the targets live in the library)."
+        )
+        return 0
+    if mutating and _calibre_running():
+        print("ERROR: Calibre is running; close it before --apply.", file=sys.stderr)
+        return 1
+    if not shutil.which("calibre-debug"):
+        print("ERROR: calibre-debug is not on PATH.", file=sys.stderr)
+        return 2
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if proc.returncode != 0:
+        print(
+            f"ERROR: calibre-debug {action} failed: {proc.stderr[:300]}",
+            file=sys.stderr,
+        )
+        return 1
+    if proc.stdout.strip():
+        print(proc.stdout.strip())
+    else:
+        print(f"calibre-debug {action} completed.")
+    return 0
+
+
 def dispatch_headless(args) -> int:
     """The no-library run verbs: routed by dispatch_run before any database
-    resolution, because none of them opens one. customize today;
-    debug-tools and device land with their verbs."""
-    return run_customize(args)
+    resolution, because none of them opens one. customize and debug-tools
+    today; device lands with its verb."""
+    if args.phase == "customize":
+        return run_customize(args)
+    return run_debug_tools(args)
 
 
 def run_catalog(db, args, *, apply: bool, take_backup=None) -> int:

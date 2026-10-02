@@ -1737,5 +1737,116 @@ class TestCustomize(unittest.TestCase):
         self.assertIn("calibre-customize is not on PATH", err)
 
 
+class TestDebugTools(unittest.TestCase):
+    """`run debug-tools`: the curated calibre-debug subset. No library; the
+    -e/--exec-file surface is deliberately unparseable."""
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with contextlib.redirect_stdout(out):
+                code = main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def setUp(self):
+        pg = mock.patch("cquarry_cli.integrate._calibre_running", return_value=False)
+        pg.start()
+        self.addCleanup(pg.stop)
+
+    def test_no_action_is_a_usage_error(self):
+        code, _, err = self.run_cli("run", "debug-tools")
+        self.assertEqual(code, 2)
+        self.assertIn("exactly one of", err)
+
+    def test_two_actions_refused(self):
+        code, _, err = self.run_cli(
+            "run", "debug-tools", "--diff", "a", "b", "--diff", "c", "d"
+        )
+        self.assertEqual(code, 2)
+
+    def test_exec_file_is_not_a_verb(self):
+        # The parser does not offer it: argparse refuses the unknown flag
+        # with its own usage error (exit 2), which is the point.
+        with self.assertRaises(SystemExit) as cm:
+            self.run_cli("run", "debug-tools", "--exec-file", "x.py")
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_missing_path_refused_at_the_plan_door(self):
+        code, _, err = self.run_cli(
+            "run", "debug-tools", "--kepubify", "/no/such/book.epub"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("no such path", err)
+
+    def test_dry_run_prints_the_exact_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp) / "book.epub"
+            book.write_bytes(b"epub")
+            code, out, _ = self.run_cli("run", "debug-tools", "--kepubify", str(book))
+        self.assertEqual(code, 0)
+        self.assertIn("debug-tools plan: calibre-debug --kepubify", out)
+
+    def test_apply_drives_calibre_debug(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp) / "book.epub"
+            book.write_bytes(b"epub")
+
+            def fake_run(cmd, capture_output, text, timeout):
+                calls.append(cmd)
+                return mock.Mock(returncode=0, stdout="converted", stderr="")
+
+            with (
+                mock.patch(
+                    "cquarry_cli.integrate.shutil.which",
+                    return_value="/usr/bin/calibre-debug",
+                ),
+                mock.patch("subprocess.run", side_effect=fake_run),
+            ):
+                code, out, _ = self.run_cli(
+                    "run", "debug-tools", "--kepubify", str(book), "--apply"
+                )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls[0], ["calibre-debug", "--kepubify", str(book)])
+
+    def test_diff_is_a_read_and_runs_without_apply(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.epub"
+            b = Path(tmp) / "b.epub"
+            a.write_bytes(b"a")
+            b.write_bytes(b"b")
+
+            def fake_run(cmd, capture_output, text, timeout):
+                calls.append(cmd)
+                return mock.Mock(returncode=0, stdout="", stderr="")
+
+            with (
+                mock.patch(
+                    "cquarry_cli.integrate.shutil.which",
+                    return_value="/usr/bin/calibre-debug",
+                ),
+                mock.patch("subprocess.run", side_effect=fake_run),
+            ):
+                code, _, _ = self.run_cli(
+                    "run", "debug-tools", "--diff", str(a), str(b)
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0], ["calibre-debug", "--diff", str(a), str(b)])
+
+    def test_apply_refuses_a_live_calibre(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            book = Path(tmp) / "book.epub"
+            book.write_bytes(b"epub")
+            with mock.patch(
+                "cquarry_cli.integrate._calibre_running", return_value=True
+            ):
+                code, _, err = self.run_cli(
+                    "run", "debug-tools", "--kepubify", str(book), "--apply"
+                )
+        self.assertEqual(code, 1)
+        self.assertIn("Calibre is running", err)
+
+
 if __name__ == "__main__":
     unittest.main()

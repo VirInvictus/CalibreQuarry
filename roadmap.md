@@ -132,9 +132,12 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       library (routed before any database resolution), exactly one action per
       invocation, mutators dry-run by default with --apply behind the closed-Calibre
       guard.)*
-- [ ] **run debug-tools** (curated subset, not a passthrough): calibre-debug
+- [x] **run debug-tools** (curated subset, not a passthrough): calibre-debug
       explode/implode/diff/kepubify/un-kepubify/inspect-mobi (src/calibre/debug.py:60-206).
       The -e/--exec-file surface stays out: arbitrary code execution is not a verb.
+      *(Shipped 2026-10-02: the parser never offers the exec surface, the mutators
+      are dry-run by default with --apply behind the closed-Calibre guard, and the
+      reads (diff, inspect-mobi) run immediately.)*
 - [ ] **run device** (USBMS subset): ebook-device ls/df/books/mkdir/cp/cat/rm/touch
       (src/calibre/devices/cli.py:247-390). MTP and the wireless Calibre-Companion
       stack are process-bound and stay excluded from parity.
