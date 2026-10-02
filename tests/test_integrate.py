@@ -1086,5 +1086,93 @@ class TestBackfillHardening(unittest.TestCase):
         self.assertEqual(self._identifiers(), [])
 
 
+class TestBackupMetadata(_IntegrateCase):
+    """`run backup-metadata`: calibredb backup_metadata over the dirtied
+    queue (the headless form of the daemon sidecar job). Pairs with run
+    flush: flush embeds into the format files, this refreshes the sidecars.
+    The queue read is cquarry's (get_dirtied_books); the missing-binary
+    seam refusal and the backup requirement follow the flush precedent."""
+
+    def _dirty(self, *ids):
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS metadata_dirtied (book INT, "
+            "seq INTEGER PRIMARY KEY AUTOINCREMENT, format TEXT, "
+            "timestamp TIMESTAMP)"
+        )
+        for bid in ids:
+            con.execute("INSERT INTO metadata_dirtied (book) VALUES (?)", (bid,))
+        con.commit()
+        con.close()
+
+    def test_empty_queue_is_an_honest_no_op(self):
+        code, out, _ = self.run_cli("run", "backup-metadata", "--db", str(self.db_path))
+        self.assertEqual(code, 0)
+        self.assertIn("The OPF queue is empty", out)
+
+    def test_dry_run_lists_the_queue_and_runs_nothing(self):
+        self._dirty(1, 3)
+        code, out, _ = self.run_cli("run", "backup-metadata", "--db", str(self.db_path))
+        self.assertEqual(code, 0)
+        self.assertIn("backup-metadata plan (2)", out)
+        self.assertIn("Dry run", out)
+
+    def test_all_widens_to_every_book(self):
+        code, out, _ = self.run_cli(
+            "run", "backup-metadata", "--all", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("backup-metadata plan (3)", out)
+
+    def test_apply_demands_backup_dir(self):
+        self._dirty(1)
+        code, _, err = self.run_cli(
+            "run", "backup-metadata", "--apply", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("--backup-dir", err)
+
+    def test_missing_calibredb_is_a_setup_refusal(self):
+        self._dirty(1)
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli(
+                "run",
+                "backup-metadata",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("calibredb is not on PATH", err)
+
+    def test_apply_drives_calibredb_with_the_library_directory(self):
+        self._dirty(1, 2)
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            code, out, _ = self.run_cli(
+                "run",
+                "backup-metadata",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        self.assertIn("Regenerated sidecar OPFs for 2 book(s)", out)
+        cmd = calls[0]
+        self.assertEqual(cmd[:2], ["calibredb", "backup_metadata"])
+        self.assertIn("--library", cmd)
+        # The --all widening rides its own flag, never a book list.
+        self.assertNotIn("--all", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

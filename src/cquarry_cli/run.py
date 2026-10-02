@@ -1533,6 +1533,7 @@ INTEGRATE_PHASES = (
     "flush",
     "backfill",
     "trash",
+    "backup-metadata",
 )
 
 

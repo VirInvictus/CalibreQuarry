@@ -726,6 +726,55 @@ def _apply_backfill(db, plan: dict, opf_path: str, args) -> bool:
     return True
 
 
+def plan_backup_metadata(db, args) -> list[dict]:
+    """One sidecar-OPF regeneration per queued book; --all widens to every
+    book (upstream marks the whole library dirty first, so a full pass is a
+    deliberate flood, not a refresh)."""
+    if getattr(args, "all", False):
+        return [
+            {"book": bid, "action": "backup_opf", "detail": "--all"}
+            for bid in sorted(db.all_ids())
+        ]
+    return [{"book": bid, "action": "backup_opf"} for bid in db.get_dirtied_books()]
+
+
+def run_backup_metadata(db, args, *, apply: bool, take_backup=None) -> int:
+    """`run backup-metadata`: calibredb backup_metadata, the headless form of
+    the daemon job cquarry's metadata_dirtied feed exists for. Pairs with
+    run flush: flush embeds into the format files, this refreshes the
+    sidecar OPFs. Dry run lists the queue; --apply demands the same rails
+    as flush (Calibre closed, backup outside the library) because calibre
+    owns the queue rows it consumes."""
+    try:
+        plans = plan_backup_metadata(db, args)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    if not plans and not getattr(args, "all", False):
+        print("The OPF queue is empty: nothing to regenerate.")
+        return 0
+    if not apply:
+        return _print_plan(plans, args, "backup-metadata plan")
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
+    if take_backup and (rc := take_backup()):
+        return rc
+    library = str(Path(db.db_path).resolve().parent)
+    cmd = ["calibredb", "backup_metadata", "--library", library]
+    if getattr(args, "all", False):
+        cmd.append("--all")
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    if proc.returncode != 0:
+        print(f"ERROR: backup_metadata failed: {proc.stderr[:300]}", file=sys.stderr)
+        return 1
+    print(
+        f"Regenerated sidecar OPFs for {len(plans)} book(s)"
+        + (" (--all)." if getattr(args, "all", False) else ".")
+    )
+    return 0
+
+
 def _print_plan(plans: list[dict], args, title: str) -> int:
     if getattr(args, "format", None) == "json":
         print(json.dumps({"plan": plans}, indent=2, ensure_ascii=False))
@@ -875,7 +924,15 @@ def dispatch_integrate(args) -> int:
     verbs_need_targets = {"convert", "polish", "cover", "export", "backfill"}
     # backfill mutates metadata.db at --apply too (matrix-C finding:
     # it was the one write verb escaping the backup requirement).
-    needs_backup = {"convert", "polish", "cover", "merge", "flush", "backfill"}
+    needs_backup = {
+        "convert",
+        "polish",
+        "cover",
+        "merge",
+        "flush",
+        "backfill",
+        "backup-metadata",
+    }
 
     # Usage guards BEFORE find_db (dispatch_run's rule): a missing --ids
     # is a usage error (exit 2) however resolvable the library is, and a
@@ -930,6 +987,7 @@ def dispatch_integrate(args) -> int:
             "export": run_export,
             "flush": run_flush,
             "backfill": run_backfill,
+            "backup-metadata": run_backup_metadata,
         }[args.phase]
         backup = take_backup if (apply and args.phase in needs_backup) else None
         return verb(db, args, apply=apply, take_backup=backup)

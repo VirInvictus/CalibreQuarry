@@ -88,7 +88,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 ### The integration verbs (Phase 19 C)
 
 `run convert`, `run polish`, `run cover`, `run export`, `run merge`,
-`run flush`, and `run backfill` drive the external tools
+`run flush`, `run backfill`, and `run backup-metadata` drive the external tools
 (`ebook-convert`, `ebook-polish`, `calibredb`,
 `fetch-ebook-metadata`) over a resolved set and register the outcome
 through cquarry's write module; `run trash` (below) is the pure
@@ -116,6 +116,11 @@ cquarry run merge --keeper 42 --duplicate 43 --apply     --backup-dir ~/backups 
 
 # Regenerate embedded metadata for everything Calibre has queued
 cquarry run flush --db ~/Calibre/metadata.db
+
+# Refresh the per-book sidecar OPFs for the same queue (the headless
+# form of the daemon job; --all widens to every book)
+cquarry run backup-metadata --db ~/Calibre/metadata.db
+cquarry run backup-metadata --all --apply --backup-dir ~/backups --db ~/Calibre/metadata.db
 
 # Review what the merges moved aside, then expire what is older than
 # 14 days (the dry run is the listing)

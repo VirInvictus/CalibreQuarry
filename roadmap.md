@@ -91,10 +91,13 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
 
 ### The unwired headless verbs (each a `run` verb around a Calibre binary; all headless upstream today, src/calibre/linux.py:23-42)
 
-- [ ] **run backup-metadata**: calibredb backup_metadata regenerates per-book OPF
+- [x] **run backup-metadata**: calibredb backup_metadata regenerates per-book OPF
       sidecars for the dirtied queue; the headless form of the daemon job cquarry's
       `metadata_dirtied` feed exists for. Pairs with run flush: flush embeds into the
-      format files, this refreshes the sidecars.
+      format files, this refreshes the sidecars. *(Shipped 2026-10-02: dry run lists
+      the queue, --apply behind the flush rails (Calibre closed, out-of-tree backup),
+      an honest empty-queue no-op, and `--all` for the deliberate whole-library
+      flood.)*
 - [ ] **run restore-database**: calibredb restore_database rebuilds a metadata.db from
       stored OPFs (upstream src/calibre/db/restore.py). Refuses to write an existing
       metadata.db without an explicit --target/--force; the NATIVE rebuild stays

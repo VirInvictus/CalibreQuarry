@@ -821,6 +821,7 @@ def build_parser() -> argparse.ArgumentParser:
             "flush",
             "backfill",
             "trash",
+            "backup-metadata",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -830,13 +831,21 @@ def build_parser() -> argparse.ArgumentParser:
         "executes): convert (ebook-convert), polish (ebook-polish), cover "
         "(set/remove cover), export (calibredb), merge (duplicate into "
         "keeper), flush (embed the OPF queue), backfill (metadata source), "
-        "trash (list/empty/expire .caltrash)",
+        "trash (list/empty/expire .caltrash), backup-metadata (regenerate "
+        "sidecar OPFs over the dirtied queue)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
         ("--ids", "target set: explicit book ids (ID[,ID...])"),
     ):
         run_p.add_argument(flag, default=None, help=help_text)
+    run_p.add_argument(
+        "--all",
+        dest="all",
+        action="store_true",
+        help="backup-metadata: regenerate sidecar OPFs for EVERY book "
+        "(the default is the dirtied queue only)",
+    )
     run_p.add_argument(
         "--empty",
         dest="empty",
