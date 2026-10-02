@@ -1381,6 +1381,11 @@ def run_device(args) -> int:
         return 1
     if proc.stdout.strip():
         print(proc.stdout.strip())
+    elif proc.stderr.strip():
+        # Upstream's no-device answer ("Unable to find a connected ebook
+        # reader.") rides stderr with rc 0: surface it, never paper over it
+        # with a bare "completed." (live-drill finding, calibre 9.15).
+        print(proc.stderr.strip())
     else:
         print(f"ebook-device {command} completed.")
     return 0
@@ -1439,13 +1444,20 @@ def run_catalog(db, args, *, apply: bool, take_backup=None) -> int:
     if not shutil.which("calibredb"):
         print("ERROR: calibredb is not on PATH.", file=sys.stderr)
         return 2
+    # calibredb catalog's hand-written parser enforces a shape no other
+    # command uses (verified live against calibre 9.15): the output
+    # filename must be the FIRST token after the subcommand and every
+    # option -- the library's own --library-path included -- comes after
+    # it. Any option before the filename dies with "Must specify the
+    # catalog output filename before any options", and the placement every
+    # other verb uses (--library after the subcommand) dies with it.
     proc = subprocess.run(
         [
             "calibredb",
             "catalog",
-            "--library",
-            library,
             str(dest),
+            "--library-path",
+            library,
             "--ids",
             ",".join(str(i) for i in ids),
         ],

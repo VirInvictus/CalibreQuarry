@@ -167,6 +167,9 @@ cquarry run device --device-cp book.epub carda:/books/ --apply
 # native --catalog; the extension decides the plugin and is enforced,
 # because calibredb silently falls back to EPUB otherwise)
 cquarry run catalog-epub --dest catalog.epub --search 'tags:Fic' --apply
+# (the BIBTEX plugin only counts books with title, authors, publisher,
+# and pubdate filled in; books missing any of them are silently absent
+# from the .bib)
 cquarry run catalog-bibtex --dest refs.bib --apply
 
 # Review what the merges moved aside, then expire what is older than

@@ -1616,9 +1616,22 @@ class TestCatalogVerbs(_IntegrateCase):
             )
         self.assertEqual(code, 0, out)
         cmd = calls[0]
-        self.assertEqual(cmd[:2], ["calibredb", "catalog"])
-        self.assertIn("refs.bib", cmd)
-        self.assertIn("1,2", cmd)
+        # Live-drill pin: catalog's parser wants the output filename FIRST
+        # and every option after it, the library via --library-path (the
+        # after-the-command --library shape every other verb uses dies with
+        # "Must specify the catalog output filename before any options").
+        self.assertEqual(
+            cmd,
+            [
+                "calibredb",
+                "catalog",
+                "refs.bib",
+                "--library-path",
+                str(self.tmpdir),
+                "--ids",
+                "1,2",
+            ],
+        )
 
 
 class TestCustomize(unittest.TestCase):
