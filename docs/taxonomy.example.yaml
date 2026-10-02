@@ -653,6 +653,25 @@ rules:
 - id: DATE_READ_NOT_READ
   severity: warning
   description: A book with a Date Read should be marked Read or DNF
+# rule_options:  (uncomment to use; a null value crashes the validator)
+  # Accepted-by-design findings, per rule. The validator suppresses a finding
+  # whose book id appears under the rule's allowed_ids and counts it in the
+  # summary line instead ("Allowlisted (not shown)"), so a clean run reports
+  # nothing actionable. Works for every book-id-carrying rule; the canonical
+  # use is EVERY_BOOK_COVER, for digital-native files with genuinely no cover
+  # art (a D&DBeyond-style download the operator rules acceptable). Add an id
+  # only with a reason: an allowlist entry is a ruling, not a convenience.
+  #
+  #  EVERY_BOOK_COVER:
+  #    # 9268 Arcana Unleashed: Deadfall arrived with no embedded cover
+  #    # (D&DBeyond digital files carry none); cover set from PDF page 1.
+  #    allowed_ids:
+  #    - 9268
+  #
+  #  READ_NO_DATE:
+  #    # Anti-library entries: marked Read without a Date Read on purpose.
+  #    allowed_ids:
+  #    - 101
 custom_columns:
 - label: audience
   name: Audience
