@@ -57,8 +57,20 @@ Standing rules, unchanged:
 
 ### Feature candidates and behavior calls (each fires on its own green light)
 
-- [ ] Feature candidates logged (FINAL-REPORT L4, ranked): --search QUERY --format md (the 3.42 emitter over any query); --rename-entity + sort setters over the shipped-but-unconsumed 1.19.0 riders (the floor has carried them two releases); trash surface (listing + empty/expire under the integrate guards); swap the audit's inline duplicate grouping for cquarry's find_duplicate_books; --health --format json + annotations-dirtied line + opt-in --fail-on-findings; run fts-index verb (superseded by Phase 20's fts-index verb below); tag-tree rolled-up subtree counts (consumes consumerless tag_rollup); addition_timeline year granularity; identifierless advisory (flood-caveated). GATED: TUI set-write batch session (risk surface), dirtied_formats promotion (fts-index prep). *(Executed 3.45.0 on Brandon's gate: --rename-entity + the sort setters over the 1.19.0 riders, and the trash surface (listing + empty/expire). Roadmap-boxed: TUI set-write batch session. 2026-09-29 correction from the parity scoping: restrict-scoped get_tag_counts shipped 3.43.0 and --identifierless ships (cli.py:1257-1270, via cquarry.integrity.find_identifierless), so two more candidates on this list are already done; the rest stays ranked.)*
-- [ ] **Per-mode --format corners are silently ignored** (`--book --format md`, `--fts --format csv|ai`): either honor them per mode or refuse them (exit 2) like --export does now; a behavior call, not a mechanical fix.
+- [x] Feature candidates logged (FINAL-REPORT L4, ranked) — retired 2026-10-02,
+      every candidate resolved. Shipped: --search QUERY --format md, the
+      --health json shape + the annotations-dirtied line + --fail-on-findings
+      (3.46.0); --rename-entity + the sort setters and the trash surface
+      (3.45.0); --identifierless and restrict-scoped get_tag_counts (3.43.0);
+      the tag-tree rolled-up subtree counts (cquarry.helpers.tag_rollup,
+      consumed by --analytics tags) and addition_timeline year granularity
+      (--pace-granularity year). Declined by recorded decision: the audit's
+      inline duplicate grouping stays inline (the CSV joins ids in scan order;
+      cquarry's find_duplicate_books sorts numerically). Re-homed: the
+      fts-index candidate is superseded by Phase 20's `run fts-index` box, and
+      the two gated residues (the TUI set-write batch session, the
+      dirtied_formats promotion) live in their Phase 20 boxes above.
+- [x] **Per-mode --format corners are silently ignored** (`--book --format md`, `--fts --format csv|ai`): either honor them per mode or refuse them (exit 2) like --export does now; a behavior call, not a mechanical fix. *(Shipped 3.46.0 with the refuse answer (exit 2 naming the one format the mode supports); confirmed in the tree at cli.py's --book gate and modes/fts.py's json-only check. Ticked 2026-10-02; the box was left open when the release shipped.)*
 - [ ] **The pypi-environment tag policy is UI-only**: Settings -> Environments -> pypi -> Deployment branches and tags -> allow `v*.*.*` (REST policies are branch-type only and reject tag deployments outright; see the 1.22.0/3.44.0 errata and the cquarry erratum).
 - [ ] **reconcile: verify-after-embed for EPUB pubdate (the exiftool `-m` lesson again)** (observed 2026-09-16, #9177 Discourses and Selected Writings): `calibredb embed_metadata` reported success but the file kept its original EPUB3 `dc:date` (2010-10-25) — the book has dual date elements and the embed does not move the one ebook-meta reads back. Reconcile now reports this one book as eternally drifted. A one-line post-embed read-back per written field would convert silent no-ops into reported residuals. (Adopted into Phase 20 by the parity program.)
 - [ ] **fetch_library_codes: title/author SRU fallback for ISBN misses** (observed 2026-09-16): the ISBN-driven pass hit 6 of 23 nonfiction books; hand-written LoC SRU `bath.title=` + `bath.author=` queries recovered 15 of the 17 misses at work level (only the German Analysis 3 and the Chinese Kodaira have no LoC record at all). The tool could do this fallback itself and tag work-level hits as such.
