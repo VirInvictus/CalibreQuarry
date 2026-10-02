@@ -89,7 +89,8 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 
 `run convert`, `run polish`, `run cover`, `run export`, `run merge`,
 `run flush`, `run backfill`, `run backup-metadata`, `run restore-database`,
-`run clone`, and `run fts-index` drive the external tools
+`run clone`, `run fts-index`, and the `run catalog-epub` /
+`run catalog-bibtex` pair drive the external tools
 (`ebook-convert`, `ebook-polish`, `calibredb`,
 `fetch-ebook-metadata`) over a resolved set and register the outcome
 through cquarry's write module; `run trash` (below) is the pure
@@ -139,6 +140,12 @@ cquarry run clone --target ~/fresh-schema --apply
 # other two doors
 cquarry run fts-index --db ~/Calibre/metadata.db
 cquarry run fts-index --apply --db ~/Calibre/metadata.db
+
+# Catalog through calibredb's own plugins (the CSV/XML half is the
+# native --catalog; the extension decides the plugin and is enforced,
+# because calibredb silently falls back to EPUB otherwise)
+cquarry run catalog-epub --dest catalog.epub --search 'tags:Fic' --apply
+cquarry run catalog-bibtex --dest refs.bib --apply
 
 # Review what the merges moved aside, then expire what is older than
 # 14 days (the dry run is the listing)

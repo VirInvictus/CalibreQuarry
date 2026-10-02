@@ -120,9 +120,12 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       action reindexes exactly the queued book:FORMAT pairs, --fts-status reads
       upstream's disabled answer as a report, --enable carries its own backup rule
       for the preference row it writes, and the cquarry floor moves to 1.24.0.)*
-- [ ] **run catalog-epub / run catalog-bibtex**: calibredb catalog through the EPUB_MOBI
+- [x] **run catalog-epub / run catalog-bibtex**: calibredb catalog through the EPUB_MOBI
       and BIBTEX catalog plugins (customize/builtins.py:704); the CSV/XML half is
-      already native (--catalog over export_rows).
+      already native (--catalog over export_rows). *(Shipped 2026-10-02: the output
+      extension decides the plugin and is enforced, because calibredb silently falls
+      back to EPUB on an unrecognized one; targets resolve read-only, no selection
+      meaning the whole library; the verb never writes the library.)*
 - [ ] **run customize**: calibre-customize install/enable/disable/list
       (src/calibre/customize/ui.py); the missing automation for installing the Bindery
       Repair plugin (and any other plugin) headlessly.
