@@ -172,20 +172,28 @@ applied/already-so/failed plus a per-id failure list (it survives
 results, committed, dry_run}`. Exit 0 committed/dry-run, 1 failures or
 lock, 2 usage.
 
-### 3.2.1 Library-schema writes (saved searches)
+### 3.2.1 Library-schema writes (saved searches, custom-column CRUD)
 
 `--saved-search-add NAME EXPR` / `--saved-search-delete NAME` /
 `--saved-search-rename OLD NEW` manage the saved searches Calibre's GUI reads,
 riding cquarry 1.24's typed `set_preference` writer (one `preferences` row,
-payload validated by key before anything lands). They change library-wide GUI
-state, not books: any book verb or set-mode source in the same invocation is
-refused, exactly one write runs per invocation, and the rails hold in full
-(dry-run by default, `--apply` with the closed-Calibre guard and an
-out-of-tree timestamped backup, exit 0/1/2). The rename resolves the old name
-exactly then case-insensitively and refuses to overwrite an existing name,
-where upstream's `saved_searches add` silently replaces. The NON-NEGOTIABLES
-do not reach here (no column labels exist in a preference row), but the
-shared dispatcher this section rides grows with the schema-write surface.
+payload validated by key before anything lands).
+`--add-custom-column LABEL NAME DATATYPE` (with `--column-is-multiple` for
+text and composite) and `--remove-custom-column LABEL` are the calibredb
+schema-CRUD parity verbs over cquarry's column DDL: creation mirrors
+upstream's `create_custom_column` DDL-for-DDL and sets Calibre's
+`update_all_last_mod_dates_on_start` (the next GUI start refreshes every
+book's last_modified), and deletion only FLAGS the column
+(`mark_for_delete`) for the purge Calibre runs at its next start. All five
+verbs change library-wide state, not books: any book verb or set-mode source
+in the same invocation is refused, exactly one write runs per invocation, and
+the rails hold in full (dry-run by default, `--apply` with the closed-Calibre
+guard and an out-of-tree timestamped backup, exit 0/1/2). The rename resolves
+the old name exactly then case-insensitively and refuses to overwrite an
+existing name, where upstream's `saved_searches add` silently replaces; the
+column doors refuse the NON-NEGOTIABLES labels (`#reading_status`, `status`,
+`date_read`) at the argument layer, because deleting the column is the
+biggest write to it there is.
 
 ### 3.3 Read-surface output guard
 

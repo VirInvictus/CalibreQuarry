@@ -95,6 +95,8 @@ SCHEMA_WRITE_DESTS: tuple[str, ...] = (
     "saved_search_add",
     "saved_search_delete",
     "saved_search_rename",
+    "add_custom_column",
+    "remove_custom_column",
 )
 
 # --restrict is a read-surface scoping modifier: write targets are chosen

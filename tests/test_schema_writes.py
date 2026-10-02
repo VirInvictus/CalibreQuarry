@@ -25,6 +25,12 @@ CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort T
 -- every fetchone() read keeps seeing the first, stale one.
 CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT NOT NULL,
     val TEXT NOT NULL, UNIQUE (key));
+-- The modern custom_columns shape the column writers require (editable/
+-- display/normalized are cquarry's minimum for create; mark_for_delete for
+-- delete).
+CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT UNIQUE,
+    name TEXT, datatype TEXT, is_multiple BOOL, editable BOOL, display TEXT,
+    normalized BOOL, mark_for_delete BOOL DEFAULT 0);
 """
 
 _SEED_SEARCHES = '{"SciFi Picks": "tags:Fic.SciFi", "Recent": "date:>7d"}'
@@ -80,7 +86,7 @@ class TestSavedSearchWrites(_SchemaWriteCase):
             "--saved-search-add", "Fic", "tags:Fic", "--db", self.db_path
         )
         self.assertEqual(code, 0)
-        self.assertIn("saved-search plan: add saved search 'Fic'", out)
+        self.assertIn("schema-write plan: add saved search 'Fic'", out)
         self.assertIn("SciFi Picks", out)
         self.assertIn("Dry run", out)
         self.assertEqual(self.stored(), _SEED_SEARCHES)  # untouched
@@ -262,6 +268,145 @@ class TestSavedSearchWrites(_SchemaWriteCase):
             )
         self.assertEqual(code, 1)
         self.assertIn("Calibre is running", err)
+
+    def test_add_column_dry_run_plans_and_sets_nothing(self):
+        code, out, _ = self.run_cli(
+            "--add-custom-column",
+            "lcc",
+            "LCC",
+            "text",
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("create custom column #lcc ('LCC', text)", out)
+        self.assertIn("update_all_last_mod_dates_on_start", out)
+        con = sqlite3.connect(self.db_path)
+        n = con.execute("SELECT COUNT(*) FROM custom_columns").fetchone()[0]
+        con.close()
+        self.assertEqual(n, 0)
+
+    def test_add_column_apply_creates_it(self):
+        code, out, _ = self.run_cli(
+            "--add-custom-column",
+            "hardcover",
+            "Hardcover ID",
+            "text",
+            "--apply",
+            "--backup-dir",
+            self.backups(),
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("applied: create custom column #hardcover", out)
+        con = sqlite3.connect(self.db_path)
+        row = con.execute(
+            "SELECT label, name, datatype FROM custom_columns WHERE label = 'hardcover'"
+        ).fetchone()
+        con.close()
+        self.assertEqual(row, ("hardcover", "Hardcover ID", "text"))
+
+    def test_add_column_refuses_bad_label_and_datatype(self):
+        code, _, err = self.run_cli(
+            "--add-custom-column", "Bad Label", "X", "text", "--db", self.db_path
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("lowercase letters", err)
+        code, _, err = self.run_cli(
+            "--add-custom-column", "ok", "X", "prose", "--db", self.db_path
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not a supported datatype", err)
+
+    def test_add_column_duplicate_label_fails_at_apply(self):
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "INSERT INTO custom_columns (label, name, datatype) "
+            "VALUES ('taken', 'Taken', 'text')"
+        )
+        con.commit()
+        con.close()
+        code, _, err = self.run_cli(
+            "--add-custom-column",
+            "taken",
+            "Again",
+            "text",
+            "--apply",
+            "--backup-dir",
+            self.backups(),
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("already exists", err)
+
+    def test_is_multiple_is_an_add_modifier(self):
+        code, _, err = self.run_cli(
+            "--column-is-multiple",
+            "--saved-search-delete",
+            "Recent",
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("modifier of --add-custom-column", err)
+
+    def test_remove_column_dry_run_names_the_purge_semantics(self):
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "INSERT INTO custom_columns (label, name, datatype) "
+            "VALUES ('old', 'Old', 'text')"
+        )
+        con.commit()
+        con.close()
+        code, out, _ = self.run_cli(
+            "--remove-custom-column", "old", "--db", self.db_path
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("mark_for_delete", out)
+        self.assertIn("Column today: #old", out)
+
+    def test_remove_column_apply_flags_it(self):
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "INSERT INTO custom_columns (label, name, datatype) "
+            "VALUES ('old', 'Old', 'text')"
+        )
+        con.commit()
+        con.close()
+        code, out, _ = self.run_cli(
+            "--remove-custom-column",
+            "old",
+            "--apply",
+            "--backup-dir",
+            self.backups(),
+            "--db",
+            self.db_path,
+        )
+        self.assertEqual(code, 0, out)
+        con = sqlite3.connect(self.db_path)
+        flagged = con.execute(
+            "SELECT mark_for_delete FROM custom_columns WHERE label = 'old'"
+        ).fetchone()[0]
+        con.close()
+        self.assertEqual(flagged, 1)
+
+    def test_remove_unknown_column_refused(self):
+        code, _, err = self.run_cli(
+            "--remove-custom-column", "nope", "--db", self.db_path
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("no custom column named", err)
+
+    def test_forbidden_labels_refused_at_both_doors(self):
+        for flag, argv in (
+            ("--add-custom-column", ["reading_status", "Status", "text"]),
+            ("--remove-custom-column", ["date_read"]),
+        ):
+            code, _, err = self.run_cli(flag, *argv, "--db", self.db_path)
+            self.assertEqual(code, 2, flag)
+            self.assertIn("NON-NEGOTIABLES", err)
 
     def test_restrict_refuses_the_combination(self):
         code, _, err = self.run_cli(

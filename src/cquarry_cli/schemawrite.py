@@ -10,14 +10,30 @@ the closed-Calibre guard and an out-of-tree timestamped backup, exit
 0/1/2. Read modes never import this module.
 """
 
+import re
 import sqlite3
 import subprocess
 import sys
 
 from cquarry_cli.backups import make_backup
 from cquarry_cli.dests import SCHEMA_WRITE_DESTS, SET_MODE_SOURCES, SINGLE_BOOK_DESTS
+from cquarry_cli.writeops import FORBIDDEN_COLUMNS
 
 _PGREP_TIMEOUT = 15
+
+#: The datatypes cquarry's create_custom_column accepts (upstream's set).
+_COLUMN_DATATYPES = (
+    "rating",
+    "text",
+    "comments",
+    "datetime",
+    "int",
+    "float",
+    "bool",
+    "series",
+    "composite",
+    "enumeration",
+)
 
 
 def _calibre_running() -> bool:
@@ -49,8 +65,20 @@ def _reject_empty(values, flag: str) -> None:
             )
 
 
+def _check_column_label(label: str, flag: str) -> None:
+    """The NON-NEGOTIABLES by label, at the schema doors too: deleting the
+    reading_status column would be the biggest write to it there is."""
+    if str(label).lstrip("#").casefold() in FORBIDDEN_COLUMNS:
+        raise _UsageError(
+            f"{flag}: #{str(label).lstrip('#')} is banned (library "
+            "NON-NEGOTIABLES: reading_status, status, and date_read are "
+            "never written by tools; deleting the column is the biggest "
+            "write there is)."
+        )
+
+
 def dispatch_schema_write(args, db_path: str) -> int | None:
-    """Dispatch the saved-search writes; None when none is present (the
+    """Dispatch the library-schema writes; None when none is present (the
     caller falls through). Returns the process exit code otherwise."""
     present = [d for d in SCHEMA_WRITE_DESTS if getattr(args, d, None)]
     if not present:
@@ -72,15 +100,67 @@ def dispatch_schema_write(args, db_path: str) -> int | None:
             )
         verb = present[0]
         apply = bool(getattr(args, "apply", False))
+        column_multiple = bool(getattr(args, "column_is_multiple", False))
+        if column_multiple and verb != "add_custom_column":
+            raise _UsageError(
+                "--column-is-multiple is a modifier of --add-custom-column."
+            )
 
-        if verb == "saved_search_add":
+        if verb == "add_custom_column":
+            label, name, datatype = args.add_custom_column
+            _check_column_label(label, "--add-custom-column")
+            label = label.strip()
+            # cquarry's rule (upstream's): \w+ starting with a letter,
+            # lowercase throughout.
+            if (
+                not label
+                or not label[0].isalpha()
+                or label != label.lower()
+                or re.match(r"^\w*$", label) is None
+            ):
+                raise _UsageError(
+                    f"--add-custom-column: the label must contain only "
+                    f"lowercase letters, digits, and underscores and start "
+                    f"with a letter, got {label!r}"
+                )
+            datatype = (datatype or "").strip().lower()
+            if datatype not in _COLUMN_DATATYPES:
+                raise _UsageError(
+                    f"--add-custom-column: {datatype!r} is not a supported "
+                    f"datatype (available: {', '.join(_COLUMN_DATATYPES)})"
+                )
+            _reject_empty((name,), "--add-custom-column")
+
+            def action(wdb):
+                return wdb.create_custom_column(
+                    label,
+                    name.strip(),
+                    datatype,
+                    is_multiple=column_multiple,
+                )
+
+            label_text = (
+                f"create custom column #{label} ({name.strip()!r}, "
+                f"{datatype}{', is_multiple' if column_multiple else ''})"
+            )
+        elif verb == "remove_custom_column":
+            # metavar LABEL with no nargs: a plain string.
+            label = args.remove_custom_column
+            _check_column_label(label, "--remove-custom-column")
+            label = label.strip()
+
+            def action(wdb):
+                return wdb.delete_custom_column(label)
+
+            label_text = f"delete custom column #{label.lstrip('#')}"
+        elif verb == "saved_search_add":
             name, expression = args.saved_search_add
             _reject_empty((name, expression), "--saved-search-add")
 
             def action(wdb):
                 return wdb.saved_search_add(name, expression)
 
-            label = f"add saved search {name.strip()!r} -> {expression.strip()!r}"
+            label_text = f"add saved search {name.strip()!r} -> {expression.strip()!r}"
         elif verb == "saved_search_delete":
             # metavar NAME with no nargs: argparse stores a plain string.
             name = args.saved_search_delete
@@ -89,7 +169,7 @@ def dispatch_schema_write(args, db_path: str) -> int | None:
             def action(wdb):
                 return wdb.saved_search_delete(name)
 
-            label = f"delete saved search {name.strip()!r}"
+            label_text = f"delete saved search {name.strip()!r}"
         else:
             old_name, new_name = args.saved_search_rename
             _reject_empty((old_name, new_name), "--saved-search-rename")
@@ -97,21 +177,57 @@ def dispatch_schema_write(args, db_path: str) -> int | None:
             def action(wdb):
                 return wdb.saved_search_rename(old_name, new_name)
 
-            label = f"rename saved search {old_name.strip()!r} -> {new_name.strip()!r}"
+            label_text = (
+                f"rename saved search {old_name.strip()!r} -> {new_name.strip()!r}"
+            )
 
         if not apply:
-            print(f"saved-search plan: {label}")
+            print(f"schema-write plan: {label_text}")
             from cquarry.db import CalibreDB
 
             db = CalibreDB(db_path)
             try:
-                names = sorted(db.get_saved_searches())
+                if verb.startswith("saved_search"):
+                    names = sorted(db.get_saved_searches())
+                    print(
+                        "Saved searches now: "
+                        f"{', '.join(names) if names else '(none)'}."
+                    )
+                else:
+                    # get_custom_columns is keyed by display NAME; the
+                    # lookup here is by label, so scan the values.
+                    key = label.lstrip("#")
+                    col = next(
+                        (
+                            c
+                            for c in db.get_custom_columns().values()
+                            if str(c.get("label", "")).lower() == key.lower()
+                        ),
+                        None,
+                    )
+                    if col is not None:
+                        print(
+                            f"Column today: #{col.get('label')} "
+                            f"{col.get('name')!r} ({col.get('datatype')}); "
+                            "deletion FLAGS the column (mark_for_delete) and "
+                            "Calibre purges the storage at its next start."
+                        )
+                    elif verb == "remove_custom_column":
+                        raise _UsageError(
+                            f"no custom column named #{key}; nothing to delete"
+                        )
             finally:
                 db.close()
-            print(f"Saved searches now: {', '.join(names) if names else '(none)'}.")
             print(
                 "Dry run: nothing executed. --apply with --backup-dir "
                 "(outside the library, Calibre closed) runs it."
+                + (
+                    " NOTE: a new column sets Calibre's "
+                    "update_all_last_mod_dates_on_start, so the next Calibre "
+                    "start refreshes every book's last_modified."
+                    if verb == "add_custom_column"
+                    else ""
+                )
             )
             return 0
         if _calibre_running():
@@ -139,7 +255,10 @@ def dispatch_schema_write(args, db_path: str) -> int | None:
             with wdb.batch():
                 changed = action(wdb)
         status = "applied" if changed else "already-so"
-        print(f"{status}: {label}.")
+        tail = ""
+        if verb == "add_custom_column" and isinstance(changed, int):
+            tail = f" as column number {changed}"
+        print(f"{status}: {label_text}{tail}.")
         return 0
     except _UsageError as e:
         print(f"ERROR: {e}", file=sys.stderr)

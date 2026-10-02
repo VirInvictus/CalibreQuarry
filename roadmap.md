@@ -149,10 +149,14 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       schemawrite dispatcher, one write per invocation, refused company with book
       verbs, and the full rails. The rename refuses to overwrite an existing name,
       where upstream silently does.)*
-- [ ] **--add-custom-column / --remove-custom-column**: the calibredb schema-CRUD
+- [x] **--add-custom-column / --remove-custom-column**: the calibredb schema-CRUD
       parity item; cquarry.write has shipped create/delete_custom_column since 1.20,
       so only the frontend verb is missing (set_custom is already covered by
-      --set-column).
+      --set-column). *(Shipped 2026-10-02 in the schemawrite dispatcher beside the
+      saved-search verbs: the full rails, the create side's
+      update_all_last_mod_dates_on_start side effect named in the dry run, the
+      mark_for_delete purge semantics named, and the NON-NEGOTIABLES labels refused
+      at both doors.)*
 
 ### Open unowned surface, owners-wanted (not committed; recorded in cquarry's ledger)
 

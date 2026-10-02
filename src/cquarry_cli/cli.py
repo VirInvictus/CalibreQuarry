@@ -594,6 +594,33 @@ def build_parser() -> argparse.ArgumentParser:
         "name, where upstream silently does)",
     )
     w.add_argument(
+        "--add-custom-column",
+        dest="add_custom_column",
+        nargs=3,
+        metavar=("LABEL", "NAME", "DATATYPE"),
+        default=None,
+        help="Create a custom column headlessly (datatypes: rating, text, "
+        "comments, datetime, int, float, bool, series, composite, "
+        "enumeration; dry run by default; --apply with --backup-dir and "
+        "Calibre closed; sets update_all_last_mod_dates_on_start)",
+    )
+    w.add_argument(
+        "--column-is-multiple",
+        dest="column_is_multiple",
+        action="store_true",
+        help="With --add-custom-column: the column holds multiple values "
+        "per book (text and composite only)",
+    )
+    w.add_argument(
+        "--remove-custom-column",
+        dest="remove_custom_column",
+        metavar="LABEL",
+        default=None,
+        help="Flag a custom column for deletion (Calibre purges the "
+        "storage at its next start; #reading_status and friends are "
+        "refused by label)",
+    )
+    w.add_argument(
         "--set-author-sort",
         dest="set_author_sort",
         nargs=2,
