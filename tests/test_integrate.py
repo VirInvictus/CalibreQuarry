@@ -1155,7 +1155,12 @@ class TestBackupMetadata(_IntegrateCase):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
-        with mock.patch("subprocess.run", side_effect=fake_run):
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
             code, out, _ = self.run_cli(
                 "run",
                 "backup-metadata",
@@ -1260,7 +1265,12 @@ class TestRestoreDatabase(_IntegrateCase):
                 returncode=0, stdout="Restoring database succeeded", stderr=""
             )
 
-        with mock.patch("subprocess.run", side_effect=fake_run):
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
             code, out, _ = self.run_cli(
                 "run",
                 "restore-database",
