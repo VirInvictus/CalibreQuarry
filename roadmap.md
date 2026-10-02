@@ -98,10 +98,13 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       the queue, --apply behind the flush rails (Calibre closed, out-of-tree backup),
       an honest empty-queue no-op, and `--all` for the deliberate whole-library
       flood.)*
-- [ ] **run restore-database**: calibredb restore_database rebuilds a metadata.db from
+- [x] **run restore-database**: calibredb restore_database rebuilds a metadata.db from
       stored OPFs (upstream src/calibre/db/restore.py). Refuses to write an existing
       metadata.db without an explicit --target/--force; the NATIVE rebuild stays
-      declined in cquarry, the O-lane covers it.
+      declined in cquarry, the O-lane covers it. *(Shipped 2026-10-02: the destination
+      is never guessed (required --target), an existing metadata.db is replaced only
+      under --force, an OPF-less target refuses, and the dry run names what the
+      rebuild loses.)*
 - [ ] **run clone**: calibredb clone (fresh-schema library copy); cquarry's
       `backup_to()` is the consistent-copy half, this is the schema-fresh half.
 - [ ] **run fts-index**: calibredb fts_index (extraction and Calibre's own tokenizer

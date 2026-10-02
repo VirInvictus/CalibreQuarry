@@ -1174,5 +1174,124 @@ class TestBackupMetadata(_IntegrateCase):
         self.assertNotIn("--all", cmd)
 
 
+class TestRestoreDatabase(_IntegrateCase):
+    """`run restore-database` creates a database, so destination confusion
+    is refused at the plan door: explicit --target, an existing
+    metadata.db only over --force, and at least one stored OPF."""
+
+    def _target(self, *, opfs=2, db=False):
+        d = self.tmpdir / "restore_target"
+        d.mkdir(exist_ok=True)
+        for i in range(opfs):
+            book = d / f"Author - Book {i} ({i})"
+            book.mkdir(exist_ok=True)
+            (book / "metadata.opf").write_text("<opf/>")
+        if db:
+            (d / "metadata.db").write_bytes(b"corrupt")
+        return d
+
+    def test_missing_target_is_a_usage_error(self):
+        code, _, err = self.run_cli(
+            "run", "restore-database", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("--target DIR", err)
+
+    def test_nonexistent_target_refused(self):
+        code, _, err = self.run_cli(
+            "run",
+            "restore-database",
+            "--target",
+            str(self.tmpdir / "nope"),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not a directory", err)
+
+    def test_existing_db_refused_without_force(self):
+        target = self._target(db=True)
+        code, _, err = self.run_cli(
+            "run",
+            "restore-database",
+            "--target",
+            str(target),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("--force", err)
+
+    def test_no_opfs_refused(self):
+        target = self._target(opfs=0)
+        code, _, err = self.run_cli(
+            "run",
+            "restore-database",
+            "--target",
+            str(target),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("nothing to restore from", err)
+
+    def test_dry_run_describes_and_executes_nothing(self):
+        target = self._target()
+        code, out, _ = self.run_cli(
+            "run",
+            "restore-database",
+            "--target",
+            str(target),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("2 OPF-bearing book folder(s)", out)
+        self.assertIn("Dry run", out)
+        self.assertIn("loses", out)
+
+    def test_apply_drives_calibredb_against_the_target(self):
+        target = self._target(db=True)
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(
+                returncode=0, stdout="Restoring database succeeded", stderr=""
+            )
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            code, out, _ = self.run_cli(
+                "run",
+                "restore-database",
+                "--target",
+                str(target),
+                "--force",
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        cmd = calls[0]
+        self.assertEqual(cmd[:2], ["calibredb", "restore_database"])
+        self.assertIn("--really-do-it", cmd)
+        self.assertEqual(cmd[cmd.index("--library") + 1], str(target))
+
+    def test_missing_calibredb_is_a_setup_refusal(self):
+        target = self._target()
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli(
+                "run",
+                "restore-database",
+                "--target",
+                str(target),
+                "--apply",
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("calibredb is not on PATH", err)
+
+
 if __name__ == "__main__":
     unittest.main()

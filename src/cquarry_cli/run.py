@@ -1534,6 +1534,7 @@ INTEGRATE_PHASES = (
     "backfill",
     "trash",
     "backup-metadata",
+    "restore-database",
 )
 
 

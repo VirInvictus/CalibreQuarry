@@ -822,6 +822,7 @@ def build_parser() -> argparse.ArgumentParser:
             "backfill",
             "trash",
             "backup-metadata",
+            "restore-database",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -832,7 +833,8 @@ def build_parser() -> argparse.ArgumentParser:
         "(set/remove cover), export (calibredb), merge (duplicate into "
         "keeper), flush (embed the OPF queue), backfill (metadata source), "
         "trash (list/empty/expire .caltrash), backup-metadata (regenerate "
-        "sidecar OPFs over the dirtied queue)",
+        "sidecar OPFs over the dirtied queue), restore-database (rebuild a "
+        "metadata.db from stored OPFs under --target)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
@@ -845,6 +847,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="backup-metadata: regenerate sidecar OPFs for EVERY book "
         "(the default is the dirtied queue only)",
+    )
+    run_p.add_argument(
+        "--target",
+        dest="target",
+        default=None,
+        metavar="DIR",
+        help="restore-database: the library directory to (re)build the "
+        "database in; an existing metadata.db there demands --force",
+    )
+    run_p.add_argument(
+        "--force",
+        dest="force",
+        action="store_true",
+        help="restore-database: replace an existing --target/metadata.db "
+        "(upstream keeps the old one as metadata_pre_restore.db)",
     )
     run_p.add_argument(
         "--empty",

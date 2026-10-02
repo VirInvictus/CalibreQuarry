@@ -775,6 +775,110 @@ def run_backup_metadata(db, args, *, apply: bool, take_backup=None) -> int:
     return 0
 
 
+#: The restore plan's walk is bounded so a huge (or cyclic-through-symlink)
+#: tree cannot hang the dry run; a real library's book dirs number in the
+#: thousands, not tens of thousands.
+_RESTORE_WALK_CAP = 20000
+
+
+def count_opf_book_dirs(target: Path) -> tuple[int, int]:
+    """(book dirs holding a metadata.opf, dirs walked) under target."""
+    seen = 0
+    found = 0
+    for dirpath, _dirnames, filenames in os.walk(target):
+        seen += 1
+        if seen > _RESTORE_WALK_CAP:
+            break
+        if "metadata.opf" in {name.lower() for name in filenames}:
+            found += 1
+    return found, seen
+
+
+def plan_restore_database(db, args) -> dict:
+    """The restore plan and its guards. This verb CREATES a database, so
+    destination confusion is refused at the plan door: an explicit --target,
+    an existing metadata.db only over --force, and at least one stored OPF
+    to rebuild from (an empty rebuild would silently mint an empty
+    library)."""
+    raw = getattr(args, "target", None)
+    if not raw:
+        raise ValueError("run restore-database needs --target DIR")
+    target = Path(raw).expanduser()
+    if not target.is_dir():
+        raise ValueError(f"--target is not a directory: {target}")
+    db_present = (target / "metadata.db").exists()
+    if db_present and not getattr(args, "force", False):
+        raise ValueError(
+            f"--target already holds a metadata.db ({target}); restore would "
+            "replace it (upstream keeps the old one as "
+            "metadata_pre_restore.db). Re-run with --force if that is the "
+            "point."
+        )
+    found, _walked = count_opf_book_dirs(target)
+    if not found:
+        raise ValueError(
+            f"no metadata.opf book folders under {target}: there is nothing "
+            "to restore from"
+        )
+    return {"target": str(target), "opf_dirs": found, "db_present": db_present}
+
+
+def run_restore_database(db, args, *, apply: bool, take_backup=None) -> int:
+    """`run restore-database`: calibredb restore_database over --target, the
+    rebuild-a-corrupt-database door. The rebuilt library loses saved
+    searches, user categories, plugboards, per-book conversion settings,
+    and custom recipes; restored rows are only as good as the stored OPFs,
+    so the dry run says so before --apply does it. No --backup-dir: the
+    verb's --force gate covers the existing-database case, and upstream
+    keeps its own metadata_pre_restore.db copy."""
+    try:
+        plan = plan_restore_database(db, args)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    note = (
+        f"restore plan: {plan['opf_dirs']} OPF-bearing book folder(s) under "
+        f"{plan['target']}; existing metadata.db: "
+        f"{'YES (replaced under --force)' if plan['db_present'] else 'none (fresh build)'}"
+    )
+    if not apply:
+        print(note)
+        print(
+            "Dry run: nothing executed. --apply runs calibredb "
+            "restore_database (Calibre closed). WARNING: the rebuild loses "
+            "saved searches, user categories, plugboards, per-book "
+            "conversion settings, and custom recipes."
+        )
+        return 0
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
+    proc = subprocess.run(
+        [
+            "calibredb",
+            "restore_database",
+            "--library",
+            plan["target"],
+            "--really-do-it",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=3600,
+    )
+    if proc.returncode != 0:
+        print(
+            f"ERROR: restore_database failed: {proc.stderr[:300]}",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"Restored a database under {plan['target']} from {plan['opf_dirs']} book folder(s)."
+    )
+    if proc.stdout.strip():
+        print(proc.stdout.strip())
+    return 0
+
+
 def _print_plan(plans: list[dict], args, title: str) -> int:
     if getattr(args, "format", None) == "json":
         print(json.dumps({"plan": plans}, indent=2, ensure_ascii=False))
@@ -945,6 +1049,13 @@ def dispatch_integrate(args) -> int:
     if args.phase == "merge" and not (args.keeper and args.duplicate):
         print("ERROR: run merge needs --keeper ID and --duplicate ID.", file=sys.stderr)
         return 2
+    if args.phase == "restore-database" and not getattr(args, "target", None):
+        print(
+            "ERROR: run restore-database needs --target DIR (this verb "
+            "creates a database; the destination is never guessed).",
+            file=sys.stderr,
+        )
+        return 2
 
     db_path = find_db(getattr(args, "db", None))
     if apply:
@@ -988,6 +1099,7 @@ def dispatch_integrate(args) -> int:
             "flush": run_flush,
             "backfill": run_backfill,
             "backup-metadata": run_backup_metadata,
+            "restore-database": run_restore_database,
         }[args.phase]
         backup = take_backup if (apply and args.phase in needs_backup) else None
         return verb(db, args, apply=apply, take_backup=backup)
