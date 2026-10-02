@@ -88,7 +88,8 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 ### The integration verbs (Phase 19 C)
 
 `run convert`, `run polish`, `run cover`, `run export`, `run merge`,
-`run flush`, `run backfill`, and `run backup-metadata` drive the external tools
+`run flush`, `run backfill`, `run backup-metadata`, `run restore-database`,
+`run clone`, and `run fts-index` drive the external tools
 (`ebook-convert`, `ebook-polish`, `calibredb`,
 `fetch-ebook-metadata`) over a resolved set and register the outcome
 through cquarry's write module; `run trash` (below) is the pure
@@ -132,6 +133,12 @@ cquarry run restore-database --target ~/damaged-library --apply
 # libraries, saved searches, settings; no books -- for a full copy, copy
 # the folder with filesystem tools)
 cquarry run clone --target ~/fresh-schema --apply
+
+# Queue Calibre's own extractor over the FTS sidecar's dirtied queue
+# (what --fts-status reports as stale); --status and --enable are the
+# other two doors
+cquarry run fts-index --db ~/Calibre/metadata.db
+cquarry run fts-index --apply --db ~/Calibre/metadata.db
 
 # Review what the merges moved aside, then expire what is older than
 # 14 days (the dry run is the listing)

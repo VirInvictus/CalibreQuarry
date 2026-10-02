@@ -1407,5 +1407,123 @@ class TestClone(_IntegrateCase):
         self.assertIn("calibredb is not on PATH", err)
 
 
+class TestFtsIndex(_IntegrateCase):
+    """`run fts-index`: calibredb fts_index over the dirtied queue (read
+    through cquarry's get_dirtied_formats). The default action reindexes
+    exactly the queued (book:format) pairs; --status and --enable are the
+    other two doors. No metadata.db backup for the reindex (sidecar only);
+    --enable writes a preference row and carries its own backup rule."""
+
+    def _sidecar_queue(self, *pairs):
+        # cquarry's sidecar read requires the plain books_text table to
+        # exist (a bare sidecar counts as absent), so create the real shape.
+        con = sqlite3.connect(self.tmpdir / "full-text-search.db")
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS books_text (book INTEGER, "
+            "format TEXT, format_size INTEGER, format_hash TEXT, "
+            "searchable_text TEXT, text_size INTEGER, text_hash TEXT, "
+            "err_msg TEXT, timestamp TEXT)"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS dirtied_formats (book INTEGER, "
+            "format TEXT, timestamp TEXT)"
+        )
+        for book, fmt in pairs:
+            con.execute(
+                "INSERT INTO dirtied_formats (book, format) VALUES (?, ?)",
+                (book, fmt),
+            )
+        con.commit()
+        con.close()
+
+    def test_missing_binary_is_a_setup_refusal(self):
+        with mock.patch("cquarry_cli.integrate.shutil.which", return_value=None):
+            code, _, err = self.run_cli("run", "fts-index", "--db", str(self.db_path))
+        self.assertEqual(code, 2)
+        self.assertIn("calibredb is not on PATH", err)
+
+    def test_status_and_enable_are_exclusive(self):
+        code, _, err = self.run_cli(
+            "run",
+            "fts-index",
+            "--fts-status",
+            "--enable",
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not both", err)
+
+    def test_empty_queue_is_an_honest_no_op(self):
+        self._sidecar_queue()
+        code, out, _ = self.run_cli("run", "fts-index", "--db", str(self.db_path))
+        self.assertEqual(code, 0)
+        self.assertIn("extraction queue is empty", out)
+
+    def test_dry_run_lists_queued_pairs(self):
+        self._sidecar_queue((1, "EPUB"), (3, "PDF"))
+        code, out, _ = self.run_cli("run", "fts-index", "--db", str(self.db_path))
+        self.assertEqual(code, 0)
+        self.assertIn("2 queued (book:format) pair(s)", out)
+        self.assertIn("1:EPUB", out)
+        self.assertIn("3:PDF", out)
+
+    def test_apply_reindexes_exactly_the_queue(self):
+        self._sidecar_queue((1, "EPUB"), (3, "PDF"))
+        calls = []
+
+        def fake_run(cmd, capture_output, text, timeout):
+            calls.append(cmd)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli(
+                "run", "fts-index", "--apply", "--db", str(self.db_path)
+            )
+        self.assertEqual(code, 0, out)
+        cmd = calls[0]
+        self.assertEqual(cmd[:2], ["calibredb", "fts_index"])
+        self.assertIn("reindex", cmd)
+        self.assertIn("1:EPUB", cmd)
+        self.assertIn("3:PDF", cmd)
+
+    def test_status_disabled_reads_as_a_report(self):
+        # Upstream exits 2 when indexing is disabled: a report outcome here,
+        # not a usage error.
+        def fake_run(cmd, capture_output, text, timeout):
+            return mock.Mock(returncode=2, stdout="", stderr="disabled")
+
+        with (
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            code, out, _ = self.run_cli(
+                "run", "fts-index", "--fts-status", "--db", str(self.db_path)
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("disabled", out)
+
+    def test_enable_apply_demands_backup_dir(self):
+        code, _, err = self.run_cli(
+            "run", "fts-index", "--enable", "--apply", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("--backup-dir", err)
+
+    def test_enable_dry_run_needs_nothing(self):
+        code, out, _ = self.run_cli(
+            "run", "fts-index", "--enable", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("enable plan", out)
+
+
 if __name__ == "__main__":
     unittest.main()

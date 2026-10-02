@@ -944,6 +944,123 @@ def run_clone(db, args, *, apply: bool, take_backup=None) -> int:
     return 0
 
 
+def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
+    """`run fts-index`: calibredb fts_index, the extraction half of the FTS
+    story (cquarry contractually never touches the FTS5 tables; Calibre's
+    own tokenizer does). The default action re-indexes the sidecar's
+    dirtied_formats queue (read through cquarry's get_dirtied_formats(),
+    the same feed --fts-status reports); --status reports Calibre's own
+    progress view; --enable turns indexing on. No metadata.db backup: the
+    default action touches only the sidecar, and --enable's one preference
+    row is backed up inside the verb (the trash precedent for verb-owned
+    backup rules)."""
+    status = bool(getattr(args, "fts_status", False))
+    enable = bool(getattr(args, "enable", False))
+    if status and enable:
+        print(
+            "ERROR: run fts-index takes --status or --enable, not both "
+            "(no flags means: reindex the dirtied queue).",
+            file=sys.stderr,
+        )
+        return 2
+    if not shutil.which("calibredb"):
+        print("ERROR: calibredb is not on PATH.", file=sys.stderr)
+        return 2
+    library = str(Path(db.db_path).resolve().parent)
+
+    if status:
+        proc = subprocess.run(
+            ["calibredb", "fts_index", "--library", library, "status"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        # Upstream exits 2 when indexing is disabled: that is a report, not
+        # a usage error, so it reads as an honest answer here.
+        if proc.returncode == 2:
+            print("FTS indexing is disabled for this library.")
+            return 0
+        if proc.returncode != 0:
+            print(
+                f"ERROR: fts_index status failed: {proc.stderr[:300]}",
+                file=sys.stderr,
+            )
+            return 1
+        print(proc.stdout.strip() or "FTS indexing is enabled.")
+        return 0
+
+    if enable:
+        note = "enable plan: turn FTS indexing on for this library (Calibre "
+        "builds the sidecar and drains the queue on its next start)"
+        if not apply:
+            print(note)
+            print("Dry run: nothing executed. --apply with --backup-dir runs it.")
+            return 0
+        if not getattr(args, "backup_dir", None):
+            print(
+                "ERROR: run fts-index --enable --apply requires --backup-dir "
+                "(outside the library): enabling writes the fts_enabled "
+                "preference row.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            make_backup(db.db_path, args.backup_dir)
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+        proc = subprocess.run(
+            ["calibredb", "fts_index", "--library", library, "enable"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if proc.returncode != 0:
+            print(
+                f"ERROR: fts_index enable failed: {proc.stderr[:300]}",
+                file=sys.stderr,
+            )
+            return 1
+        print("FTS indexing enabled.")
+        return 0
+
+    queue = db.get_dirtied_formats()
+    if not queue:
+        print("The extraction queue is empty: nothing to index.")
+        return 0
+    items = [f"{book}:{fmt}" for book, fmt in queue]
+    if not apply:
+        print(
+            f"fts-index plan: {len(queue)} queued (book:format) pair(s) "
+            "for Calibre's extractor:"
+        )
+        for item in items[:30]:
+            print(f"  {item}")
+        if len(items) > 30:
+            print(f"  ... and {len(items) - 30} more")
+        print(
+            "Dry run: nothing executed. --apply runs calibredb fts_index "
+            "reindex over exactly these pairs (Calibre closed)."
+        )
+        return 0
+    proc = subprocess.run(
+        ["calibredb", "fts_index", "--library", library, "reindex", *items],
+        capture_output=True,
+        text=True,
+        timeout=3600,
+    )
+    if proc.returncode != 0:
+        # The usual shape: "Full text indexing is not enabled on this
+        # library" -- calibre's own message rides out.
+        print(
+            f"ERROR: fts_index reindex failed: {proc.stderr.strip()[:300]}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"Queued {len(items)} (book:format) pair(s) for extraction.")
+    return 0
+
+
 def _print_plan(plans: list[dict], args, title: str) -> int:
     if getattr(args, "format", None) == "json":
         print(json.dumps({"plan": plans}, indent=2, ensure_ascii=False))
@@ -1173,6 +1290,7 @@ def dispatch_integrate(args) -> int:
             "backup-metadata": run_backup_metadata,
             "restore-database": run_restore_database,
             "clone": run_clone,
+            "fts-index": run_fts_index,
         }[args.phase]
         backup = take_backup if (apply and args.phase in needs_backup) else None
         return verb(db, args, apply=apply, take_backup=backup)

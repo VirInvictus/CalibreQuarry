@@ -824,6 +824,7 @@ def build_parser() -> argparse.ArgumentParser:
             "backup-metadata",
             "restore-database",
             "clone",
+            "fts-index",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -836,7 +837,8 @@ def build_parser() -> argparse.ArgumentParser:
         "trash (list/empty/expire .caltrash), backup-metadata (regenerate "
         "sidecar OPFs over the dirtied queue), restore-database (rebuild a "
         "metadata.db from stored OPFs under --target), clone (a fresh-schema "
-        "empty copy under --target)",
+        "empty copy under --target), fts-index (Calibre's extractor over "
+        "the dirtied queue; --status, --enable)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
@@ -849,6 +851,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="backup-metadata: regenerate sidecar OPFs for EVERY book "
         "(the default is the dirtied queue only)",
+    )
+    run_p.add_argument(
+        "--enable",
+        dest="enable",
+        action="store_true",
+        help="fts-index: turn FTS indexing on for this library (the "
+        "default action reindexes the dirtied queue)",
+    )
+    run_p.add_argument(
+        "--fts-status",
+        dest="fts_status",
+        action="store_true",
+        help="fts-index: report Calibre's own indexing status",
     )
     run_p.add_argument(
         "--target",

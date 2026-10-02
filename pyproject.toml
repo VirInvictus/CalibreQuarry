@@ -26,7 +26,7 @@ authors = [
 dependencies = [
   "tqdm",
   "vir-tui>=2.5.0",
-  "cquarry>=1.22.0",
+  "cquarry>=1.24.0",
 ]
 
 [project.scripts]

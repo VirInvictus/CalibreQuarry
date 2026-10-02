@@ -4,20 +4,19 @@ Content search reads Calibre's ``full-text-search.db`` sidecar: the
 plain ``books_text`` table only, no FTS5 machinery (the index tables
 use a custom tokenizer and are unqueryable outside Calibre). The search
 itself goes through cquarry's ``search_book_text`` (case- and
-accent-folded, restrict-aware) and coverage comes through cquarry's
-``get_text_extractions``; the sidecar's ``dirtied_formats`` queue is
-the one table cquarry 1.20 does not expose, so it is read directly with
-a read-only sqlite connection, confined to this module (recorded A.1
-route decision; promoting it to cquarry remains a future option).
+accent-folded, restrict-aware), coverage comes through cquarry's
+``get_text_extractions``, and the dirtied queue reads cquarry's
+``get_dirtied_formats()`` (cquarry 1.24): the raw sidecar read this
+module used to carry was the frontend tier's one recorded raw-SQL
+exception until the promotion fired with the fts-index verb.
 """
 
 import json
 import os
-import sqlite3
 import sys
 
 from cquarry.db import CalibreDB
-from cquarry.helpers import C_DIM, C_HEADER, C_WARN, color, db_uri_ro
+from cquarry.helpers import C_DIM, C_HEADER, C_WARN, color
 
 from cquarry_cli.output import open_output
 
@@ -82,19 +81,7 @@ def fts_staleness(db: CalibreDB) -> dict:
             empty.append(pair)
     sidecar = fts_sidecar_path(db.db_path)
     if os.path.exists(sidecar):
-        con = sqlite3.connect(db_uri_ro(sidecar), uri=True)
-        try:
-            try:
-                queued = {
-                    (book, (fmt or "").upper())
-                    for book, fmt in con.execute(
-                        "SELECT book, format FROM dirtied_formats"
-                    )
-                }
-            except sqlite3.OperationalError:
-                queued = set()
-        finally:
-            con.close()
+        queued = {(book, (fmt or "").upper()) for book, fmt in db.get_dirtied_formats()}
 
     never = sorted(
         (bid, fmt)

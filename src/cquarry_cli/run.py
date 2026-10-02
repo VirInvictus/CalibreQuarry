@@ -1536,6 +1536,7 @@ INTEGRATE_PHASES = (
     "backup-metadata",
     "restore-database",
     "clone",
+    "fts-index",
 )
 
 
