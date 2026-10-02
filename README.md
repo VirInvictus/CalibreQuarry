@@ -74,7 +74,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Run verbs (Phase 17)** | `run phase1 DIR`, `run sign --manifest F`, `run phase2 --manifest F --backup-dir D`, `run phase3 --manifest F [--answer-file A]` | The acquisition pathway as commands: phase 1 vets a downloads directory into an `acquisition-manifest/1` manifest (duplicate screen, DRM audit, PDF/DJVU battery via `scripts/check_pdf.py`, bindery's EPUB slice; filename-derived stamps and provenance seeds for the review to correct); `run sign` seals the reviewed manifest (an HMAC over the approved set, the stamps, the provenance, the lossy flags, and the decisions; any later edit refuses to load until re-signed); phase 1 is dry against book files unless `--stamp`/`--apply-lossy`/`--quarantine` are passed (quarantine moves true DRM hits only); phase 2 imports the SIGNED, SEALED manifest as one transaction (`add_book`, `#source`/`#audience` stamped, tags+rating cleared on the imported ids, timestamped backups, metadata downloads whose failures become decisions, resumable); phase 3 refuses a live Calibre and banned answer-file columns like every other write path, and its mechanical-pass trouble fails the verb |
 | **Set writes** | `--ids` / `--from-search` / `--from-untagged` / `--from-manifest` + `--batch-*` verbs, `--apply`, `--backup-dir`, `--format json` | One target set, many verbs, one transaction (Phase 16). Dry-run by default; `--apply` demands a closed Calibre and a backup of `metadata.db` outside the library directory, then commits as ONE `batch()` pass (all-or-nothing; `--commit-per-book` for very large sets). `--commit-per-book` really commits one transaction per book (a failing book rolls back alone; the report and JSON say which). `--batch-clear-rating` is legal ONLY against a valid, sealed batch manifest, and only for ids it imported (the bulk-ratings ban, mechanically enforced); empty-string values are refused; `#reading_status`/`status`/`date_read` are refused by name at every door; reporting counts applied / already-so / failed per verb, with a machine-readable JSON report that names the resolved ids |
 | **Custom columns (write)** | `--add-custom-column LABEL NAME DATATYPE [--column-is-multiple]`, `--remove-custom-column LABEL` | The calibredb schema-CRUD parity verbs, over cquarry's column DDL. Dry run by default; `--apply` demands a closed Calibre and a backup outside the library. A new column sets Calibre's `update_all_last_mod_dates_on_start` (the next GUI start refreshes every book's last_modified); deletion only FLAGS the column (`mark_for_delete`) and Calibre purges the storage at its next start. `#reading_status`/`status`/`date_read` are refused by label at both doors |
-| **Saved searches (write)** | `--saved-search-add NAME EXPR`, `--saved-search-delete NAME`, `--saved-search-rename OLD NEW` | Manage the saved searches Calibre's GUI reads, through cquarry's typed preference writer (one `preferences` row). Dry run by default; `--apply` demands a closed Calibre and a backup outside the library; one write per invocation (they refuse the company of book verbs); the rename refuses to overwrite an existing name, where upstream silently does |
+| **Saved searches (write)** | `--saved-search-add NAME EXPR`, `--saved-search-delete NAME`, `--saved-search-rename OLD NEW` | Manage the saved searches Calibre's GUI reads, through cquarry's typed preference writer (one `preferences` row). Dry run by default; `--apply` demands a closed Calibre and a backup outside the library; one write per invocation (a book verb in the same invocation is refused); the rename refuses to overwrite an existing name, where upstream silently does |
 | **Trash** | `--trash` | List the library's `.caltrash` entries (what `run merge` moved aside): category, book id, age, files; library-shape, so `--restrict` does not scope it |
 | **Book detail** | `--book BOOK_ID[,BOOK_ID...]`, `--book --untagged` | Full dossier for one book or a comma-separated list: identifiers, format files with catalogued sizes and on-disk paths, cover, comments (HTML stripped), custom columns, annotations, per-device reading progress, plugin data, conversion overrides; publication date shown alongside the timestamps. `--book --untagged` (no ids) selects every untagged book (the phase-3 curation entry state) via cquarry's `find_untagged()` |
 | **Entities** | `--entities KIND` | List `authors`/`series`/`publishers`/`tags`/`languages`/`ratings` with book counts; authors/series/publishers carry their sort and link columns |
@@ -89,15 +89,19 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 
 ### The integration verbs (Phase 19 C)
 
+The integration verbs drive Calibre's own headless tools:
 `run convert`, `run polish`, `run cover`, `run export`, `run merge`,
-`run flush`, `run backfill`, `run backup-metadata`, `run restore-database`,
-`run clone`, `run fts-index`, and the `run catalog-epub` /
-`run catalog-bibtex` pair drive the external tools
-(`ebook-convert`, `ebook-polish`, `calibredb`,
-`fetch-ebook-metadata`) over a resolved set and register the outcome
-through cquarry's write module; `run trash` (below) is the pure
-filesystem lifecycle. Every verb is a dry run until
-`--apply`, which demands a closed Calibre and (for the
+`run flush`, `run backfill`, and `run backup-metadata` shell out to
+`ebook-convert`, `ebook-polish`, `calibredb`, and
+`fetch-ebook-metadata` over a resolved set and register the outcome
+through cquarry's write module; `run restore-database` and
+`run clone` manage whole databases under an explicit `--target`;
+`run fts-index` queues Calibre's own extractor;
+`run catalog-epub` / `run catalog-bibtex` produce catalogs through
+calibredb's plugins (the library is only read); and `run customize`,
+`run debug-tools`, and `run device` need no library at all
+(`run trash`, below, is the pure filesystem lifecycle). Every verb is
+a dry run until `--apply`, which demands a closed Calibre and (for the
 metadata-mutating verbs) a `--backup-dir` outside the library. A
 book that already has the requested conversion target is skipped at
 plan time ("already has TARGET"; the file stands untouched), the
@@ -957,7 +961,7 @@ A linter for `metadata.db` with two layers. It is the database-side companion to
 
 **Integrity layer (always on, zero config).** Taxonomy-agnostic, schema-level problems the UI and `--audit` leave alone: books with no language, one ISBN attached to two books, placeholder (`0101-01-01`) or unparseable publication dates, junk identifier types (`url`, `uri`, `guid`, `isbn13`, ...), an ISBN-10 misfiled under `amazon`/`mobi-asin` (checksum-verified, so genuine ASINs are left alone), and custom-column link rows orphaned by deleted books. Safe to point at any library; needs no configuration.
 
-**Opinionated layer (on when a taxonomy is loaded).** A `taxonomy.json` describes your tag tree, publisher consolidations, and identifier vocabulary, and these checks enforce it: every tag in use must be declared (`TAG_IN_SPEC`), alias publishers must be merged into their canonical (`PUBLISHER_NOT_CONSOLIDATED`), and fiction should not be PDF-only (`FORMAT_FICTION_PDF`). Loading a taxonomy also makes the identifier-type vocabulary authoritative (the `--strict` behavior turns on automatically). A comprehensive, ready-to-adapt template ships as **`scripts/taxonomy.example.json`** (three roots: `Fic` / `NonFic` / `Gaming`, with a deep, single-tag-per-book hierarchy; a branch is a valid tag on its own only when its `bare_allowed` is `true`). A fuller real-world reference in YAML, **`docs/taxonomy.example.yaml`**, is also included; it is the richer schema used by a separate library-side linter and is provided for reference (the stdlib tools here read the JSON form).
+**Opinionated layer (on when a taxonomy is loaded).** A `taxonomy.json` describes your tag tree, publisher consolidations, and identifier vocabulary, and these checks enforce it: every tag in use must be declared (`TAG_IN_SPEC`), alias publishers must be merged into their canonical (`PUBLISHER_NOT_CONSOLIDATED`), and fiction should not be PDF-only (`FORMAT_FICTION_PDF`). Loading a taxonomy also makes the identifier-type vocabulary authoritative (the `--strict` behavior turns on automatically). A ready-to-adapt template ships as **`scripts/taxonomy.example.json`** (three roots: `Fic` / `NonFic` / `Gaming`, with a deep, single-tag-per-book hierarchy; a branch is a valid tag on its own only when its `bare_allowed` is `true`). A fuller real-world reference in YAML, **`docs/taxonomy.example.yaml`**, is also included; it is the richer schema used by a separate library-side linter and is provided for reference (the stdlib tools here read the JSON form).
 
 Errors are bad data Calibre or tooling can trip on; warnings are hygiene.
 
@@ -1036,7 +1040,7 @@ and within the batch, and printed as comparison columns. Beyond true
 duplicates, the classifier surfaces two advisory classes it never auto-
 refuses: differing declared volume annotations as one multi-volume set
 (`batch_volumes`), and colon-boundary title containment as related
-candidates (`batch_related`, `related_hits`) — the shape a series/store
+candidates (`batch_related`, `related_hits`): the shape a series/store
 prefix makes when it can either mask a duplicate or join two distinct
 products, so the human judges. `--format json` emits the bare list of
 per-file records the `run phase1` seam consumes (only records with

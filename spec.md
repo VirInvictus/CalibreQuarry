@@ -1,6 +1,6 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.54.0  
+**Version:** 3.55.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry` (>= 1.24.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -258,8 +258,7 @@ it are never reported as never indexed. A missing sidecar is the
   only `metadata.db` and its reports. What the toolkit does ship is
   orchestration of Calibre's own headless tools: `run convert` drives
   `ebook-convert` and registers the output through cquarry, `run polish` drives
-  `ebook-polish`, and the §5 companion scripts rewrite book files directly, all
-  explicitly outside the package guarantees this section states.
+  `ebook-polish`, and the §5 companion scripts rewrite book files directly.
 - **Not a server.** It has no web interface, and the read surface has no network access. The one network-touching verb is `run backfill` at `--apply` (it drives `fetch-ebook-metadata`, an external calibre tool, per book); everything else runs entirely offline.
 
 These guarantees apply to the `cquarry_cli` package only. The companion scripts in §5 are explicitly outside this contract.

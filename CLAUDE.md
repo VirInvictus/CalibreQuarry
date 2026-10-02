@@ -5,6 +5,51 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.55.0 onward, the Phase 20 parity lane)
+
+- **The headless verbs are subprocess seams with spawn-point refusals.**
+  `integrate.py` hosts backup-metadata, restore-database, clone, fts-index,
+  catalog-epub/bibtex; customize, debug-tools, and device need no library and
+  are routed by `dispatch_run` before any database resolution
+  (`dispatch_headless`). The missing-binary refusal (`shutil.which`) sits
+  with the spawns, never ahead of a dry run: CI has no calibredb, and a
+  verb-top check refused even the plans (339cb06's fix). restore-database
+  CREATES a database: `--target` required, existing metadata.db replaced
+  only under `--force`, an OPF-less target refused, no `--backup-dir`
+  (upstream keeps its own `metadata_pre_restore.db`). clone's dry run says
+  NO BOOKS copy; the target must not exist or must be empty and never
+  collides with the source. catalog's output extension is enforced per verb
+  (`_CATALOG_EXTS`): calibredb catalog silently falls back to the EPUB
+  plugin on an unrecognized extension. fts-index's `--enable` writes a
+  preference row and carries its OWN backup rule in-verb (the trash
+  precedent); the reindex touches only the sidecar and needs none.
+- **The library-schema writes are one dispatcher: `schemawrite.py`.**
+  `SCHEMA_WRITE_DESTS` (dests.py) holds the five dests; they refuse the
+  company of any book verb or set source, run one write per invocation, and
+  take the full rails. The custom-column doors refuse the NON-NEGOTIABLES
+  labels at the argument layer (`_check_column_label`); add sets
+  update_all_last_mod_dates_on_start (named in the dry run), remove only
+  flags mark_for_delete. `--column-is-multiple` is refused as an orphan
+  modifier. The flags with no nargs (delete, remove) store plain strings,
+  not tuples. The dry-run peek opens one read-only CalibreDB and must do
+  BOTH reads inside its open block (the column read used to run after
+  close). Test-fixture trap, now pinned: the preferences table needs
+  `UNIQUE (key)` (Calibre's real shape) or INSERT OR REPLACE inserts second
+  rows and every fetchone() sees the stale first one.
+- **The sign/approve pair.** `manifest.approve_from_verdicts` REPLACEs the
+  approved list from the per-file verdicts; `run approve` wraps it (loads
+  with `check_approval_pairing=False`, the validate opt-out, because the
+  repair door must load the broken pairing it fixes); `sign_manifest`
+  replaces the pairing cross-check with the derived-vs-listed comparison,
+  which covers BOTH divergence directions and names approve as the fix.
+  Phase 2/3 loads keep the full validator.
+- **reconcile's verify-after-embed**: `verify_embedded` re-diffs every file
+  a writer claimed; residuals fail the run (exit 1, the class phase 3's
+  seam already tolerates). `run flush` reports `queue_remaining` in JSON.
+  fetch_library_codes' `--sru-fallback` caches work-level lookups under
+  `work:` keys that cannot collide with ISBN keys; fallback failures count
+  toward the consecutive-failure abort.
+
 ## Programmer-facing contract notes (3.54.0 onward, the seed-and-recover batch)
 
 - **The phase-1 author seed cuts the bracket BEFORE the split.**

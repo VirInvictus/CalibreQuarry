@@ -1,5 +1,90 @@
 # CalibreQuarry Patch Notes
 
+# 3.55.0 (2026-10-02)
+
+### The Phase 20 parity lane: every unwired headless Calibre verb, plus the record-integrity batch
+
+- **Eight new `run` verbs wire the headless upstream surface** (the Phase 20
+  program's committed boxes): `run backup-metadata` (calibredb
+  backup_metadata over the dirtied queue, `--all` for the deliberate
+  whole-library flood, flush's rails), `run restore-database` (the
+  rebuild-from-stored-OPFs door behind a required `--target`, an existing
+  metadata.db replaced only under `--force`, an OPF-less target refused, and
+  the rebuild's losses named in the dry run), `run clone` (the schema-fresh
+  half of a library copy; the dry run says NO BOOKS copy, loudly; the target
+  must not exist or must be empty and never collides with the source), `run
+  fts-index` (calibredb fts_index over the dirtied queue read through
+  cquarry's `get_dirtied_formats()`; `--fts-status` reads upstream's disabled
+  answer as a report; `--enable` writes the fts_enabled preference and
+  carries its own backup rule), `run catalog-epub` / `run catalog-bibtex`
+  (calibredb catalog through the EPUB_MOBI and BIBTEX plugins; the output
+  extension is ENFORCED because calibredb silently falls back to EPUB on an
+  unrecognized one), `run customize` (calibre-customize install/enable/
+  disable/list; the Bindery Repair plugin zip's headless front door), `run
+  debug-tools` (the curated calibre-debug subset: explode/implode/diff/
+  kepubify/un-kepubify/inspect-mobi; `-e`/`--exec-file` is not a verb and the
+  parser never offers it), and `run device` (the ebook-device USBMS subset;
+  MTP and wireless stay excluded). customize, debug-tools, and device need no
+  library and are routed before any database resolution; the file mutators
+  are dry-run by default with `--apply` behind the closed-Calibre guard, and
+  the missing-binary refusals sit at the spawn points, never ahead of a dry
+  run (CI's calibredb-less runner caught the first cut refusing plans).
+- **The library-schema writes land as a class**: `--saved-search-add NAME
+  EXPR` / `--saved-search-delete NAME` / `--saved-search-rename OLD NEW`
+  (cquarry 1.24's typed preference writer; the rename refuses to overwrite
+  an existing name where upstream silently does) and
+  `--add-custom-column LABEL NAME DATATYPE` (+`--column-is-multiple`) /
+  `--remove-custom-column LABEL` (cquarry's column DDL; creation names the
+  update_all_last_mod_dates_on_start side effect, deletion names the
+  mark_for_delete purge semantics, and the NON-NEGOTIABLES labels are
+  refused at both doors). The new `schemawrite` dispatcher owns the class:
+  library-wide state, not books, so the verbs refuse the company of any
+  book verb or set source, run one write per invocation, and hold the full
+  rails (dry-run default, `--apply` with the closed-Calibre guard and an
+  out-of-tree timestamped backup, exit 0/1/2).
+- **`run approve` is the sanctioned verdict-flip propagation, and sign
+  refuses divergence** (the 2026-09-19 Moral Letters / Arcana hole): a
+  reviewer verdict flip used to require editing `verdict` AND rebuilding
+  `approved_for_import` by hand, with the under-listed direction invisible
+  to every gate (phase 2 silently imported less than the verdicts approved).
+  `cquarry run approve --manifest FILE` re-derives the list from the
+  per-file verdicts (REPLACE, so a flip back to a refusal also propagates)
+  and reports the adds/removals; sign refuses the derived-vs-listed
+  divergence in BOTH directions and names approve as the fix. The manifest
+  validator's approved-pairing cross-check gains an opt-out flag because the
+  repair door must be able to load the broken pairing it exists to fix;
+  phase 2/3 loads keep the full check.
+- **reconcile_file_metadata.py verifies after it embeds** (the #9177
+  lesson): every file a writer claimed is read back and re-diffed after the
+  apply pass, still-drifted files are reported as RESIDUAL rows and fail the
+  run, so `calibredb embed_metadata`'s success-with-no-write class (the EPUB
+  that keeps its own dc:date) is a finding instead of a silence. `run flush`
+  names its two empty states apart ("The OPF queue is empty" versus "No
+  targeted book is in the OPF queue") and reports the queue it leaves behind
+  after `--apply` (`queue_remaining` in the JSON form).
+- **fetch_library_codes.py gains `--sru-fallback`**: after a clean ISBN
+  miss, one paced title/author SRU query (the 2026-09 hand pass recovered 15
+  of 17 misses this way); work-level hits are tagged in the hit lines and
+  the report because the classification belongs to the matched work, not
+  necessarily this edition, and work lookups cache under a key that cannot
+  collide with an ISBN entry.
+- **The raw-SQL tier is clean again**: `modes/fts.py`'s dirtied-formats
+  sidecar read (the frontend's one recorded raw-SQL exception since 3.37)
+  is retired for cquarry 1.24's `get_dirtied_formats()`, and the cquarry
+  floor moves to **1.24.0** in both carriers.
+- **Docs and CI truth**: the per-mode `--format` corners box and the L4
+  ranked-candidates line are resolved in the roadmap (every candidate
+  shipped, was superseded by Phase 20, or died by its recorded decision);
+  spec section 4's "Not a converter" claim now names the orchestration
+  posture (the package's native surface stays metadata-only; the conversion
+  surface is Calibre's own tools plus the out-of-contract scripts); the
+  example taxonomy documents the validator-v2 `rule_options.<RULE>.allowed_ids`
+  allowlist (the EVERY_BOOK_COVER suppression path; the live case resolved
+  itself, zero has_cover = 0 books); and ci.yml's actions are SHA-pinned to
+  the same commits publish.yml uses, with a concurrency block and a job
+  timeout (the merged dependabot PRs had moved the tags without pinning).
+
+
 # 3.54.0 (2026-09-26)
 
 ### The multi-author seed fix and the stamp_pdf parse-crash recovery
