@@ -177,6 +177,12 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       orchestration posture (the verb shells Calibre's own tools; the native surface
       stays read-only). *(Fixed 2026-10-02: §4 now draws the line as package
       guarantees versus orchestration and script capabilities.)*
+- [x] ci.yml hardening (found 2026-10-02 in the four-lane verification): the
+      merged dependabot PRs had left ci.yml on movable tags while publish.yml
+      carried the ledger's SHA pins; ci.yml now pins the same commits, with a
+      concurrency block and a job timeout. *(Shipped 2026-10-02 in 3.55.0's
+      "Docs and CI truth" bullet; this line exists because the Final-audit
+      ledger row's hardening covers publish.yml only.)*
 - [ ] The L4 TUI set-write batch session stays GATED (risk surface); the program does
       not ungate it. The per-mode --format corners, the fetch_library_codes SRU fallback, the
       run approve design, and the validate_library allowlist shipped or closed
