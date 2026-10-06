@@ -24,6 +24,12 @@ assert _spec and _spec.loader
 rfm = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rfm)
 
+try:
+    from cquarry_cli import epubdates as epd
+except ImportError:
+    # the script's exec above already put the repo's src/ on sys.path
+    from cquarry_cli import epubdates as epd
+
 
 def db_record(**over):
     base = {
@@ -466,7 +472,14 @@ class TestEpubDateNormalization(unittest.TestCase):
     every other one standing, while calibre's EPUB2 reader reports the
     minimum: a file carrying a fetch-era run-clock value plus the publisher
     original read back as permanent pubdate drift that re-embedding never
-    converged. The pass forces the OPF to exactly one canonical dc:date."""
+    converged. The pass forces the OPF to exactly one canonical dc:date.
+    The functions live in cquarry_cli.epubdates (run flush shares them);
+    the script re-exports what it uses."""
+
+    def test_script_reexports_are_the_module_objects(self):
+        # Single source: the script must not carry a fork of the surgery.
+        self.assertIs(rfm.norm_date, epd.norm_date)
+        self.assertIs(rfm.normalize_epub_dates, epd.normalize_epub_dates)
 
     LIVE_OPF = (
         "<?xml version='1.0' encoding='utf-8'?>\n"
@@ -505,7 +518,7 @@ class TestEpubDateNormalization(unittest.TestCase):
         return re.findall(r"<dc:date[^>]*>[^<]*</dc:date>", opf_text)
 
     def test_live_three_date_shape_collapses_to_one(self):
-        out = rfm.canonical_dc_dates(self.LIVE_OPF, "2023-09-28")
+        out = epd.canonical_dc_dates(self.LIVE_OPF, "2023-09-28")
         self.assertIsNotNone(out)
         self.assertEqual(self.dates_in(out), ["<dc:date>2023-09-28</dc:date>"])
         # the canonical element sits where the publisher's first date sat,
@@ -532,16 +545,16 @@ class TestEpubDateNormalization(unittest.TestCase):
             '    <dc:date opf:event="modification">2023-06-06</dc:date>\n',
             "    <dc:date>2023-09-28</dc:date>\n",
         )
-        self.assertEqual(rfm.canonical_dc_dates(opf, "2023-09-28"), opf)
+        self.assertEqual(epd.canonical_dc_dates(opf, "2023-09-28"), opf)
 
     def test_second_pass_is_idempotent(self):
-        once = rfm.canonical_dc_dates(self.LIVE_OPF, "2023-09-28")
-        self.assertEqual(rfm.canonical_dc_dates(once, "2023-09-28"), once)
+        once = epd.canonical_dc_dates(self.LIVE_OPF, "2023-09-28")
+        self.assertEqual(epd.canonical_dc_dates(once, "2023-09-28"), once)
 
     def test_missing_target_removes_every_date(self):
         # '' is the unset/sentinel DB pubdate: the canonical shape is no
         # dc:date at all, matching how diff_fields compares.
-        out = rfm.canonical_dc_dates(self.LIVE_OPF, "")
+        out = epd.canonical_dc_dates(self.LIVE_OPF, "")
         self.assertIsNotNone(out)
         self.assertEqual(self.dates_in(out), [])
         self.assertIn("<dc:publisher>Subterranean Press</dc:publisher>", out)
@@ -550,7 +563,7 @@ class TestEpubDateNormalization(unittest.TestCase):
     def test_no_dates_inserts_after_publisher(self):
         opf = self.LIVE_OPF
         opf = re.sub(r"    <dc:date[^>]*>[^<]*</dc:date>\n", "", opf)
-        out = rfm.canonical_dc_dates(opf, "2023-09-28")
+        out = epd.canonical_dc_dates(opf, "2023-09-28")
         self.assertIsNotNone(out)
         self.assertIn(
             "    <dc:publisher>Subterranean Press</dc:publisher>\n"
@@ -561,10 +574,10 @@ class TestEpubDateNormalization(unittest.TestCase):
     def test_insertion_without_dc_binding_is_refused(self):
         opf = self.LIVE_OPF.replace(' xmlns:dc="http://purl.org/dc/elements/1.1/"', "")
         opf = re.sub(r"    <dc:date[^>]*>[^<]*</dc:date>\n", "", opf)
-        self.assertIsNone(rfm.canonical_dc_dates(opf, "2023-09-28"))
+        self.assertIsNone(epd.canonical_dc_dates(opf, "2023-09-28"))
 
     def test_no_metadata_block_is_refused(self):
-        self.assertIsNone(rfm.canonical_dc_dates("<html><body/></html>", "2023-09-28"))
+        self.assertIsNone(epd.canonical_dc_dates("<html><body/></html>", "2023-09-28"))
 
     def test_epub3_dcterms_modified_survives(self):
         opf = self.LIVE_OPF.replace(
@@ -572,7 +585,7 @@ class TestEpubDateNormalization(unittest.TestCase):
             '    <meta name="cover" content="cover-image"/>\n'
             '    <meta property="dcterms:modified">2023-07-01T00:00:00Z</meta>\n',
         )
-        out = rfm.canonical_dc_dates(opf, "2023-09-28")
+        out = epd.canonical_dc_dates(opf, "2023-09-28")
         self.assertIn(
             '<meta property="dcterms:modified">2023-07-01T00:00:00Z</meta>', out
         )
@@ -595,7 +608,7 @@ class TestEpubDateNormalization(unittest.TestCase):
                 n: before.read(n) for n in before.namelist() if n != "OEBPS/content.opf"
             }
             before.close()
-            self.assertTrue(rfm.normalize_epub_dates(path, "2023-09-28"))
+            self.assertTrue(epd.normalize_epub_dates(path, "2023-09-28"))
             after = zipfile.ZipFile(path)
             self.assertEqual(after.namelist()[0], "mimetype")
             self.assertEqual(after.namelist(), list(other) + ["OEBPS/content.opf"])
@@ -617,21 +630,21 @@ class TestEpubDateNormalization(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._build_epub(tmp, opf)
             raw = path.read_bytes()
-            self.assertTrue(rfm.normalize_epub_dates(path, "2023-09-28"))
+            self.assertTrue(epd.normalize_epub_dates(path, "2023-09-28"))
             self.assertEqual(path.read_bytes(), raw)
 
     def test_unopenable_file_fails_cleanly(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "book.epub"
             path.write_bytes(b"epub")
-            self.assertFalse(rfm.normalize_epub_dates(path, "2023-09-28"))
+            self.assertFalse(epd.normalize_epub_dates(path, "2023-09-28"))
 
     def test_zip_without_container_fails_cleanly(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "book.epub"
             with zipfile.ZipFile(path, "w") as z:
                 z.writestr("mimetype", "application/epub+zip")
-            self.assertFalse(rfm.normalize_epub_dates(path, "2023-09-28"))
+            self.assertFalse(epd.normalize_epub_dates(path, "2023-09-28"))
 
 
 if __name__ == "__main__":

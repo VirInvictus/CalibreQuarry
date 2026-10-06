@@ -33,6 +33,7 @@ from pathlib import Path
 from cquarry.helpers import to_isbn13
 from cquarry.write import WritableCalibreDB
 from cquarry_cli.backups import make_backup
+from cquarry_cli.epubdates import norm_date, normalize_epub_dates
 
 _PGREP_TIMEOUT = 10
 
@@ -539,6 +540,27 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
             )
             return 1
         done += len(c)
+    # The dc:date cleanup rides every EPUB embed (the 3.56.0 pass, issue
+    # #3): calibredb's EPUB2 writer rewrites only the earliest dc:date and
+    # leaves the rest standing, so a flushed multi-dated EPUB2 kept the
+    # junk dates forever. The same normalization
+    # scripts/reconcile_file_metadata.py runs, from the shared module.
+    normalized = 0
+    for bid in ids:
+        entry = db.get_formats(bid).get("EPUB")
+        if entry is None:
+            continue
+        fpath = Path(entry["path"])
+        if not fpath.exists():
+            continue
+        if normalize_epub_dates(fpath, norm_date(db.get_book(bid)["pubdate"])):
+            normalized += 1
+        else:
+            print(
+                f"ERROR: dc:date normalization failed on {fpath}",
+                file=sys.stderr,
+            )
+            return 1
     # Post-apply honesty: re-read the queue so a calibredb run that exited 0
     # without draining it (or dirtied work that raced the run) is reported,
     # not silent.
@@ -546,12 +568,21 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
     if as_json:
         print(
             json.dumps(
-                {"results": {"flushed": done, "queue_remaining": len(remaining)}},
+                {
+                    "results": {
+                        "flushed": done,
+                        "epub_dates_normalized": normalized,
+                        "queue_remaining": len(remaining),
+                    }
+                },
                 indent=1,
             )
         )
     else:
-        print(f"Flushed {done} book(s): embedded metadata regenerated.")
+        line = f"Flushed {done} book(s): embedded metadata regenerated."
+        if normalized:
+            line += f" dc:date normalized in {normalized} EPUB file(s)."
+        print(line)
         if remaining:
             print(
                 f"Queue after flush: {len(remaining)} book(s) still queued "

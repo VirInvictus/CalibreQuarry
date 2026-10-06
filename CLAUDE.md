@@ -26,8 +26,15 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   fails the run; the read-back re-diff stays the arbiter. The zip
   rewrite is whole-archive (entry order and per-entry metadata
   preserved) through a temp file + os.replace in the file's directory.
-  Scope note: `run flush` embeds via calibredb too and does NOT run the
-  normalization (raised, not built).
+- **The pass lives in `src/cquarry_cli/epubdates.py` and `run flush`
+  runs it too** (the follow-up to 3.56.0, sharing the module; ships
+  with the next release): after a green embed pass, every flushed
+  book's EPUB is normalized the same way, a normalization failure
+  fails the verb, and the report carries the count (text line;
+  `epub_dates_normalized` in JSON). The script imports norm_date and
+  normalize_epub_dates from the module (a checkout run without the
+  package importable inserts the repo's src/), and a test pins the
+  re-exports as the module objects, so a fork cannot rot flush.
 
 ## Programmer-facing contract notes (3.55.2 onward, the live-seam drill)
 
