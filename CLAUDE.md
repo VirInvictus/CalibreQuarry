@@ -5,6 +5,23 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.59.0 onward, the truthed-up + json help)
+
+- **Verb pages are claim-map truth.** `VERB_FLAGS` claims `backup_dir`
+  for every verb whose `--apply` demands it (phase2 + the
+  dispatch_integrate needs_backup set), and the per-verb shared footer
+  is verb-aware via `shared_flags_for` + `APPLY_VERBS`: the
+  acquisition-pathway verbs (phase1/sign/approve/phase2/phase3) have NO
+  --apply and their pages must not advertise one. `takes_apply` in the
+  json surface is the same table.
+- **`--help json` is the machine surface**: the complete parser
+  (groups, flags, run verbs with claimed flags + prose + shared) as
+  JSON generated from the live parser, `sort_keys` deterministic, and
+  NEVER painted — the intercept exempts the json topic from `paint()`
+  so the output stays valid JSON under FORCE_COLOR. An agent's
+  single-artifact CLI reference; the AI-grokability probe (2026-10-06)
+  is what drove the truth-up.
+
 ## Programmer-facing contract notes (3.58.0 onward, the colored help)
 
 - **Help pages paint at print time, never at layout time.**

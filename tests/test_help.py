@@ -252,3 +252,100 @@ class TestColor(unittest.TestCase):
             code = main(["--help", "write"])
         self.assertEqual(code, 0)
         self.assertNotIn("\x1b", out.getvalue())
+
+
+class TestTruthedUpPages(unittest.TestCase):
+    """The AI-grokability probe's findings, fixed: verb pages tell the
+    truth about --apply and --backup-dir, and the json topic dumps the
+    whole surface as one machine-readable artifact."""
+
+    def test_pathway_pages_do_not_advertise_apply(self):
+        for verb in ("phase1", "sign", "approve", "phase2", "phase3"):
+            page = handle_help(["run", "--help", verb])[1]
+            self.assertNotIn("--apply (execute", page, verb)
+
+    def test_apply_pages_do_and_claim_backup_dir_where_required(self):
+        from cquarry_cli.helpcli import VERB_FLAGS
+
+        backup_verbs = {
+            verb for verb, flags in VERB_FLAGS.items() if "backup_dir" in flags
+        }
+        self.assertEqual(
+            backup_verbs,
+            {
+                "phase2",
+                "convert",
+                "polish",
+                "cover",
+                "merge",
+                "flush",
+                "backfill",
+                "backup-metadata",
+            },
+        )
+        for verb in ("flush", "convert", "backup-metadata"):
+            page = handle_help(["run", "--help", verb])[1]
+            self.assertIn("--apply (execute", page, verb)
+            self.assertIn("--backup-dir", page, verb)
+
+    def test_read_topic_names_the_two_mode_outcome(self):
+        text = handle_help(["--help", "read"])[1]
+        self.assertIn("two modes in one invocation", text)
+        self.assertIn("exit 2", text)
+
+
+class TestJsonTopic(unittest.TestCase):
+    def test_valid_deterministic_and_versioned(self):
+        import json as jsonlib
+
+        first = handle_help(["--help", "json"])[1]
+        second = handle_help(["--help", "json"])[1]
+        self.assertEqual(first, second)
+        data = jsonlib.loads(first)
+        from cquarry_cli import VERSION
+
+        self.assertEqual(data["version"], VERSION)
+        self.assertEqual(data["tool"], "cquarry")
+        self.assertEqual(len(data["run"]["verbs"]), 22)
+
+    def test_json_covers_every_top_level_flag(self):
+        import json as jsonlib
+
+        data = jsonlib.loads(handle_help(["--help", "json"])[1])
+        text = handle_help(["--help", "json"])[1]
+        parser = build_parser()
+        for action in parser._actions:
+            for opt in action.option_strings:
+                if opt in ("-h", "--help"):
+                    continue
+                self.assertIn(opt, text, opt)
+        dests = {f["dest"] for group in data["groups"] for f in group["flags"]}
+        for action in parser._actions:
+            if action.dest in ("help", "subcommand"):
+                continue
+            self.assertIn(action.dest, dests, action.dest)
+
+    def test_json_takes_apply_matches_the_apply_table(self):
+        import json as jsonlib
+
+        data = jsonlib.loads(handle_help(["--help", "json"])[1])
+        verbs = data["run"]["verbs"]
+        self.assertFalse(verbs["sign"]["takes_apply"])
+        self.assertTrue(verbs["flush"]["takes_apply"])
+        self.assertEqual(
+            {v for v, info in verbs.items() if info["takes_apply"]},
+            set(data["run"]["apply_verbs"]),
+        )
+        # the flush claim map carries the required backup flag now
+        flush_dests = {f["dest"] for f in verbs["flush"]["flags"]}
+        self.assertIn("backup_dir", flush_dests)
+
+    def test_json_never_colored_even_forced(self):
+        import os
+
+        from cquarry_cli.helpcli import paint
+
+        handle_help(["--help", "json"])
+        with mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
+            self.assertNotIn("\x1b", handle_help(["--help", "json"])[1])
+            self.assertIn("\x1b", paint("run VERB --flag FILE"))

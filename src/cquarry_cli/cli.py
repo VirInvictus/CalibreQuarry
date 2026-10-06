@@ -16,7 +16,6 @@ from cquarry.integrity import find_untagged
 
 from cquarry_cli import VERSION
 from cquarry_cli.helpcli import (
-    _can_color,
     DISPLAY_TITLE,
     MODES_TITLE,
     MODIFIERS_TITLE,
@@ -1323,11 +1322,9 @@ def main(argv: list[str] | None = None) -> int:
 
     helped = handle_help(list(argv))
     if helped is not None:
+        # text arrives final (painted by the intercept unless it is JSON)
         code, text = helped
-        from cquarry_cli.helpcli import paint
-
-        stream = sys.stdout if code == 0 else sys.stderr
-        print(paint(text, _can_color(stream)), file=stream)
+        print(text, file=sys.stdout if code == 0 else sys.stderr)
         return code
     if len(argv) == 0:
         return interactive_menu()

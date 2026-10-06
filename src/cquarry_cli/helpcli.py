@@ -11,10 +11,13 @@ by construction; the curated layer is the prose and the per-verb claim map
 (which run flag belongs to which verb), and tests/test_help.py pins that
 map against build_parser() so an undocumented flag cannot land quietly."""
 
+import json
 import os
 import re
 import sys
 import textwrap
+
+from cquarry_cli import VERSION
 
 # Group titles, shared with cli.py's add_argument_group calls so topic
 # rendering can find the groups without knowing their positions.
@@ -28,7 +31,7 @@ SET_TITLE = (
     "set writes (dry-run by default; --apply requires --backup-dir and Calibre closed)"
 )
 
-TOPICS = ("read", "write", "set", "run", "examples", "all")
+TOPICS = ("read", "write", "set", "run", "examples", "all", "json")
 
 # The color theme mirrors the CPython 3.14 argparse default (_colorize's
 # argparse theme: bold blue headings and usage, bold magenta prog, bold cyan
@@ -142,6 +145,40 @@ RUN_VERBS: tuple[str, ...] = tuple(verb for _, verbs in RUN_STAGES for verb, _ i
 # (--apply where it mutates, --db, --format, --quiet) live in
 # SHARED_RUN_FLAGS instead, so the claim map stays per-verb truth.
 SHARED_RUN_FLAGS = ("apply", "db", "format", "quiet")
+# The verbs that actually consult --apply (dry run by default). The
+# acquisition-pathway verbs do NOT: phase1's file-side writes are the
+# separate --stamp/--apply-lossy/--quarantine opt-ins, and
+# sign/approve/phase2/phase3 execute the manifest exactly as their pages
+# document, so their pages must not advertise --apply.
+APPLY_VERBS = frozenset(
+    {
+        "convert",
+        "polish",
+        "cover",
+        "export",
+        "merge",
+        "flush",
+        "backfill",
+        "trash",
+        "backup-metadata",
+        "restore-database",
+        "clone",
+        "fts-index",
+        "catalog-epub",
+        "catalog-bibtex",
+        "customize",
+        "debug-tools",
+        "device",
+    }
+)
+
+
+def shared_flags_for(verb: str) -> tuple[str, ...]:
+    if verb in APPLY_VERBS:
+        return SHARED_RUN_FLAGS
+    return ("db", "format", "quiet")
+
+
 VERB_FLAGS: dict[str, tuple[str, ...]] = {
     "phase1": (
         "dir",
@@ -155,15 +192,15 @@ VERB_FLAGS: dict[str, tuple[str, ...]] = {
     "approve": ("manifest",),
     "phase2": ("manifest", "backup_dir", "audience"),
     "phase3": ("manifest", "answer_file"),
-    "convert": ("search", "ids", "to", "from_format"),
-    "polish": ("search", "ids", "polish_ops"),
-    "cover": ("search", "ids", "cover", "remove_cover"),
+    "convert": ("search", "ids", "to", "from_format", "backup_dir"),
+    "polish": ("search", "ids", "polish_ops", "backup_dir"),
+    "cover": ("search", "ids", "cover", "remove_cover", "backup_dir"),
     "export": ("search", "ids", "dest", "template"),
-    "merge": ("keeper", "duplicate"),
-    "flush": ("search", "ids", "chunk"),
-    "backfill": ("search", "ids", "fields"),
+    "merge": ("keeper", "duplicate", "backup_dir"),
+    "flush": ("search", "ids", "chunk", "backup_dir"),
+    "backfill": ("search", "ids", "fields", "backup_dir"),
     "trash": ("empty", "expire"),
-    "backup-metadata": ("all",),
+    "backup-metadata": ("all", "backup_dir"),
     "restore-database": ("target", "force"),
     "clone": ("target",),
     "fts-index": ("enable", "fts_status"),
@@ -264,8 +301,9 @@ VERB_PROSE: dict[str, str] = {
     ),
     "flush": (
         "Embed current database metadata into every book in the OPF-dirty\n"
-        "queue via calibredb embed_metadata, chunked (--chunk, default 50,\n"
-        "ids sent space-separated: a hyphen range would embed every book\n"
+        "queue (the default target; --search/--ids are optional filters on\n"
+        "that queue) via calibredb embed_metadata, chunked (--chunk, default\n"
+        "50, ids sent space-separated: a hyphen range would embed every book\n"
         "between the endpoints). The EPUB dc:date normalization rides along.\n"
         "--apply needs Calibre closed and --backup-dir; the queue is re-read\n"
         "afterwards and any remainder reported."
@@ -467,7 +505,7 @@ def overview(parser) -> str:
     )
     lines.append("")
     lines.append("deep dives:")
-    lines.append("  cquarry --help read|write|set|run|examples|all")
+    lines.append("  cquarry --help read|write|set|run|examples|all|json")
     lines.append("  cquarry --version")
     lines.append("  cquarry run --help VERB        e.g. run --help phase2")
     lines.append("")
@@ -495,7 +533,8 @@ def run_overview() -> str:
             lines.append("  " + verb.ljust(20) + blurb)
         lines.append("")
     lines.append(
-        "shared flags: --apply (execute the plan), --db, --format json, --quiet"
+        "shared flags: --apply (library operations execute at --apply; the"
+        " acquisition-pathway verbs have no --apply), --db, --format json, --quiet"
     )
     lines.append("")
     lines.append("per-verb detail: cquarry run --help VERB   (e.g. run --help phase1)")
@@ -526,9 +565,11 @@ def verb_page(verb: str) -> str:
                 for chunk in textwrap.wrap(detail, 78):
                     lines.append("      " + chunk)
         lines.append("")
-    lines.append(
-        "shared: --apply (execute; dry run without it), --db, --format json, --quiet"
+    footer = "shared: " + ", ".join(
+        "--apply (execute; dry run without it)" if f == "apply" else f"--{f}"
+        for f in shared_flags_for(verb)
     )
+    lines.append(footer)
     return "\n".join(lines)
 
 
@@ -560,6 +601,8 @@ def topic_read(parser) -> str:
         "  --analytics genres --genre-depth N   deeper tag-hierarchy levels\n"
         "  --restrict SEARCH          scopes every read mode; refused with\n"
         "                             write verbs, the run verbs, and --book/--id\n"
+        "  two modes in one invocation  a usage error (exit 2); the error\n"
+        "                             names the flags involved\n"
         "exit codes: 0 clean, 1 findings (mode-dependent), 2 usage."
     )
     return "\n".join(lines)
@@ -663,6 +706,83 @@ def topic_all(parser) -> str:
     return "\n".join(lines)
 
 
+def topic_json() -> str:
+    """The complete parser surface as machine-readable JSON, generated from
+    the live parser (the same anti-rot principle as the flag tables: a new
+    flag lands here by construction). Painted NEVER: the output must stay
+    valid JSON even under FORCE_COLOR. Shape: groups (every top-level
+    argument group with its flags), run.verbs (per verb: stage, summary,
+    prose, the flags it consumes, the shared flags, and whether it takes
+    --apply), run.apply_verbs, topics, usage."""
+    parser = _parser()
+    run_p = next(
+        action.choices["run"]
+        for action in parser._actions
+        if action.dest == "subcommand"
+    )
+    run_actions = {action.dest: action for action in run_p._actions}
+
+    def flag_entry(action):
+        entry = {
+            "flags": list(action.option_strings) or [action.dest],
+            "dest": action.dest,
+            "help": " ".join((action.help or "").split()),
+        }
+        if action.metavar:
+            met = action.metavar
+            entry["metavar"] = " ".join(met) if isinstance(met, tuple) else met
+        if action.choices:
+            entry["choices"] = [str(c) for c in action.choices]
+        if action.nargs not in (None, 0):
+            entry["nargs"] = str(action.nargs)
+        return entry
+
+    groups = []
+    for group in _groups(parser):
+        if not group.title:
+            continue
+        groups.append(
+            {
+                "title": group.title,
+                "description": group.description or "",
+                "flags": [
+                    flag_entry(a) for a in group._group_actions if a.dest != "help"
+                ],
+            }
+        )
+    verbs = {}
+    for stage, stage_verbs in RUN_STAGES:
+        for verb, blurb in stage_verbs:
+            verbs[verb] = {
+                "stage": stage,
+                "summary": blurb,
+                "prose": " ".join(VERB_PROSE[verb].split()),
+                "flags": [
+                    flag_entry(run_actions[dest])
+                    for dest in VERB_FLAGS[verb]
+                    if dest in run_actions
+                ],
+                "shared": ["--" + f for f in shared_flags_for(verb)],
+                "takes_apply": verb in APPLY_VERBS,
+            }
+    payload = {
+        "tool": "cquarry",
+        "version": VERSION,
+        "usage": (
+            "cquarry [--db DB] [--restrict SEARCH] MODE [mode flags]"
+            " | cquarry run VERB [verb flags]"
+        ),
+        "topics": list(TOPICS),
+        "groups": groups,
+        "run": {
+            "verbs": verbs,
+            "apply_verbs": sorted(APPLY_VERBS),
+        },
+        "help": "cquarry --help TOPIC | cquarry run --help VERB",
+    }
+    return json.dumps(payload, indent=1, sort_keys=True)
+
+
 def render_topic(topic: str) -> str:
     parser = _parser()
     if topic == "read":
@@ -677,6 +797,8 @@ def render_topic(topic: str) -> str:
         return topic_examples()
     if topic == "all":
         return topic_all(parser)
+    if topic == "json":
+        return topic_json()
     raise ValueError(f"unknown topic {topic!r}")
 
 
@@ -711,19 +833,22 @@ def handle_help(argv: list[str]) -> tuple[int, str] | None:
                 if hi + 1 < len(rest) and not rest[hi + 1].startswith("-"):
                     candidate = rest[hi + 1]
                     if candidate in RUN_VERBS:
-                        return 0, verb_page(candidate)
+                        return 0, paint(verb_page(candidate))
                     return 2, _unknown_verb(candidate)
                 for token in rest[:hi]:
                     if not token.startswith("-") and token in RUN_VERBS:
-                        return 0, verb_page(token)
-                return 0, run_overview()
+                        return 0, paint(verb_page(token))
+                return 0, paint(run_overview())
     for h in ("--help", "-h"):
         if h in argv:
             i = argv.index(h)
             if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
                 topic = argv[i + 1]
                 if topic in TOPICS:
-                    return 0, render_topic(topic)
+                    text = render_topic(topic)
+                    if topic != "json":  # JSON must stay valid under FORCE_COLOR
+                        text = paint(text)
+                    return 0, text
                 return 2, _unknown_topic(topic)
             return None
     return None
