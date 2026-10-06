@@ -1,5 +1,8 @@
 """The two-level help surface: a compact overview on bare `--help` and
 focused deep-dive pages on `--help TOPIC` (plus per-verb pages under `run`).
+On a terminal the output is ANSI-colored with the exact CPython 3.14
+argparse theme (the colorization argparse itself would have printed before
+the custom renderer took over); piped output stays plain.
 
 The grammar is untouched: this module runs as a pre-parse intercept in
 cli.main() and only ever prints. Flag tables are generated from the live
@@ -8,6 +11,9 @@ by construction; the curated layer is the prose and the per-verb claim map
 (which run flag belongs to which verb), and tests/test_help.py pins that
 map against build_parser() so an undocumented flag cannot land quietly."""
 
+import os
+import re
+import sys
 import textwrap
 
 # Group titles, shared with cli.py's add_argument_group calls so topic
@@ -23,6 +29,71 @@ SET_TITLE = (
 )
 
 TOPICS = ("read", "write", "set", "run", "examples", "all")
+
+# The color theme mirrors the CPython 3.14 argparse default (_colorize's
+# argparse theme: bold blue headings and usage, bold magenta prog, bold cyan
+# long options, bold green short options, bold yellow metavars/labels), so
+# cquarry's help reads like `python --help` in the same terminal. The
+# renderer lays out PLAIN text and paints the finished lines, so column
+# math never sees the (zero-width) codes and one layout serves both faces.
+_THEME = {
+    "heading": "\x1b[1;34m",
+    "prog": "\x1b[1;35m",
+    "long_option": "\x1b[1;36m",
+    "short_option": "\x1b[1;32m",
+    "label": "\x1b[1;33m",
+    "reset": "\x1b[0m",
+}
+
+_CSI = re.compile(r"\x1b\[[0-9;]*m")
+_LONG_OPT = re.compile(r"(?<![\w/-])--[\w][\w-]*")
+_SHORT_OPT = re.compile(r"(?<![\w-])-([A-Za-z])\b")
+_LABEL = re.compile(r"\b[A-Z][A-Z0-9]*\b")
+_PROG = re.compile(r"(?<![\w~./])cquarry\b")
+
+
+def _can_color(stream=None) -> bool:
+    """FORCE_COLOR wins, then NO_COLOR and PYTHON_COLORS=0 suppress, then a
+    TTY check: piped output (tests, README embedding) stays plain. The
+    same contract lattice-music's help ships."""
+    if stream is None:
+        stream = sys.stdout
+    force = os.environ.get("FORCE_COLOR")
+    if force and force != "0":
+        return True
+    if "NO_COLOR" in os.environ:
+        return False
+    if os.environ.get("PYTHON_COLORS") == "0":
+        return False
+    try:
+        return stream.isatty()
+    except ValueError:
+        return False
+
+
+def _paint_line(line: str, style: dict[str, str]) -> str:
+    """Paint the command-shaped tokens of one finished layout line: long
+    options, short options, ALL-CAPS metavars/labels, and the prog name.
+    Prose stays plain."""
+    line = _LONG_OPT.sub(style["long_option"] + r"\g<0>" + style["reset"], line)
+    line = _SHORT_OPT.sub(style["short_option"] + r"\g<0>" + style["reset"], line)
+    line = _LABEL.sub(style["label"] + r"\g<0>" + style["reset"], line)
+    line = _PROG.sub(style["prog"] + r"\g<0>" + style["reset"], line)
+    return line
+
+
+def paint(text: str, enabled: bool | None = None) -> str:
+    """Colorize a finished help page (layout already done on plain text).
+    Disabled (piped, NO_COLOR, PYTHON_COLORS=0) returns the text unchanged;
+    FORCE_COLOR forces. Stripped of codes, the painted render is identical
+    to the plain one."""
+    if enabled is None:
+        enabled = _can_color()
+    if not enabled:
+        return text
+    style = _THEME
+    return "\n".join(_paint_line(line, style) for line in text.splitlines())
+
 
 # The run verbs, staged the way the acquisition pathway thinks about them:
 # (verb, one-liner). Order is the run overview's order.
@@ -355,7 +426,7 @@ def _wrapped_flag_block(actions, indent=2, width=88):
         if not detail:
             lines.append(" " * indent + token)
             continue
-        if len(token) + indent + 2 + len(detail) <= width:
+        if len(token) <= 28 and len(token) + indent + 2 + len(detail) <= width:
             lines.append(" " * indent + token.ljust(28) + detail)
         else:
             lines.append(" " * indent + token)

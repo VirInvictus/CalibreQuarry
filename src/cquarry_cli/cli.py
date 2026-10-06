@@ -16,6 +16,7 @@ from cquarry.integrity import find_untagged
 
 from cquarry_cli import VERSION
 from cquarry_cli.helpcli import (
+    _can_color,
     DISPLAY_TITLE,
     MODES_TITLE,
     MODIFIERS_TITLE,
@@ -107,9 +108,9 @@ class _OverviewHelp(argparse.Action):
         )
 
     def __call__(self, parser, namespace, values, option_string=None):
-        from cquarry_cli.helpcli import overview
+        from cquarry_cli.helpcli import overview, paint
 
-        print(overview(parser))
+        print(paint(overview(parser)))
         parser.exit(0)
 
 
@@ -1323,7 +1324,10 @@ def main(argv: list[str] | None = None) -> int:
     helped = handle_help(list(argv))
     if helped is not None:
         code, text = helped
-        print(text, file=sys.stdout if code == 0 else sys.stderr)
+        from cquarry_cli.helpcli import paint
+
+        stream = sys.stdout if code == 0 else sys.stderr
+        print(paint(text, _can_color(stream)), file=stream)
         return code
     if len(argv) == 0:
         return interactive_menu()

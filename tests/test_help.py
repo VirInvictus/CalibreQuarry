@@ -4,7 +4,11 @@ build_parser()'s argument groups, so these pins guard the curated layer:
 the verb claim map (every run flag claimed by some verb), the topic
 registry, the mode table, and the group assignment the topics render."""
 
+import os
+import re
+import sys
 import unittest
+from unittest import mock
 
 from cquarry_cli import helpcli
 from cquarry_cli.cli import build_parser
@@ -137,3 +141,114 @@ class TestHelpPins(unittest.TestCase):
         self.assertTrue(args.stats)
         args = self.parser.parse_args(["run", "phase1", "somedir"])
         self.assertEqual(args.phase, "phase1")
+
+
+class TestColor(unittest.TestCase):
+    """The CPython 3.14 argparse theme, lattice-music's contract: layout
+    runs on plain text, paint happens on finished lines, piped output
+    stays plain, and the painted render stripped of codes is byte-for-byte
+    the plain one."""
+
+    _CSI = re.compile(r"\x1b\[[0-9;]*m")
+
+    def _plain(self, argv):
+        with mock.patch.dict(os.environ, {"NO_COLOR": "1"}):
+            return handle_help(argv)[1]
+
+    def test_piped_output_stays_plain(self):
+        # tests run piped; no forcing env in play
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FORCE_COLOR", None)
+            os.environ.pop("NO_COLOR", None)
+            code, text = handle_help(["--help", "write"])
+            self.assertEqual(code, 0)
+            self.assertNotIn("\x1b", text)
+
+    def test_force_color_paints_the_cpython_theme(self):
+        plain = self._plain(["--help", "read"])
+        with mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
+            painted = helpcli.paint(plain)
+        self.assertIn("\x1b[1;36m--genre-depth\x1b[0m", painted)
+        self.assertIn("\x1b[1;33mRECENT\x1b[0m", painted)
+        # underscored metavars do not match the ALL-CAPS label shape
+        self.assertNotIn("\x1b[1;33mBOOK_ID\x1b[0m", painted)
+        # force wins even though the test stream is not a tty
+        self.assertNotEqual(painted, plain)
+
+    def test_env_contract(self):
+        text = "run VERB  --flag FILE"
+        cases = [
+            ({"FORCE_COLOR": "1"}, True),
+            ({"NO_COLOR": "1"}, False),
+            ({"NO_COLOR": "1", "FORCE_COLOR": "1"}, True),
+            ({"PYTHON_COLORS": "0"}, False),
+            ({"PYTHON_COLORS": "0", "FORCE_COLOR": "1"}, True),
+            ({}, False),  # piped in tests: no tty, no force
+        ]
+        for env, want in cases:
+            with self.subTest(env=env):
+                with mock.patch.dict(os.environ, env):
+                    painted = helpcli.paint(text)
+                self.assertEqual("\x1b" in painted, want, env)
+
+    def test_strip_invariant(self):
+        pages = [
+            ["--help", "read"],
+            ["--help", "write"],
+            ["--help", "set"],
+            ["--help", "run"],
+            ["--help", "examples"],
+            ["--help", "all"],
+            ["run", "--help", "phase2"],
+            ["run", "--help", "device"],
+        ]
+        for argv in pages:
+            with self.subTest(argv=argv):
+                plain = self._plain(argv)
+                with mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
+                    painted = helpcli.paint(plain)
+                self.assertEqual(self._CSI.sub("", painted), plain)
+
+    def test_overview_paints_modes_and_prog(self):
+        from cquarry_cli.cli import build_parser
+
+        plain = helpcli.overview(build_parser())
+        with mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
+            painted = helpcli.paint(plain)
+        self.assertIn("\x1b[1;35mcquarry\x1b[0m", painted)
+        self.assertIn("\x1b[1;36m--catalog\x1b[0m", painted)
+        self.assertEqual(self._CSI.sub("", painted), plain)
+
+    def test_main_print_path_colors_when_forced(self):
+        import contextlib
+        import io
+        import os
+
+        from cquarry_cli.cli import main
+
+        out = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}),
+            mock.patch.object(sys, "argv", ["cquarry", "--help", "write"]),
+            contextlib.redirect_stdout(out),
+        ):
+            code = main(["--help", "write"])
+        self.assertEqual(code, 0)
+        self.assertIn("\x1b[1;36m--set-title\x1b[0m", out.getvalue())
+
+    def test_main_print_path_plain_without_env(self):
+        import contextlib
+        import io
+        import os
+
+        from cquarry_cli.cli import main
+
+        out = io.StringIO()
+        env = {k: v for k, v in os.environ.items() if k != "FORCE_COLOR"}
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            contextlib.redirect_stdout(out),
+        ):
+            code = main(["--help", "write"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("\x1b", out.getvalue())

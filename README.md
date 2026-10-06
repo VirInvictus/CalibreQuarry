@@ -581,7 +581,9 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 overview below, `--help read|write|set|run|examples|all` prints the
 focused deep dives (flag tables generated from the live parser, so they
 cannot drift from the real flags), and `run --help VERB` prints a
-per-verb page for each of the 22 run verbs.
+per-verb page for each of the 22 run verbs. On a terminal the output is
+ANSI-colored with the same theme Python 3.14's argparse uses (plain when
+piped; `NO_COLOR` and `FORCE_COLOR` are honored).
 
 ```
 cquarry - Calibre library toolkit: catalog, stats, audit, export,
