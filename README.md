@@ -577,280 +577,68 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 
 ## Full help output
 
+`--help` is two-level by design: the bare flag prints the compact
+overview below, `--help read|write|set|run|examples|all` prints the
+focused deep dives (flag tables generated from the live parser, so they
+cannot drift from the real flags), and `run --help VERB` prints a
+per-verb page for each of the 22 run verbs.
+
 ```
-usage: cquarry [-h] [--version] [--catalog | --all-wings |
-               --all-saved-searches | --stats |
-               --analytics {author,pace,tags,genres,overlap,reading} |
-               --audit | --health | --recent [RECENT] | --series | --export |
-               --search QUERY | --fts QUERY | --fts-status | --wings |
-               --tags | --trash | --book [BOOK_ID[,BOOK_ID...]] |
-               --entities KIND | --reading-progress | --columns | --info |
-               --exportlt | --export-annotations | --format-stats]
-               [--untagged] [--id BOOK_ID] [--plugin-data NAME] [--db DB]
-               [--restrict SEARCH] [--wing WING] [--output OUTPUT]
-               [--outdir OUTDIR] [--format {json,csv,ai,md}] [--primary-only]
-               [--show-tags] [--show-id] [--genre-depth N]
-               [--show-custom COL_NAME] [--show-author-details] [--quiet]
-               [--set-title BOOK_ID TITLE] [--set-authors BOOK_ID NAMES]
-               [--set-rating BOOK_ID STARS] [--set-pubdate BOOK_ID DATE]
-               [--clear-pubdate BOOK_ID] [--set-comments BOOK_ID HTML]
-               [--clear-comments BOOK_ID] [--set-column BOOK_ID LABEL VALUE]
-               [--clear-column BOOK_ID LABEL] [--add-tag BOOK_ID TAG]
-               [--remove-tag BOOK_ID TAG]
-               [--set-identifier BOOK_ID TYPE VALUE]
-               [--clear-identifier BOOK_ID TYPE] [--set-series BOOK_ID NAME]
-               [--series-index NUM] [--clear-series BOOK_ID]
-               [--set-publisher BOOK_ID NAME] [--clear-publisher BOOK_ID]
-               [--set-languages BOOK_ID LANGS] [--clear-languages BOOK_ID]
-               [--add-format BOOK_ID FORMAT NAME SIZE]
-               [--remove-format BOOK_ID FORMAT] [--set-cover BOOK_ID YES/NO]
-               [--remove-book BOOK_ID] [--confirm-remove]
-               [--rename-entity KIND OLD NEW] [--set-author-sort BOOK_ID SORT]
-               [--set-title-sort BOOK_ID SORT] [--ids ID[,ID...] |
-               --from-search EXPR | --from-untagged | --from-manifest FILE]
-               [--batch-add-tag TAG] [--batch-remove-tag TAG]
-               [--batch-clear-tags] [--batch-clear-rating]
-               [--batch-set-column LABEL VALUE] [--batch-clear-column LABEL]
-               [--batch-add-column-value LABEL VALUE]
-               [--batch-set-title TITLE] [--batch-set-authors NAMES]
-               [--batch-set-pubdate DATE] [--batch-clear-pubdate]
-               [--batch-set-publisher NAME] [--batch-clear-publisher]
-               [--batch-set-languages CODES] [--batch-clear-languages]
-               [--batch-set-series NAME] [--batch-clear-series]
-               [--batch-set-identifier TYPE VALUE]
-               [--batch-clear-identifier TYPE] [--batch-set-cover YES/NO]
-               [--batch-remove-format FMT] [--apply] [--backup-dir DIR]
-               [--commit-per-book]
-               {run} ...
+cquarry - Calibre library toolkit: catalog, stats, audit, export,
+the acquisition run pathway, and headless Calibre verbs.
 
-Calibre library toolkit: catalog, stats, audit, export
+usage: cquarry [--db DB] [--restrict SEARCH] MODE [mode flags]
+       cquarry run VERB [verb flags]
 
-positional arguments:
-  {run}
-    run                 The acquisition pathway: vet (phase1), import
-                        (phase2), curate (phase3)
-
-options:
-  -h, --help            show this help message and exit
-  --version             show program's version number and exit
-  --catalog             Build a text catalog
-  --all-wings           Generate catalogs for all virtual libraries
-  --all-saved-searches  Generate a catalog per saved search (the --all-wings
-                        analog; files land in --outdir, one per search, scoped
-                        by --restrict when given)
-  --stats               Show library statistics
+modes (pick exactly one):
+  --catalog                 Build a text catalog
+  --all-wings               Generate catalogs for all virtual libraries
+  --all-saved-searches      Generate a catalog per saved search (the --all-wings ...
+  --stats                   Show library statistics
   --analytics {author,pace,tags,genres,overlap,reading}
-                        Extended analytics and visualizations (reading: status
-                        funnel and finish dates from
-                        #reading_status/#date_read; read-only)
-  --audit               Report issues (untagged, unrated, series gaps,
-                        conversion overrides)
-  --health              One-shot health digest: the audit's finding counts in
-                        a short form (composes with --restrict; always exit 0)
-  --recent [RECENT]     Show N most recently added books (default: 20)
-  --series              List all series with completeness and gap detection
-  --export              Export library to JSON, CSV, or AI format
-  --search QUERY        Show/export books matching a Calibre search expression
-                        (prints to stdout unless --output is given; empty
-                        query = whole library). Supports custom grouped-search
-                        terms (GroupName:query) and annotations: full-text
-                        over e-reader highlights
-  --fts QUERY           Full-text content search over Calibre's full-text-
-                        search.db sidecar (what the books' text actually says,
-                        not metadata). Case- and accent-folded; composes with
-                        --restrict. Prints an index-staleness summary after
-                        the matches unless --quiet
-  --fts-status          Report FTS index staleness only: never-indexed
-                        formats, indexed-empty documents, stale entries queued
-                        for re-index, and extraction errors
-  --wings               List all virtual library wings
-  --tags                Dump every tag with its book count
-  --trash               List the library's .caltrash entries (what run merge
-                        moved aside): category, book id, age, files; library-
-                        shape, so --restrict does not scope it
+      Extended analytics and visualizations (reading: status funnel and finish dates
+      from #reading_status/#date_read; read-only)
+  --audit                   Report issues (untagged, unrated, series gaps, conversion ...
+  --health                  One-shot health digest: the audit's finding counts in a ...
+  --recent [RECENT]         Show N most recently added books (default: 20)
+  --series                  List all series with completeness and gap detection
+  --export                  Export library to JSON, CSV, or AI format
+  --search QUERY            Show/export books matching a Calibre search expression ...
+  --fts QUERY               Full-text content search over Calibre's full-text-search.db ...
+  --fts-status              Report FTS index staleness only: never-indexed formats, ...
+  --wings                   List all virtual library wings
+  --tags                    Dump every tag with its book count
+  --identifierless          List books with no identifiers (id and title; the curation ...
+  --trash                   List the library's .caltrash entries (what run merge moved ...
   --book [BOOK_ID[,BOOK_ID...]]
-                        Show the full record for one book or a comma-separated
-                        list: identifiers, format files, cover, comments,
-                        custom columns, annotations, reading progress. With
-                        --untagged, give no ids to select every untagged book
-  --untagged            With --book: select every untagged book (the phase-3
-                        entry state) instead of listing ids; use as `--book
-                        --untagged`
-  --entities KIND       List an entity class with book counts
-                        (authors/series/publishers include sort and link
-                        columns)
-  --reading-progress    Show per-device reading positions with progress bars,
-                        newest first
-  --columns             List custom columns: type, editability, enum values
-  --info                Library dossier: identity, wings + expressions, saved
-                        searches, @Name user categories, grouped search terms,
-                        feeds, sync queues
-  --exportlt            Export to LibraryThing CSV format (can be used alone
-                        or with --search)
-  --export-annotations  Dump e-reader highlights/bookmarks/notes as JSON
-                        (optionally scoped with --id)
-  --id BOOK_ID          Scope --export-annotations to a single Calibre book id
-  --plugin-data NAME    With --catalog or --search: append a books_plugin_data
-                        value (e.g. goodreads_id, wordcount) to each book line
-  --db DB               Path to Calibre metadata.db (auto-detected if omitted)
-  --restrict SEARCH     Scope every read mode to books matching this search
-                        expression (or `vl:Name` for a virtual library):
-                        stats, audit, analytics, exports, catalogs, and the
-                        rest compute over the restricted set only. Refused
-                        with write verbs, the run verbs, and --book/--id
-  --wing WING           Filter to a specific virtual library wing
-  --output OUTPUT       Output file path
-  --outdir OUTDIR       Output directory for --all-wings (default: current
-                        dir)
-  --format {json,csv,ai,md}
-                        Output format. --export defaults to json; --search
-                        defaults to a plain-text listing unless a format is
-                        given here; --catalog and the catalog sweeps accept md
-  --primary-only        Use only the first author (useful for TTRPG
-                        collections)
-  --show-tags           Show tags instead of ratings in catalog output
-  --show-id             Prefix each book with its Calibre ID for scripting
-  --genre-depth N       Levels of the tag hierarchy shown by --analytics
-                        genres (default: 1, top-level genres only)
-  --show-custom COL_NAME
-                        Load and display a specific custom column
-  --show-author-details
-                        With --catalog/--all-wings/--export/--search: append
-                        each author's true sort key and link URL (from
-                        cquarry's entity secondary columns) to the output
-  --quiet               Minimize output
-  --format-stats        Show per-format book counts and total bytes
+      Show the full record for one book or a comma-separated list: identifiers, format
+      files, cover, comments, custom columns, annotations, reading progress. With
+      --untagged, give no ids to select every untagged book
+  --entities KIND           List an entity class with book counts ...
+  --reading-progress        Show per-device reading positions with progress bars, ...
+  --columns                 List custom columns: type, editability, enum values
+  --info                    Library dossier: identity, wings + expressions, saved ...
+  --exportlt                Export to LibraryThing CSV format (can be used alone or ...
+  --export-annotations      Dump e-reader highlights/bookmarks/notes as JSON ...
+  --format-stats            Show per-format book counts and total bytes
 
-write verbs (Calibre must be closed):
-  --set-title BOOK_ID TITLE
-                        Rename a book
-  --set-authors BOOK_ID NAMES
-                        Replace authors ("Name One; Name Two"; ; = separator)
-  --set-rating BOOK_ID STARS
-                        Set rating (0-5, halves allowed)
-  --set-pubdate BOOK_ID DATE
-                        Set the publication date (YYYY-MM-DD or a full ISO
-                        datetime)
-  --clear-pubdate BOOK_ID
-                        Clear the publication date
-  --set-comments BOOK_ID HTML
-                        Set the comments/description HTML
-  --clear-comments BOOK_ID
-                        Clear the comments/description
-  --set-column BOOK_ID LABEL VALUE
-                        Write a custom-column value (#label; enumerations are
-                        validated against the column's configured values)
-  --clear-column BOOK_ID LABEL
-                        Clear a custom-column value
-  --add-tag BOOK_ID TAG
-                        Attach a tag (repeat the flag for several)
-  --remove-tag BOOK_ID TAG
-                        Detach a tag (repeat the flag for several)
-  --set-identifier BOOK_ID TYPE VALUE
-                        Upsert an identifier (isbn, goodreads, ...); empty
-                        VALUE deletes it
-  --clear-identifier BOOK_ID TYPE
-                        Delete one identifier type
-  --set-series BOOK_ID NAME
-                        Assign the series (index 1.0 unless --series-index; ""
-                        clears)
-  --series-index NUM    With --set-series: the book's number in the series
-  --clear-series BOOK_ID
-                        Remove the book from its series
-  --set-publisher BOOK_ID NAME
-                        Replace the publisher
-  --clear-publisher BOOK_ID
-                        Remove the publisher
-  --set-languages BOOK_ID LANGS
-                        Replace languages ("en, fr"; English names or ISO
-                        codes)
-  --clear-languages BOOK_ID
-                        Remove all languages from the book
-  --add-format BOOK_ID FORMAT NAME SIZE
-                        Register a format row (metadata only; the file must
-                        already sit in the book's folder as NAME.format)
-  --remove-format BOOK_ID FORMAT
-                        Drop a format row (leaves the file on disk untouched)
-  --set-cover BOOK_ID YES/NO
-                        Toggle the catalogued has_cover flag
-  --remove-book BOOK_ID
-                        Permanently remove a book (dry run unless --confirm-
-                        remove)
-  --confirm-remove      With --remove-book: actually delete instead of dry-
-                        running
-  --rename-entity KIND OLD NEW
-                        Rename an authors/series/publishers/tags entity
-                        everywhere (merges into NEW when that row already
-                        exists)
-  --set-author-sort BOOK_ID SORT
-                        Override the author_sort string verbatim (a later
-                        --set-authors recomputes over it)
-  --set-title-sort BOOK_ID SORT
-                        Override the title_sort string verbatim (a later
-                        --set-title recomputes over it)
+scoping:
+  --db DB                   Path to Calibre metadata.db (auto-detected if omitted)
+  --restrict SEARCH         Scope every read mode to books matching this search ...
+  --wing WING               Filter to a specific virtual library wing
 
-set writes (dry-run by default; --apply requires --backup-dir and Calibre closed):
-  --ids ID[,ID...]      Target set: explicit book ids (set mode)
-  --from-search EXPR    Target set: books matching a Calibre search
-                        expression, resolved read-only before anything opens
-                        writable
-  --from-untagged       Target set: every untagged book (the phase-3 entry
-                        state)
-  --from-manifest FILE  Target set: ids one per line or comma-separated in
-                        FILE; the only source that unlocks --batch-clear-
-                        rating
-  --batch-add-tag TAG   Add a tag to every targeted book (repeatable)
-  --batch-remove-tag TAG
-                        Remove a tag from every targeted book (repeatable)
-  --batch-clear-tags    Detach every tag from every targeted book
-  --batch-clear-rating  Clear the rating on every targeted book; ONLY legal
-                        with --from-manifest (the NON-NEGOTIABLES bulk-ratings
-                        ban)
-  --batch-set-column LABEL VALUE
-                        Write a custom-column value on every targeted book
-                        (#reading_status/#status/#date_read are refused)
-  --batch-clear-column LABEL
-                        Clear a custom-column value on every targeted book
-  --batch-add-column-value LABEL VALUE
-                        Append a value to a multi-valued custom column on
-                        every targeted book (repeatable; deduped per book)
-  --batch-set-title TITLE
-                        Rename every targeted book
-  --batch-set-authors NAMES
-                        Replace authors on every targeted book ('Name One;
-                        Name Two')
-  --batch-set-pubdate DATE
-                        Set the publication date on every targeted book
-  --batch-clear-pubdate
-                        Clear the publication date on every targeted book
-  --batch-set-publisher NAME
-                        Set the publisher on every targeted book
-  --batch-clear-publisher
-                        Clear the publisher on every targeted book
-  --batch-set-languages CODES
-                        Replace the languages on every targeted book
-  --batch-clear-languages
-                        Clear the languages on every targeted book
-  --batch-set-series NAME
-                        Put every targeted book in a series (--series-index
-                        optional)
-  --batch-clear-series  Remove every targeted book from its series
-  --batch-set-identifier TYPE VALUE
-                        Set an identifier (isbn, goodreads, ...) on every
-                        targeted book
-  --batch-clear-identifier TYPE
-                        Clear an identifier type on every targeted book
-  --batch-set-cover YES/NO
-                        Set the catalogued has_cover flag on every targeted
-                        book
-  --batch-remove-format FMT
-                        Drop a format row from every targeted book (files
-                        untouched)
-  --apply               Execute the planned set write (default is a dry run)
-  --backup-dir DIR      REQUIRED with --apply: metadata.db is copied here
-                        first; must sit outside the library directory
-  --commit-per-book     With --apply: one transaction per book instead of one
-                        for the whole pass (escape hatch for very large sets)
+also:
+  write verbs   --set-title, --add-tag, ... per-book edits            (see: --help write)
+  set writes    --from-search/--ids + --batch-* edits          (see: --help set)
+  run VERB      the acquisition pathway + headless calibre verbs   (see: --help run)
+
+deep dives:
+  cquarry --help read|write|set|run|examples|all
+  cquarry --version
+  cquarry run --help VERB        e.g. run --help phase2
+
+example:
+  cquarry --catalog --wing "The Tabletop" --show-tags --db ~/Calibre/metadata.db
 ```
 
 ## Companion scripts

@@ -15,6 +15,15 @@ from cquarry.helpers import find_db
 from cquarry.integrity import find_untagged
 
 from cquarry_cli import VERSION
+from cquarry_cli.helpcli import (
+    DISPLAY_TITLE,
+    MODES_TITLE,
+    MODIFIERS_TITLE,
+    OUTPUT_TITLE,
+    SCOPING_TITLE,
+    SET_TITLE,
+    WRITE_TITLE,
+)
 from cquarry_cli.manifest import DEFAULT_AUDIENCE
 from cquarry_cli.output import OutputRefusedError
 from cquarry_cli.restrict import RestrictedView, restrict_refusal
@@ -77,14 +86,72 @@ def _book_ids(value: str) -> list[int]:
     return ids
 
 
+class _OverviewHelp(argparse.Action):
+    """Bare -h/--help prints the compact overview; the deep dives live
+    behind `--help TOPIC`, which the pre-parse intercept in main()
+    answers before argparse ever runs."""
+
+    def __init__(
+        self,
+        option_strings,
+        dest=argparse.SUPPRESS,
+        default=argparse.SUPPRESS,
+        help=None,
+    ):
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=0,
+            default=default,
+            help=help,
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from cquarry_cli.helpcli import overview
+
+        print(overview(parser))
+        parser.exit(0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="cquarry",
         description="Calibre library toolkit: catalog, stats, audit, export",
+        usage="cquarry [--db DB] [--restrict SEARCH] MODE [mode flags]"
+        " | cquarry run VERB [verb flags]",
+        epilog=(
+            "two-level help:\n"
+            "  cquarry --help read|write|set|run|examples|all\n"
+            "  cquarry run --help VERB          per-verb detail"
+            " (e.g. run --help phase2)\n"
+            "\n"
+            "modes are mutually exclusive: pick exactly one per invocation."
+            " Write and set\nverbs need Calibre closed; run's mutating verbs"
+            " are dry-run by default and take --apply."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False,
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+    p.add_argument(
+        "-h",
+        "--help",
+        action=_OverviewHelp,
+        help="compact overview (deep dives: --help read|write|set|run|examples|all)",
+    )
 
-    group = p.add_mutually_exclusive_group()
+    # The modes group is a TITLED section, not an argparse mutually
+    # exclusive group: _MutuallyExclusiveGroup takes no title, so the
+    # pick-one enforcement is the explicit post-parse check in main()
+    # (same refusal, same exit 2).
+    group = p.add_argument_group(
+        MODES_TITLE,
+        description="one per invocation; every mode only reads metadata.db",
+    )
+    scope = p.add_argument_group(SCOPING_TITLE)
+    out = p.add_argument_group(OUTPUT_TITLE)
+    disp = p.add_argument_group(DISPLAY_TITLE)
+    mods = p.add_argument_group(MODIFIERS_TITLE)
     group.add_argument("--catalog", action="store_true", help="Build a text catalog")
     group.add_argument(
         "--all-wings",
@@ -109,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
         "funnel and finish dates from #reading_status/#date_read; "
         "read-only)",
     )
-    p.add_argument(
+    mods.add_argument(
         "--pace-granularity",
         dest="pace_granularity",
         choices=["month", "year"],
@@ -129,7 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
         "short form (composes with --restrict and --format json; always "
         "exit 0 unless --fail-on-findings)",
     )
-    p.add_argument(
+    mods.add_argument(
         "--fail-on-findings",
         dest="fail_on_findings",
         action="store_true",
@@ -216,7 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     # --untagged stays OUTSIDE the exclusive group on purpose: it is a
     # modifier of --book (`--book --untagged`), not an independent mode.
-    p.add_argument(
+    mods.add_argument(
         "--untagged",
         dest="untagged",
         action="store_true",
@@ -266,7 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
         "(optionally scoped with --id)",
     )
 
-    p.add_argument(
+    mods.add_argument(
         "--id",
         dest="book_id",
         type=int,
@@ -275,7 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scope --export-annotations to a single Calibre book id",
     )
 
-    p.add_argument(
+    disp.add_argument(
         "--plugin-data",
         dest="plugin_data",
         default=None,
@@ -284,12 +351,12 @@ def build_parser() -> argparse.ArgumentParser:
         "(e.g. goodreads_id, wordcount) to each book line",
     )
 
-    p.add_argument(
+    scope.add_argument(
         "--db",
         default=None,
         help="Path to Calibre metadata.db (auto-detected if omitted)",
     )
-    p.add_argument(
+    scope.add_argument(
         "--restrict",
         default=None,
         metavar="SEARCH",
@@ -299,16 +366,16 @@ def build_parser() -> argparse.ArgumentParser:
         "restricted set only. Refused with write verbs, the run verbs, "
         "and --book/--id",
     )
-    p.add_argument(
+    scope.add_argument(
         "--wing", default=None, help="Filter to a specific virtual library wing"
     )
-    p.add_argument("--output", default=None, help="Output file path")
-    p.add_argument(
+    out.add_argument("--output", default=None, help="Output file path")
+    out.add_argument(
         "--outdir",
         default=None,
         help="Output directory for --all-wings (default: current dir)",
     )
-    p.add_argument(
+    out.add_argument(
         "--format",
         choices=["json", "csv", "ai", "md"],
         default=None,
@@ -316,25 +383,25 @@ def build_parser() -> argparse.ArgumentParser:
         "plain-text listing unless a format is given here; --catalog and "
         "the catalog sweeps accept md",
     )
-    p.add_argument(
+    disp.add_argument(
         "--primary-only",
         dest="primary_only",
         action="store_true",
         help="Use only the first author (useful for TTRPG collections)",
     )
-    p.add_argument(
+    disp.add_argument(
         "--show-tags",
         dest="show_tags",
         action="store_true",
         help="Show tags instead of ratings in catalog output",
     )
-    p.add_argument(
+    disp.add_argument(
         "--show-id",
         dest="show_id",
         action="store_true",
         help="Prefix each book with its Calibre ID for scripting",
     )
-    p.add_argument(
+    disp.add_argument(
         "--genre-depth",
         dest="genre_depth",
         type=int,
@@ -343,14 +410,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Levels of the tag hierarchy shown by --analytics genres "
         "(default: 1, top-level genres only)",
     )
-    p.add_argument(
+    disp.add_argument(
         "--show-custom",
         dest="show_custom",
         default=None,
         metavar="COL_NAME",
         help="Load and display a specific custom column",
     )
-    p.add_argument(
+    disp.add_argument(
         "--show-author-details",
         dest="show_author_details",
         action="store_true",
@@ -359,10 +426,10 @@ def build_parser() -> argparse.ArgumentParser:
         "secondary columns) to the output",
     )
 
-    p.add_argument("--quiet", action="store_true", help="Minimize output")
+    out.add_argument("--quiet", action="store_true", help="Minimize output")
 
     # --- Write verbs (opt-in; all funnel through writeops/cquarry.write) ---
-    w = p.add_argument_group("write verbs (Calibre must be closed)")
+    w = p.add_argument_group(WRITE_TITLE)
     w.add_argument(
         "--set-title",
         dest="set_title",
@@ -646,10 +713,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # --- Set-oriented writes: one target set, id-less --batch-* verbs ---
-    s = p.add_argument_group(
-        "set writes (dry-run by default; --apply requires --backup-dir "
-        "and Calibre closed)"
-    )
+    s = p.add_argument_group(SET_TITLE)
     src = s.add_mutually_exclusive_group()
     src.add_argument(
         "--ids",
@@ -1254,12 +1318,34 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+    from cquarry_cli.helpcli import handle_help
+
+    helped = handle_help(list(argv))
+    if helped is not None:
+        code, text = helped
+        print(text, file=sys.stdout if code == 0 else sys.stderr)
+        return code
     if len(argv) == 0:
         return interactive_menu()
 
     try:
         parser = build_parser()
         args = parser.parse_args(argv)
+        modes_group = next(
+            g for g in parser._action_groups if g.title == MODES_TITLE
+        )
+        picked = [
+            a
+            for a in modes_group._group_actions
+            if getattr(args, a.dest, None) not in (None, False, [], ())
+        ]
+        if len(picked) > 1:
+            print(
+                "ERROR: modes are mutually exclusive; pick one of: "
+                + ", ".join("/".join(a.option_strings) for a in picked),
+                file=sys.stderr,
+            )
+            return 2
         if getattr(args, "subcommand", None) == "run":
             from cquarry_cli.run import dispatch_run
 

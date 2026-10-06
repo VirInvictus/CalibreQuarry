@@ -86,6 +86,7 @@ The path is saved to config on first successful resolution.
 
 | Mode | Flag | Description |
 |------|------|-------------|
+| Help | `--help`, `--help TOPIC` | Two-level: the bare flag prints the compact overview (mode table, scoping, topic pointers); `--help read|write|set|run|examples|all` prints the focused deep dives with flag tables generated from the live parser's groups; `run --help VERB` (or `run VERB --help`) prints a per-verb page. The pre-parse intercept answers before argparse; the grammar is untouched. Modes stay mutually exclusive (one per invocation, exit 2 otherwise) |
 | Catalog | `--catalog` | Formatted text grouped by author with ratings and series; `--format md` renders the Markdown shape (headings per author, bulleted books, bold totals) |
 | All wings | `--all-wings` | Separate catalog per virtual library (`--format md` names the files `.md`); a per-file failure drops the stale file and fails the sweep |
 | All saved searches | `--all-saved-searches` | Separate catalog per saved search (`--outdir`), each headed with the search's expression |
