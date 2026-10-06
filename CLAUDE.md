@@ -5,6 +5,17 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.58.0 onward, the colored help)
+
+- **Help pages paint at print time, never at layout time.**
+  `helpcli.paint(text)` applies the CPython 3.14 argparse theme
+  (lattice-music's shipped contract: FORCE_COLOR forces, NO_COLOR and
+  PYTHON_COLORS=0 suppress, piped stays plain) to FINISHED layout lines;
+  the renderers stay plain-text so column math never sees codes.
+  `stripped(paint(x)) == x` is a pinned invariant. New help text needs
+  nothing color-specific unless it must NOT be painted (avoid ALL-CAPS
+  words you do not want yellow; the label regex paints them).
+
 ## Programmer-facing contract notes (3.57.0 onward, the two-level help)
 
 - **The help surface lives in `src/cquarry_cli/helpcli.py` and answers

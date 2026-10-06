@@ -1,5 +1,30 @@
 # CalibreQuarry Patch Notes
 
+# 3.58.0 (2026-10-06)
+
+### The help surface, in color: the CPython argparse theme
+
+- **The help is ANSI-colored on terminals now**, painted with the exact
+  CPython 3.14 default theme (bold blue headings and usage, bold magenta
+  prog, bold cyan long options, bold green short options, bold yellow
+  metavars/labels), so cquarry's help reads like `python --help` in the
+  same terminal. This is the same fix lattice-music shipped for its own
+  help surface (6b88a52): staying on argparse kept the grammar but the
+  custom renderer printed plain text, losing the colorization Python
+  3.14's argparse paints on its own help.
+- Auto-detected with lattice's shipped contract: `FORCE_COLOR` forces,
+  `NO_COLOR` and `PYTHON_COLORS=0` suppress, and piped output stays
+  plain so README embedding and tests are stable. Layout runs on plain
+  text and painting happens on the finished lines, so column math never
+  sees the (zero-width) codes; stripped of codes the painted page is
+  byte-identical to the plain one, pinned across every topic page.
+- One rendering fix that fell out: a flag token longer than the help
+  column no longer jams against its help text (it wraps underneath,
+  like every other long row).
+- 7 new tests (847 total): the env contract, pipe safety, the strip
+  invariant across every page, the theme codes, and both main() print
+  paths (forced and plain).
+
 # 3.57.1 (2026-10-06)
 
 ### Erratum: the 3.57.0 publish short-circuited on a format regression
