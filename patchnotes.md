@@ -1,5 +1,55 @@
 # CalibreQuarry Patch Notes
 
+# 3.57.0 (2026-10-06)
+
+### The two-level help: a compact overview, deep-dive topics, per-verb run pages
+
+- **Bare `--help` is now a compact overview** instead of the old wall:
+  the hand-written one-line usage replaces the 20-line auto-generated
+  blob, the mode table (one line per mode, pick-one stated in the
+  section title) leads, scoping follows, and the write/set/run surfaces
+  get one pointer line each. Flag tables are GENERATED from the live
+  parser's argument groups, so a flag added to a group shows up in its
+  topic by construction; the README's "Full help output" section now
+  embeds the overview instead of the old blob.
+- **`--help read|write|set|run|examples|all` prints the focused deep
+  dives** (pre-parse intercept in main(); an unknown topic exits 2
+  naming the valid ones). `read` carries every mode plus its modifiers
+  and the composition notes (`--book --untagged`, `--health
+  --fail-on-findings`, the `--restrict` refusal set); `write` and `set`
+  carry their flag groups with the transaction/backup contracts in
+  prose; `run` stages the 22 verbs the way the acquisition pathway
+  thinks about them.
+- **`run --help VERB` (and `run VERB --help`) prints a per-verb page**
+  for each of the 22 run verbs: what the verb does, its guard contract
+  (dry-run by default, --apply, closed-Calibre, --backup-dir or the
+  recorded no-backup exceptions), and the flags it consumes. The
+  verb-to-flags claim map is the curated layer, pinned by tests against
+  build_parser(): every run flag must be claimed by some verb or shared
+  explicitly, so an undocumented flag cannot land quietly.
+- **No grammar change**: every flag, verb, and invocation keeps
+  working; tests parse the same shapes. One visible behavior detail:
+  the modes are a titled section now, and argparse gives
+  mutually-exclusive groups no title, so the pick-one refusal moved
+  into an explicit post-parse check (same refusal, same exit 2, the
+  error names the flags involved).
+- **`run flush` now runs the EPUB dc:date normalization** (the
+  3.56.0-pass follow-up that was raised, not built, last release): the
+  surgery moved to the shared `src/cquarry_cli/epubdates.py` module,
+  and after a green embed pass every flushed book's EPUB is normalized
+  to one canonical dc:date exactly as reconcile does. A normalization
+  failure fails the verb; the report carries the count (text line;
+  `epub_dates_normalized` in JSON); the script imports the module (a
+  checkout shim inserts the repo's src/), and a test pins the
+  re-exports as the module objects so a fork cannot rot flush.
+  Live-drilled end to end on calibre 9.15: a flush of the dirty
+  #9635 shape comes back with exactly one canonical dc:date.
+- 17 new tests (840 total; 13 help + 4 flush): the intercept (topics,
+  unknown topics, both verb-page forms, fall-through), the anti-rot
+  pins (every mode in the overview, every top-level flag in --help
+  all, every run flag claimed, every run choice has a page and
+  prose), and the flush normalization seam tests.
+
 # 3.56.0 (2026-10-06)
 
 ### The dc:date convergence fix: reconcile's EPUB embed normalizes the OPF (issue #3)

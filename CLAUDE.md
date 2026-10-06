@@ -5,6 +5,28 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.57.0 onward, the two-level help)
+
+- **The help surface lives in `src/cquarry_cli/helpcli.py` and answers
+  before argparse.** `handle_help(argv)` runs first in `cli.main()`:
+  `--help TOPIC` / `run --help VERB` / `run VERB --help` return
+  `(exit_code, text)`, bare `--help`/`-h` returns None and lands on the
+  parser's `_OverviewHelp` action, which prints `overview(parser)`.
+  Flag tables are generated from the parser's argument groups (found by
+  the title constants helpcli owns: MODES/SCOPING/OUTPUT/DISPLAY/
+  MODIFIERS/WRITE/SET), so group assignment IS topic coverage. The
+  curated layer is `VERB_FLAGS` (the verb claim map) + `VERB_PROSE`;
+  tests/test_help.py pins every run flag claimed or shared, every mode
+  in the overview, every choice paginated. New run flags must join the
+  claim map or the pin fails.
+- **The modes group is a titled regular group, not an argparse
+  mutually exclusive group** (argparse gives exclusivity groups no
+  title): the pick-one enforcement is the explicit post-parse check at
+  the top of `cli.main()` (exit 2, names the picked flags). Do not
+  re-add a second exclusive group for modes. The set-mode target
+  sources keep their real exclusive group (untitled, inside the set
+  section).
+
 ## Programmer-facing contract notes (3.56.0 onward, the dc:date convergence batch)
 
 - **reconcile's EPUB embeds end with an OPF normalization pass**
