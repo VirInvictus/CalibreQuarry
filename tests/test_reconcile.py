@@ -5,11 +5,13 @@ scripts/, so it is imported by path."""
 import contextlib
 import importlib.util
 import io
+import re
 import sys
 import sqlite3
 import pathlib
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -384,7 +386,7 @@ class TestVerifyWiring(unittest.TestCase):
         (book_dir / "The Hobbit.epub").write_bytes(b"epub")
         return root
 
-    def _run_main(self, tmp, read_backs):
+    def _run_main(self, tmp, read_backs, normalize_result=True):
         root = self._library(tmp)
         argv = [
             "reconcile_file_metadata.py",
@@ -392,16 +394,21 @@ class TestVerifyWiring(unittest.TestCase):
             "--apply",
         ]
         out = io.StringIO()
+        err = io.StringIO()
         with (
             mock.patch.object(sys, "argv", argv),
             mock.patch.object(rfm, "shutil") as _sh,
             mock.patch.object(rfm, "file_metadata", side_effect=read_backs),
             mock.patch.object(rfm, "embed_calibredb", return_value=True) as embed,
+            mock.patch.object(
+                rfm, "normalize_epub_dates", return_value=normalize_result
+            ) as norm,
             mock.patch.object(rfm, "calibre_running", return_value=False),
             contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
         ):
             rc = rfm.main()
-        return rc, out.getvalue(), embed.call_count
+        return rc, out.getvalue(), embed.call_count, norm, err.getvalue()
 
     def test_in_sync_read_back_is_done(self):
         # First read (the drift scan) sees the old date; the post-embed
@@ -409,24 +416,222 @@ class TestVerifyWiring(unittest.TestCase):
         drifted = file_meta(published="2010-10-25")
         fixed = file_meta()
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds = self._run_main(tmp, [drifted, fixed])
-        self.assertEqual(rc, 0, out)
+            rc, out, embeds, norm, err = self._run_main(tmp, [drifted, fixed])
+        self.assertEqual(rc, 0, out + err)
         self.assertIn("DONE", out)
         self.assertIn("verified by read-back", out)
         self.assertEqual(embeds, 1)
+        norm.assert_called_once()
 
     def test_still_drifted_read_back_is_a_residual_and_fails(self):
         # The #9177 shape: embed_metadata exits 0, the EPUB keeps its own
         # dc:date. The read-back catches it; the run fails with a RESIDUAL.
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds = self._run_main(
+            rc, out, embeds, norm, err = self._run_main(
                 tmp, [drifted, file_meta(published="2010-10-25")]
             )
-        self.assertEqual(rc, 1, out)
+        self.assertEqual(rc, 1, out + err)
         self.assertIn("RESIDUAL", out)
         self.assertIn("pubdate", out)
         self.assertEqual(embeds, 1)
+
+    def test_normalization_targets_the_date_only_db_pubdate(self):
+        # The dc:date pass runs once per embedded EPUB with the database
+        # pubdate reduced to date-only form (the canonical element value).
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, embeds, norm, err = self._run_main(tmp, [drifted, file_meta()])
+        self.assertEqual(rc, 0, out + err)
+        args = norm.call_args.args
+        self.assertEqual(args[0].name, "The Hobbit.epub")
+        self.assertEqual(args[1], "1937-09-21")
+
+    def test_failed_normalization_fails_the_run(self):
+        # An OPF the normalizer cannot rewrite is a named failure, not a
+        # silent pass-through to the read-back.
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, embeds, norm, err = self._run_main(
+                tmp, [drifted, file_meta()], normalize_result=False
+            )
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("normalization failed", err)
+        self.assertIn("The Hobbit.epub", err)
+
+
+class TestEpubDateNormalization(unittest.TestCase):
+    """The post-embed dc:date pass (issue #3, the #9177/#9635 live class).
+    calibredb's EPUB2 writer rewrites only the earliest dc:date and leaves
+    every other one standing, while calibre's EPUB2 reader reports the
+    minimum: a file carrying a fetch-era run-clock value plus the publisher
+    original read back as permanent pubdate drift that re-embedding never
+    converged. The pass forces the OPF to exactly one canonical dc:date."""
+
+    LIVE_OPF = (
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" '
+        'unique-identifier="BookId">\n'
+        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:opf="http://www.idpf.org/2007/opf">\n'
+        "    <dc:title>The Great Change</dc:title>\n"
+        '    <dc:creator opf:role="aut">Joe Abercrombie</dc:creator>\n'
+        "    <dc:publisher>Subterranean Press</dc:publisher>\n"
+        "    <dc:date>2023-09-28T07:00:00+00:00</dc:date>\n"
+        "    <dc:date>2023-09-28T00:00:00+00:00</dc:date>\n"
+        '    <dc:date opf:event="modification">2023-06-06</dc:date>\n'
+        '    <dc:identifier id="BookId" opf:scheme="ISBN">9780857661349'
+        "</dc:identifier>\n"
+        '    <meta name="cover" content="cover-image"/>\n'
+        "  </metadata>\n"
+        "  <manifest>\n"
+        '    <item id="cover-image" href="cover.jpg" media-type="image/jpeg"/>\n'
+        "  </manifest>\n"
+        "</package>\n"
+    )
+
+    CONTAINER_XML = (
+        '<?xml version="1.0"?>\n'
+        '<container version="1.0" '
+        'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+        "  <rootfiles>\n"
+        '    <rootfile full-path="OEBPS/content.opf" '
+        'media-type="application/oebps-package+xml"/>\n'
+        "  </rootfiles>\n"
+        "</container>\n"
+    )
+
+    def dates_in(self, opf_text):
+        return re.findall(r"<dc:date[^>]*>[^<]*</dc:date>", opf_text)
+
+    def test_live_three_date_shape_collapses_to_one(self):
+        out = rfm.canonical_dc_dates(self.LIVE_OPF, "2023-09-28")
+        self.assertIsNotNone(out)
+        self.assertEqual(self.dates_in(out), ["<dc:date>2023-09-28</dc:date>"])
+        # the canonical element sits where the publisher's first date sat,
+        # on its own line at the same indentation
+        self.assertIn(
+            "    <dc:publisher>Subterranean Press</dc:publisher>\n"
+            "    <dc:date>2023-09-28</dc:date>\n"
+            "    <dc:identifier",
+            out,
+        )
+        # nothing outside the date set moved
+        for keep in (
+            "<dc:title>The Great Change</dc:title>",
+            '<meta name="cover" content="cover-image"/>',
+            '<item id="cover-image" href="cover.jpg" media-type="image/jpeg"/>',
+            "</package>\n",
+        ):
+            self.assertIn(keep, out)
+
+    def test_already_canonical_file_is_byte_identical(self):
+        opf = self.LIVE_OPF.replace(
+            "    <dc:date>2023-09-28T07:00:00+00:00</dc:date>\n"
+            "    <dc:date>2023-09-28T00:00:00+00:00</dc:date>\n"
+            '    <dc:date opf:event="modification">2023-06-06</dc:date>\n',
+            "    <dc:date>2023-09-28</dc:date>\n",
+        )
+        self.assertEqual(rfm.canonical_dc_dates(opf, "2023-09-28"), opf)
+
+    def test_second_pass_is_idempotent(self):
+        once = rfm.canonical_dc_dates(self.LIVE_OPF, "2023-09-28")
+        self.assertEqual(rfm.canonical_dc_dates(once, "2023-09-28"), once)
+
+    def test_missing_target_removes_every_date(self):
+        # '' is the unset/sentinel DB pubdate: the canonical shape is no
+        # dc:date at all, matching how diff_fields compares.
+        out = rfm.canonical_dc_dates(self.LIVE_OPF, "")
+        self.assertIsNotNone(out)
+        self.assertEqual(self.dates_in(out), [])
+        self.assertIn("<dc:publisher>Subterranean Press</dc:publisher>", out)
+        self.assertIn("<dc:identifier", out)
+
+    def test_no_dates_inserts_after_publisher(self):
+        opf = self.LIVE_OPF
+        opf = re.sub(r"    <dc:date[^>]*>[^<]*</dc:date>\n", "", opf)
+        out = rfm.canonical_dc_dates(opf, "2023-09-28")
+        self.assertIsNotNone(out)
+        self.assertIn(
+            "    <dc:publisher>Subterranean Press</dc:publisher>\n"
+            "    <dc:date>2023-09-28</dc:date>",
+            out,
+        )
+
+    def test_insertion_without_dc_binding_is_refused(self):
+        opf = self.LIVE_OPF.replace(' xmlns:dc="http://purl.org/dc/elements/1.1/"', "")
+        opf = re.sub(r"    <dc:date[^>]*>[^<]*</dc:date>\n", "", opf)
+        self.assertIsNone(rfm.canonical_dc_dates(opf, "2023-09-28"))
+
+    def test_no_metadata_block_is_refused(self):
+        self.assertIsNone(rfm.canonical_dc_dates("<html><body/></html>", "2023-09-28"))
+
+    def test_epub3_dcterms_modified_survives(self):
+        opf = self.LIVE_OPF.replace(
+            '    <meta name="cover" content="cover-image"/>\n',
+            '    <meta name="cover" content="cover-image"/>\n'
+            '    <meta property="dcterms:modified">2023-07-01T00:00:00Z</meta>\n',
+        )
+        out = rfm.canonical_dc_dates(opf, "2023-09-28")
+        self.assertIn(
+            '<meta property="dcterms:modified">2023-07-01T00:00:00Z</meta>', out
+        )
+
+    def _build_epub(self, root, opf_text):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER_XML)
+            z.writestr("OEBPS/content.opf", opf_text)
+        path = pathlib.Path(root) / "book.epub"
+        path.write_bytes(buf.getvalue())
+        return path
+
+    def test_zip_rewrite_preserves_other_entries_and_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.LIVE_OPF)
+            before = zipfile.ZipFile(path)
+            other = {
+                n: before.read(n) for n in before.namelist() if n != "OEBPS/content.opf"
+            }
+            before.close()
+            self.assertTrue(rfm.normalize_epub_dates(path, "2023-09-28"))
+            after = zipfile.ZipFile(path)
+            self.assertEqual(after.namelist()[0], "mimetype")
+            self.assertEqual(after.namelist(), list(other) + ["OEBPS/content.opf"])
+            self.assertEqual(
+                self.dates_in(after.read("OEBPS/content.opf").decode()),
+                ["<dc:date>2023-09-28</dc:date>"],
+            )
+            for name, payload in other.items():
+                self.assertEqual(after.read(name), payload)
+            after.close()
+
+    def test_canonical_zip_is_not_rewritten(self):
+        opf = self.LIVE_OPF.replace(
+            "    <dc:date>2023-09-28T07:00:00+00:00</dc:date>\n"
+            "    <dc:date>2023-09-28T00:00:00+00:00</dc:date>\n"
+            '    <dc:date opf:event="modification">2023-06-06</dc:date>\n',
+            "    <dc:date>2023-09-28</dc:date>\n",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, opf)
+            raw = path.read_bytes()
+            self.assertTrue(rfm.normalize_epub_dates(path, "2023-09-28"))
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_unopenable_file_fails_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "book.epub"
+            path.write_bytes(b"epub")
+            self.assertFalse(rfm.normalize_epub_dates(path, "2023-09-28"))
+
+    def test_zip_without_container_fails_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "book.epub"
+            with zipfile.ZipFile(path, "w") as z:
+                z.writestr("mimetype", "application/epub+zip")
+            self.assertFalse(rfm.normalize_epub_dates(path, "2023-09-28"))
 
 
 if __name__ == "__main__":
