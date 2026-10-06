@@ -1,5 +1,46 @@
 # CalibreQuarry Patch Notes
 
+# 3.56.0 (2026-10-06)
+
+### The dc:date convergence fix: reconcile's EPUB embed normalizes the OPF (issue #3)
+
+- **reconcile_file_metadata.py's --apply now forces every embedded EPUB's
+  OPF to exactly one canonical dc:date**: the database pubdate in
+  date-only form, or zero dates for the unset/sentinel case (matching
+  how the diff compares). The live class (#9177 2026-09-16, #9635
+  2026-10-05): both files are EPUB2 packages carrying three dc:date
+  elements (a fetch-era run-clock value, a previous embed's output, the
+  publisher original), and the pubdate residual never converged because
+  calibredb's EPUB2 writer rewrites only the EARLIEST dc:date in place
+  while calibre's EPUB2 reader reports the MINIMUM of the dates it
+  finds. Any leftover date older than the database value read back as
+  permanent drift, and even a converged file kept the junk dates
+  forever, silently flattening the publisher's opf:event="modification"
+  stamp into a bare duplicate. The normalization deduplicates to the
+  single value; dcterms:modified and everything else in the package are
+  untouched; the zip is rewritten whole (entry order and per-entry
+  metadata preserved) through a temp file + os.replace, and an
+  already-canonical file is not rewritten at all. A file the pass cannot
+  safely rewrite (no metadata block, no dc prefix binding, unreadable
+  zip) is a named failure that fails the run; the read-back re-diff
+  remains the arbiter either way.
+- Live-drilled on calibre 9.15 before the fix: the EPUB3 embed path
+  (opf3.set_pubdate) removes all dc:date and appends one, and a
+  single-date EPUB2 converges on the first pass; the residual shape is
+  specifically the multi-date EPUB2 package. After the fix, both live
+  shapes converge end to end in scratch libraries: three dates in, one
+  canonical date out, verified by read-back, second dry run in sync.
+  Both live library files still carry the junk (the dry run flags
+  pubdate on #9177 and #9635); one scoped
+  `--apply --id 9635,9177 --format epub` closes them.
+- 15 new tests (47 in the reconcile suite, 823 total): pure surgery on
+  the exact live shapes (collapse, dedupe, insertion point, refusal
+  cases, idempotence, EPUB3 dcterms:modified survival), zip-level
+  rewrite checks, and main() wiring (the date-only target, a failed
+  normalization fails the run).
+- The phase-3-import skill's residual list no longer records the class
+  as a format limitation; it names the fix and the convergence command.
+
 # 3.55.2 (2026-10-02)
 
 ### The live-seam drill: catalog's real argv contract, and device's hidden answer

@@ -5,6 +5,30 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.56.0 onward, the dc:date convergence batch)
+
+- **reconcile's EPUB embeds end with an OPF normalization pass**
+  (`normalize_epub_dates`, after the calibredb chunks, before the
+  read-back): every embedded EPUB's metadata block is forced to exactly
+  one `dc:date` carrying `norm_date(db pubdate)`, or zero dates when the
+  DB pubdate is the sentinel (matching diff_fields' comparison). The
+  live class it closes (#9177/#9635): calibredb's EPUB2 writer rewrites
+  only the EARLIEST dc:date in place and leaves the rest standing,
+  while calibre's EPUB2 reader reports the MINIMUM, so multi-dated
+  packages never converged. The surgery is text-scoped to the
+  `<metadata>` block (`canonical_dc_dates`): dcterms:modified and
+  everything outside the block are untouched; an already-canonical file
+  is byte-identical (no zip rewrite); insertion goes after the last
+  DTD-predecessor element (title/creator/subject/description/
+  publisher/contributor). A file that cannot be safely rewritten (no
+  metadata block, no `xmlns:dc` binding for insertion, unreadable zip)
+  is a named failure (`dc:date normalization failed`, stderr) that
+  fails the run; the read-back re-diff stays the arbiter. The zip
+  rewrite is whole-archive (entry order and per-entry metadata
+  preserved) through a temp file + os.replace in the file's directory.
+  Scope note: `run flush` embeds via calibredb too and does NOT run the
+  normalization (raised, not built).
+
 ## Programmer-facing contract notes (3.55.2 onward, the live-seam drill)
 
 - **calibredb catalog's argv contract is unique and live-verified**: the
