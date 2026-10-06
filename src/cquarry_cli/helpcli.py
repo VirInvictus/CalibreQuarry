@@ -182,7 +182,6 @@ def shared_flags_for(verb: str) -> tuple[str, ...]:
 VERB_FLAGS: dict[str, tuple[str, ...]] = {
     "phase1": (
         "dir",
-        "manifest",
         "bindery_report",
         "stamp",
         "apply_lossy",
@@ -239,10 +238,13 @@ VERB_FLAGS: dict[str, tuple[str, ...]] = {
 # usage problems exit 2, an open Calibre exits 1.
 VERB_PROSE: dict[str, str] = {
     "phase1": (
-        "Vet a downloads directory into a review manifest ({date}-batch.json):\n"
-        "bindery repairs (consent-gated when lossy), the DRM audit, the\n"
-        "duplicate screen, filename stamps, provenance seeds. metadata.db is\n"
-        "only read. The file-side writes are separate opt-ins: --stamp drives\n"
+        "Vet a downloads directory into a review manifest ({date}-batch.json,\n"
+        "written under the library's .claude/manifests/ directory; the run\n"
+        "prints the path): bindery repairs (consent-gated when lossy), the\n"
+        "DRM audit, the duplicate screen, filename stamps, provenance seeds.\n"
+        "metadata.db is only read. Sign that printed path with `run sign`.\n"
+        "This verb takes no --manifest: the output path is derived, never\n"
+        "supplied. The file-side writes are separate opt-ins: --stamp drives\n"
         "stamp_pdf, --apply-lossy takes bindery's gated lossy repairs, and\n"
         "--quarantine MOVES true DRM hits into _quarantine/ (without it the\n"
         "verdict is recorded and the file stays put)."
@@ -262,16 +264,19 @@ VERB_PROSE: dict[str, str] = {
     "phase2": (
         "Import the SIGNED manifest as ONE batch() transaction: bindery\n"
         "consent first, then add_book per approved file with the #source and\n"
-        "#audience stamps (--audience, default from the manifest). Requires\n"
+        "#audience stamps (--audience, default: the constant house default).\n"
+        "Requires\n"
         "--backup-dir (outside the library) and Calibre closed; metadata\n"
         "downloads defer if Calibre opens mid-run. A failure rolls back the\n"
         "whole import."
     ),
     "phase3": (
         "Curate the freshly imported books (tags, comments, fixes) from\n"
-        "--answer-file JSON or TTY prompts, then drive the mechanical pass\n"
-        "(bindery + reconcile). Re-validates to 0 errors or exits 1 with the\n"
-        "library unwritten by the failed step."
+        "--answer-file JSON or TTY prompts (unattended runs always pass\n"
+        "--answer-file; the prompts need a terminal), then drive the\n"
+        "mechanical pass (bindery + reconcile). Re-validates to 0 errors or\n"
+        "exits 1 (curation rolls back; a mechanical-pass failure can leave\n"
+        "applied file-side work behind, reported in the batch record)."
     ),
     "convert": (
         "Convert the targeted books to --to FORMAT with ebook-convert\n"
@@ -291,13 +296,15 @@ VERB_PROSE: dict[str, str] = {
     "export": (
         "Copy the targeted books' format files out with calibredb export into\n"
         "--dest DIR (--template is calibredb's save template). The library\n"
-        "itself is never written: export needs no backup and no closed\n"
-        "Calibre."
+        "itself is never written and no backup is taken, but --apply still\n"
+        "observes the house closed-Calibre guard (exit 1 while Calibre runs)."
     ),
     "merge": (
-        "Fold --duplicate ID into --keeper ID (tags, formats, identifiers\n"
-        "merge; the duplicate's files move to .caltrash, never deleted).\n"
-        "--apply needs Calibre closed and --backup-dir."
+        "Fold --duplicate ID into --keeper ID: the keeper gains every format\n"
+        "it lacks from the duplicate (nothing else carries over -- the\n"
+        "duplicate's tags, identifiers, and comments are discarded), and the\n"
+        "duplicate's files move to .caltrash, never deleted. --apply needs\n"
+        "Calibre closed and --backup-dir."
     ),
     "flush": (
         "Embed current database metadata into every book in the OPF-dirty\n"
@@ -311,15 +318,16 @@ VERB_PROSE: dict[str, str] = {
     "backfill": (
         "Fetch missing metadata (--fields: comma list of\n"
         "title,authors,publisher,isbn) for the targeted books and apply it to\n"
-        "the database at --apply. The only verb that touches the network.\n"
-        "--apply needs Calibre closed and --backup-dir."
+        "the database at --apply. Network-touching like phase2's download\n"
+        "segment. --apply needs Calibre closed and --backup-dir."
     ),
     "trash": (
         "The .caltrash lifecycle: the dry run lists entries (category, book\n"
         "id, age, files); --empty with --apply permanently deletes EVERYTHING\n"
         "in .caltrash; --expire DAYS with --apply deletes entries older than\n"
-        "DAYS (default upstream 14-day rule). metadata.db never changes: no\n"
-        "backup, and --apply does not demand closed Calibre."
+        "DAYS (without the flag, nothing is deleted: --apply just lists).\n"
+        "metadata.db never changes: no backup. --apply still observes the\n"
+        "house closed-Calibre guard (exit 1 while Calibre runs)."
     ),
     "backup-metadata": (
         "Regenerate the sidecar metadata.opf files over the dirtied queue\n"
@@ -361,8 +369,9 @@ VERB_PROSE: dict[str, str] = {
     "customize": (
         "Calibre plugin management without the GUI: --list-plugins (read\n"
         "only), --add-plugin ZIP, --remove-plugin NAME (builtins unaffected),\n"
-        "--enable-plugin / --disable-plugin NAME. Needs no library; installs\n"
-        "and changes happen at --apply in a sandboxed config."
+        "--enable-plugin / --disable-plugin NAME. Needs no library. Installs\n"
+        "and changes happen at --apply and modify your REAL Calibre config\n"
+        "(there is no sandbox; Calibre must be closed)."
     ),
     "debug-tools": (
         "Calibre's file-level debugging pair-tools, no library needed:\n"
@@ -439,7 +448,7 @@ def _flag_rows(actions, detail_limit, pad=26, indent=2, width=88):
         if action.dest == "help":
             continue
         token = _flag_token(action)
-        if len(token) <= pad:
+        if len(token) < pad:
             detail = _truncate(action.help, width - indent - pad)
             if not detail:
                 lines.append(" " * indent + token)
@@ -464,7 +473,7 @@ def _wrapped_flag_block(actions, indent=2, width=88):
         if not detail:
             lines.append(" " * indent + token)
             continue
-        if len(token) <= 28 and len(token) + indent + 2 + len(detail) <= width:
+        if len(token) < 28 and len(token) + indent + 2 + len(detail) <= width:
             lines.append(" " * indent + token.ljust(28) + detail)
         else:
             lines.append(" " * indent + token)
@@ -504,8 +513,13 @@ def overview(parser) -> str:
         "   (see: --help run)"
     )
     lines.append("")
+    lines.append("also:")
+    lines.append("  cquarry (no arguments)        the interactive TUI")
+    lines.append("")
     lines.append("deep dives:")
-    lines.append("  cquarry --help read|write|set|run|examples|all|json")
+    lines.append(
+        "  cquarry --help read|write|set|run|examples|all|json  (-h works too)"
+    )
     lines.append("  cquarry --version")
     lines.append("  cquarry run --help VERB        e.g. run --help phase2")
     lines.append("")
@@ -535,6 +549,11 @@ def run_overview() -> str:
     lines.append(
         "shared flags: --apply (library operations execute at --apply; the"
         " acquisition-pathway verbs have no --apply), --db, --format json, --quiet"
+    )
+    lines.append("")
+    lines.append(
+        "exit codes: 0 clean; 1 failed apply or a live-Calibre refusal; "
+        "2 usage or trouble-found per verb (each page states which)"
     )
     lines.append("")
     lines.append("per-verb detail: cquarry run --help VERB   (e.g. run --help phase1)")
@@ -569,6 +588,8 @@ def verb_page(verb: str) -> str:
         "--apply (execute; dry run without it)" if f == "apply" else f"--{f}"
         for f in shared_flags_for(verb)
     )
+    if verb not in APPLY_VERBS:
+        footer += " (this verb ignores --apply: it executes as documented)"
     lines.append(footer)
     return "\n".join(lines)
 
@@ -599,10 +620,13 @@ def topic_read(parser) -> str:
         "  --book --untagged          select every untagged book\n"
         "  --health --fail-on-findings  turn the dashboard into a gate (exit 1)\n"
         "  --analytics genres --genre-depth N   deeper tag-hierarchy levels\n"
-        "  --restrict SEARCH          scopes every read mode; refused with\n"
-        "                             write verbs, the run verbs, and --book/--id\n"
+        "  --restrict SEARCH          scopes every read mode except --trash\n"
+        "                             (library-shape); refused with write verbs,\n"
+        "                             the run verbs, --book/--id, and bare --untagged\n"
         "  two modes in one invocation  a usage error (exit 2); the error\n"
-        "                             names the flags involved\n"
+        "                             names the flags involved (a bare --book\n"
+        "                             alongside another mode is the one silent\n"
+        "                             case: it contributes no id list)\n"
         "exit codes: 0 clean, 1 findings (mode-dependent), 2 usage."
     )
     return "\n".join(lines)
@@ -613,11 +637,15 @@ def topic_write(parser) -> str:
     lines = [
         "cquarry write verbs - per-book edits, one flag per edit",
         "",
-        "Opt-in and dispatched only when a write flag is present. Calibre",
-        "must be closed (a lock is exit 1; a usage problem is exit 2). Every",
-        "edit funnels through one batch() transaction per invocation, so an",
-        "interrupt mid-verb cannot commit a torn edit. Empty-string values",
-        "are refused. Combine freely: --set-title + --add-tag in one call.",
+        "Opt-in and dispatched only when a write flag is present. THESE VERBS",
+        "COMMIT IMMEDIATELY: no dry run, no --apply, no backup (only",
+        "--remove-book gates, behind --confirm-remove). Calibre must be",
+        "closed (a lock is exit 1; a usage problem is exit 2). Every edit",
+        "funnels through one batch() transaction per invocation, so an",
+        "interrupt mid-verb cannot commit a torn edit. (Empty-string values",
+        "are refused on the set and schema doors, not here.) Combine freely:",
+        "--set-title + --add-tag in one call; --remove-book cannot combine",
+        "with any other verb.",
         "",
         group.title + ":",
     ]
@@ -681,11 +709,11 @@ def topic_examples() -> str:
             "  cquarry --from-search 'tags:\"To Sort\"' --batch-add-tag Curated \\",
             "      --db ~/Calibre/metadata.db",
             "",
-            "# The acquisition pathway",
-            "  cquarry run phase1 ~/Downloads --manifest /tmp/batch.json",
-            "  cquarry run sign --manifest /tmp/batch.json",
-            "  cquarry run phase2 --manifest /tmp/batch.json --backup-dir ~/bak",
-            "  cquarry run phase3 --manifest /tmp/batch.json --answer-file a.json",
+            "# The acquisition pathway (phase1 prints its manifest path; sign THAT)",
+            "  cquarry run phase1 ~/Downloads",
+            "  cquarry run sign --manifest <library>/.claude/manifests/2026-10-06-batch.json",
+            "  cquarry run phase2 --manifest <same-path> --backup-dir ~/bak",
+            "  cquarry run phase3 --manifest <same-path> --answer-file a.json",
             "",
             "# Headless calibre verbs",
             "  cquarry run flush --apply --backup-dir ~/bak --db ~/Calibre/metadata.db",

@@ -278,8 +278,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="BOOK_ID[,BOOK_ID...]",
         help="Show the full record for one book or a comma-separated list: "
         "identifiers, format files, cover, comments, custom columns, "
-        "annotations, reading progress. With --untagged, give no ids to "
-        "select every untagged book",
+        "annotations, reading progress. --format json emits the "
+        "machine-readable dossier. With --untagged, give no ids to "
+        "select every untagged book (also a standalone mode)",
     )
     # --untagged stays OUTSIDE the exclusive group on purpose: it is a
     # modifier of --book (`--book --untagged`), not an independent mode.
@@ -354,7 +355,8 @@ def build_parser() -> argparse.ArgumentParser:
     scope.add_argument(
         "--db",
         default=None,
-        help="Path to Calibre metadata.db (auto-detected if omitted)",
+        help="Path to Calibre metadata.db, or the library directory "
+        "containing it (auto-detected if omitted)",
     )
     scope.add_argument(
         "--restrict",
@@ -373,7 +375,8 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument(
         "--outdir",
         default=None,
-        help="Output directory for --all-wings (default: current dir)",
+        help="Output directory for --all-wings (default: ./catalogs), "
+        "--all-saved-searches (default: ./saved_search_catalogs), and --exportlt",
     )
     out.add_argument(
         "--format",
@@ -649,7 +652,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="saved_search_delete",
         metavar="NAME",
         default=None,
-        help="Delete a saved search by its stored spelling",
+        help="Delete a saved search by its stored spelling (dry run by "
+        "default; --apply with --backup-dir, like the set door)",
     )
     w.add_argument(
         "--saved-search-rename",
@@ -658,7 +662,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("OLD", "NEW"),
         default=None,
         help="Rename a saved search (refuses to overwrite an existing "
-        "name, where upstream silently does)",
+        "name, where upstream silently does; dry run by default; --apply "
+        "with --backup-dir)",
     )
     w.add_argument(
         "--add-custom-column",
@@ -685,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Flag a custom column for deletion (Calibre purges the "
         "storage at its next start; #reading_status and friends are "
-        "refused by label)",
+        "refused by label; dry run by default; --apply with --backup-dir)",
     )
     w.add_argument(
         "--set-author-sort",
@@ -1127,7 +1132,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="restore-database: the library directory to (re)build the "
-        "database in; an existing metadata.db there demands --force",
+        "database in (an existing metadata.db there demands --force); "
+        "clone: the empty folder receiving the fresh schema",
     )
     run_p.add_argument(
         "--force",
@@ -1198,7 +1204,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="export: destination directory; catalog-epub/catalog-bibtex: "
-        "the destination FILE (extension enforced: .epub / .bib)",
+        "the destination FILE (extension enforced: .epub / .bib); required by all three",
     )
     run_p.add_argument(
         "--template",
@@ -1260,7 +1266,7 @@ def build_parser() -> argparse.ArgumentParser:
         "dir",
         nargs="?",
         default=None,
-        help="phase1: the downloads directory to vet",
+        help="phase1 (required there): the downloads directory to vet",
     )
     run_p.add_argument(
         "--manifest",
@@ -1272,7 +1278,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="backup_dir",
         metavar="DIR",
         default=None,
-        help="phase2 (required): metadata.db copied here first; outside the library",
+        help="required at --apply (phase2 and every write verb): metadata.db copied here first; outside the library",
     )
     run_p.add_argument(
         "--audience",
