@@ -1,5 +1,20 @@
 # CalibreQuarry Patch Notes
 
+# 3.57.1 (2026-10-06)
+
+### Erratum: the 3.57.0 publish short-circuited on a format regression
+
+- v3.57.0's CI and PyPI publish both failed at the pinned
+  `ruff format --check` gate before a single test ran: the
+  two-level-help commit left one three-line `next(...)` call in cli.py
+  that ruff collapses to one line (the edit rode in after the last
+  format check, exactly the stale-anchor trap the lane notes warn
+  about). 3.57.0 never reached PyPI and its GitHub Release was never
+  minted; this is the same release with the line collapsed, retagged
+  v3.57.1. No code change beyond that one line's formatting; the
+  v3.57.0 tag stays where it is (release tags are never rewritten) and
+  carries the full 3.57.0 entry.
+
 # 3.57.0 (2026-10-06)
 
 ### The two-level help: a compact overview, deep-dive topics, per-verb run pages

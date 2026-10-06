@@ -1331,9 +1331,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser()
         args = parser.parse_args(argv)
-        modes_group = next(
-            g for g in parser._action_groups if g.title == MODES_TITLE
-        )
+        modes_group = next(g for g in parser._action_groups if g.title == MODES_TITLE)
         picked = [
             a
             for a in modes_group._group_actions
