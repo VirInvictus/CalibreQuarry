@@ -1,5 +1,43 @@
 # CalibreQuarry Patch Notes
 
+# 3.59.0 (2026-10-06)
+
+### --help json, and verb pages that tell the apply/backup truth
+
+- An AI-grokability probe (a fresh agent learning the CLI from the help
+  surface alone, source and docs forbidden) confirmed the two-level
+  help works for agent operators end to end, and found real gaps. This
+  release fixes the ones that were our text's fault and adds the
+  machine surface.
+- **The per-verb shared footer no longer lies about --apply**: the
+  acquisition-pathway verbs (phase1, sign, approve, phase2, phase3)
+  have no --apply (phase1's file-side writes are the separate
+  --stamp/--apply-lossy/--quarantine opt-ins; sign/approve/phase2/
+  phase3 execute the manifest as their pages document), and their pages
+  stop advertising it. The footer is verb-aware via an APPLY_VERBS
+  table; an agent could previously not tell whether the documented
+  pathway examples executed or dry-ran.
+- **--backup-dir appears in the flags blocks of every verb whose
+  --apply demands it** (convert, polish, cover, merge, flush, backfill,
+  backup-metadata; phase2 already listed it). It was prose-only before,
+  so scripting from the flags list alone missed a required flag.
+- **--help json**: the complete parser surface as deterministic,
+  machine-readable JSON -- every top-level group and flag, every run
+  verb with stage, summary, prose, claimed flags, shared flags, and
+  takes_apply -- generated from the live parser, so a new flag lands in
+  it by construction. Valid JSON under any environment: the json topic
+  is exempt from the ANSI painter even under FORCE_COLOR. One artifact
+  replaces 23 help calls for an agent (or human) wanting the whole
+  CLI.
+- Smaller composition truths: the read topic names the two-modes
+  outcome (a usage error, exit 2, the error naming the flags), and
+  flush's page states its default target (the whole OPF-dirty queue;
+  --search/--ids are optional filters on it).
+- 7 new tests (854 total): the apply/backup truth per page, the
+  two-mode note, and the json surface (valid, deterministic,
+  versioned, complete over every top-level flag, apply-table
+  consistent, never colored).
+
 # 3.58.0 (2026-10-06)
 
 ### The help surface, in color: the CPython argparse theme
