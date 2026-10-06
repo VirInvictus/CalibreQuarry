@@ -1,5 +1,48 @@
 # CalibreQuarry Patch Notes
 
+# 3.59.1 (2026-10-06)
+
+### The 12-agent help audit: the docs-truth wave
+
+Three waves of four lenses (a completeness census, a usability walk, a
+fact-check of every behavioral claim against code, and a human+AI
+dual-lens read) audited this help surface. The generated layer
+verified complete: zero missed flags, zero invented verbs, the JSON
+dump exactly matching the parser. Every defect lived in the
+hand-written layer, and this release fixes the text:
+
+- **The examples page taught a broken acquisition walkthrough**:
+  phase1 silently ignores --manifest (it auto-names the manifest under
+  the library's .claude/manifests/ and prints the path), so the
+  documented `run sign --manifest /tmp/batch.json` targeted a file
+  phase1 never wrote. The claim map drops phase1's phantom --manifest,
+  the phase1 page states where the manifest lands, and the examples
+  show the real flow.
+- **trash and export claimed --apply demands no closed Calibre**; the
+  dispatch guard refuses both (exit 1). customize's "sandboxed config"
+  was false (there is no sandbox: it modifies the real config), merge
+  does NOT merge tags or identifiers (only missing formats move; the
+  rest is discarded with the duplicate), backfill is not the only
+  network verb (phase2's download segment is one too), and phase2's
+  --audience default is stated plainly.
+- **The write page now says what every neighboring tier inverts**:
+  these verbs commit immediately (no dry run, no --apply, no backup;
+  only --remove-book gates behind --confirm-remove), the empty-value
+  refusal is scoped to the set and schema doors, and --remove-book's
+  non-combination is named.
+- Shared run-flag help no longer bleeds across verb pages (--backup-dir
+  is verb-neutral, --target names both verbs' rules), and the smaller
+  truths landed: --outdir's real consumers and defaults, --db accepting
+  the library directory, --book's --format json dossier, --untagged as
+  a standalone mode, the TUI on-ramp and -h in the overview, the
+  epilog's json topic, --restrict's --trash exception and bare
+  --untagged refusal, phase3's unattended guidance and mechanical-pass
+  caveat, the run overview's exit-code line, phase1's dir marked
+  required, the schema verbs' dry-run clauses, the pathway footer's
+  "ignores --apply", and the 28-char column collision.
+
+No behavior changes: this release is help text and the claim map only.
+
 # 3.59.0 (2026-10-06)
 
 ### --help json, and verb pages that tell the apply/backup truth
