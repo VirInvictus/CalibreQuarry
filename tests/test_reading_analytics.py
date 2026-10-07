@@ -16,28 +16,11 @@ from contextlib import redirect_stderr, redirect_stdout
 
 from cquarry_cli.cli import main
 
-_SCHEMA = """
-CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT,
-    timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT,
-    series_index REAL DEFAULT 1.0, path TEXT, uuid TEXT);
-CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT, link TEXT);
-CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
-CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT);
-CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT);
-CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT);
-CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT, rating INT);
-CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT);
-CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
-CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT);
-CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT,
-    uncompressed_size INT);
-CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
-CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT,
-    datatype TEXT, is_multiple BOOL, editable BOOL, display TEXT);
+from _fixtures import SCHEMA as _SCHEMA
+
+# The reading funnel's columns: #reading_status is a normalized enum
+# (value table + link), #date_read a direct-storage datetime.
+_SCHEMA += """
 CREATE TABLE custom_column_1 (id INTEGER PRIMARY KEY, value TEXT);
 CREATE TABLE books_custom_column_1_link (id INTEGER PRIMARY KEY, book INT,
     value INT);
@@ -70,12 +53,14 @@ def _build(db_path, with_columns=True):
         )
     if with_columns:
         con.execute(
-            "INSERT INTO custom_columns VALUES (1,'reading_status','Status',"
+            "INSERT INTO custom_columns (id,label,name,datatype,is_multiple,"
+            "editable,display) VALUES (1,'reading_status','Status',"
             '\'enumeration\',0,1,\'{"enum_values": ["Wish", "Active", '
             '"Done"]}\')'
         )
         con.execute(
-            "INSERT INTO custom_columns VALUES (2,'date_read','Date Read',"
+            "INSERT INTO custom_columns (id,label,name,datatype,is_multiple,"
+            "editable,display) VALUES (2,'date_read','Date Read',"
             "'datetime',0,1,'{}')"
         )
         # Enum values live in the normalized value table + link table.

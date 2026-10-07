@@ -16,22 +16,7 @@ from unittest import mock
 
 from cquarry_cli.cli import main
 
-_SCHEMA = """
-CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT,
-    timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT,
-    series_index REAL DEFAULT 1.0, path TEXT, uuid TEXT);
--- Calibre's real preferences table carries UNIQUE(key): INSERT OR REPLACE
--- upserts on it. Without the constraint the writers insert second rows and
--- every fetchone() read keeps seeing the first, stale one.
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT NOT NULL,
-    val TEXT NOT NULL, UNIQUE (key));
--- The modern custom_columns shape the column writers require (editable/
--- display/normalized are cquarry's minimum for create; mark_for_delete for
--- delete).
-CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT UNIQUE,
-    name TEXT, datatype TEXT, is_multiple BOOL, editable BOOL, display TEXT,
-    normalized BOOL, mark_for_delete BOOL DEFAULT 0);
-"""
+from _fixtures import SCHEMA as _SCHEMA
 
 _SEED_SEARCHES = '{"SciFi Picks": "tags:Fic.SciFi", "Recent": "date:>7d"}'
 

@@ -18,7 +18,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from cquarry_cli import manifest
@@ -43,37 +43,21 @@ from cquarry_cli.run import (
     sign_manifest,
 )
 
-# The phase-2 import fixture: the add_book INSERT-path hazards (AUTOINCREMENT
-# + books_insert_trg needing title_sort()/uuid4()) plus the #source (direct
-# storage) and #audience (multi-valued link) columns the run stamps.
-_RUN_SCHEMA = """
-CREATE TABLE books (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, sort TEXT,
-    author_sort TEXT, timestamp TEXT, pubdate TEXT, series_index REAL,
-    has_cover INTEGER DEFAULT 0, uuid TEXT, path TEXT, last_modified TEXT
-);
-CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT UNIQUE, sort TEXT);
-CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
-CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT UNIQUE);
-CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT,
-    UNIQUE(book, tag));
-CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT UNIQUE, sort TEXT);
-CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT);
-CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT UNIQUE);
-CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT, rating INT);
-CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT UNIQUE, sort TEXT);
-CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT);
-CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT UNIQUE);
-CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT);
-CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT,
-    uncompressed_size INT, name TEXT);
-CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT,
-    val TEXT, UNIQUE(book, type));
-CREATE TABLE comments (id INTEGER PRIMARY KEY, book INT, text TEXT);
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
-CREATE TABLE metadata_dirtied (id INTEGER PRIMARY KEY, book INTEGER NOT NULL,
-    UNIQUE(book));
-CREATE TABLE books_pages_link (book INTEGER PRIMARY KEY, pages INTEGER DEFAULT 0);
+# The phase-2 import fixture rides the shared base (AUTOINCREMENT books
+# included) plus the add_book INSERT-path hazards (books_insert_trg
+# needing title_sort()/uuid4()) and the #source (normalized enumeration)
+# and #audience (multi-valued link) columns the run stamps.
+from _fixtures import SCHEMA as _RUN_BASE
+
+# Phase 2's import path needs more than the shared base: the add_book
+# INSERT-path hazards (books_insert_trg needing title_sort()/uuid4(), the
+# Count Pages create trigger) and the #source (normalized enumeration)
+# plus #audience (multi-valued text) columns the run stamps. `Z-Lib` is
+# the renamed enum value (Brandon's spelling, 2026-09-13); the 3.40-era
+# "Z-Library" string no longer exists in the enum.
+_RUN_SCHEMA = (
+    _RUN_BASE
+    + """
 CREATE TRIGGER books_insert_trg AFTER INSERT ON books
 BEGIN
     UPDATE books SET sort = title_sort(NEW.title), uuid = uuid4()
@@ -83,25 +67,19 @@ CREATE TRIGGER books_pages_link_create_trigger AFTER INSERT ON books FOR EACH RO
 BEGIN
     INSERT INTO books_pages_link(book) VALUES (NEW.id);
 END;
-CREATE TABLE custom_columns (
-    id INTEGER PRIMARY KEY, label TEXT UNIQUE, name TEXT, datatype TEXT,
-    is_multiple BOOL, editable BOOL DEFAULT 1, display TEXT DEFAULT '{}'
-);
 CREATE TABLE custom_column_10 (id INTEGER PRIMARY KEY, value TEXT UNIQUE);
 CREATE TABLE books_custom_column_10_link (book INTEGER, value INTEGER,
     UNIQUE(book, value));
 CREATE TABLE custom_column_11 (id INTEGER PRIMARY KEY, value TEXT UNIQUE);
 CREATE TABLE books_custom_column_11_link (book INTEGER, value INTEGER,
     UNIQUE(book, value));
--- #source mirrors the real library: enumeration, normalized storage, the
--- real enum values (cquarry 1.17's dispatch refuses the text+direct shape
--- this fixture used to model, which no real Calibre schema creates).
--- `Z-Lib` is the renamed value (Brandon's spelling, 2026-09-13); the
--- 3.40-era "Z-Library" string no longer exists in the enum.
-INSERT INTO custom_columns VALUES (10, 'source', 'Source', 'enumeration', 0, 1,
+INSERT INTO custom_columns (id, label, name, datatype, is_multiple, editable,
+    display) VALUES (10, 'source', 'Source', 'enumeration', 0, 1,
     '{"enum_values": ["Standard Ebooks", "Library Genesis", "Bought EPUB", "Bought physical", "ripped", "Anna''s Archive", "Free", "Gifted", "Other", "Z-Lib"]}');
-INSERT INTO custom_columns VALUES (11, 'audience', 'Audience', 'text', 1, 1, '{}');
+INSERT INTO custom_columns (id, label, name, datatype, is_multiple, editable,
+    display) VALUES (11, 'audience', 'Audience', 'text', 1, 1, '{}');
 """
+)
 
 
 def _build_library(db_path: str) -> None:
@@ -2421,6 +2399,86 @@ class TestEmbeddedStamps(unittest.TestCase):
         # seeds and records no failure.
         with mock.patch("cquarry_cli.run._run", return_value=self._proc("")):
             self.assertEqual(_stamps_from_embedded("/tmp/probe.epub"), {})
+
+
+class TestPhaseFlagWiring(RunCase):
+    """The 2026-09-20 test-gap audit's item 3: --quarantine/--stamp and
+    phase 3's --answer-file were tested only at the run_phase1/run_phase3
+    function level; the argv wiring (parser dest -> dispatch_run kwarg)
+    was invisible. The phase functions are stubbed so this class pins
+    exactly the dispatch contract, defaults included."""
+
+    def _run_main(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stderr(err), redirect_stdout(out):
+            code = main(list(argv))
+        return code
+
+    def test_phase1_flags_reach_run_phase1(self):
+        with mock.patch("cquarry_cli.run.run_phase1", return_value=0) as phase1:
+            code = self._run_main(
+                "run",
+                "phase1",
+                self.downloads,
+                "--quarantine",
+                "--stamp",
+                "--db",
+                self.db_path,
+            )
+        self.assertEqual(code, 0)
+        phase1.assert_called_once_with(
+            self.downloads,
+            self.db_path,
+            bindery_report=None,
+            stamp=True,
+            apply_lossy=False,
+            quarantine=True,
+            quiet=False,
+        )
+
+    def test_phase1_flags_default_off(self):
+        with mock.patch("cquarry_cli.run.run_phase1", return_value=0) as phase1:
+            code = self._run_main("run", "phase1", self.downloads, "--db", self.db_path)
+        self.assertEqual(code, 0)
+        self.assertFalse(phase1.call_args.kwargs["stamp"])
+        self.assertFalse(phase1.call_args.kwargs["quarantine"])
+        self.assertFalse(phase1.call_args.kwargs["apply_lossy"])
+
+    def test_phase3_answer_file_reaches_run_phase3(self):
+        manifest_path = os.path.join(self.temp_dir, "batch.json")
+        answer_path = os.path.join(self.temp_dir, "answers.json")
+        with mock.patch("cquarry_cli.run.run_phase3", return_value=0) as phase3:
+            code = self._run_main(
+                "run",
+                "phase3",
+                "--manifest",
+                manifest_path,
+                "--answer-file",
+                answer_path,
+                "--db",
+                self.db_path,
+            )
+        self.assertEqual(code, 0)
+        phase3.assert_called_once_with(
+            manifest_path, self.db_path, answer_file=answer_path, quiet=False
+        )
+
+    def test_phase3_answer_file_defaults_to_none(self):
+        manifest_path = os.path.join(self.temp_dir, "batch.json")
+        with mock.patch("cquarry_cli.run.run_phase3", return_value=0) as phase3:
+            code = self._run_main(
+                "run", "phase3", "--manifest", manifest_path, "--db", self.db_path
+            )
+        self.assertEqual(code, 0)
+        self.assertIsNone(phase3.call_args.kwargs["answer_file"])
+
+    def test_phase1_missing_dir_is_refused_before_the_library(self):
+        # The usage guard fires before find_db, so a bad --db cannot turn
+        # the argument problem into an environment failure.
+        with mock.patch("cquarry_cli.run.run_phase1") as phase1:
+            code = self._run_main("run", "phase1", "", "--db", self.db_path)
+        self.assertEqual(code, 2)
+        phase1.assert_not_called()
 
 
 if __name__ == "__main__":

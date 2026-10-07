@@ -24,30 +24,7 @@ from cquarry.db import CalibreDB
 from cquarry_cli import integrate
 from cquarry_cli.cli import main
 
-_SCHEMA = """
-CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT,
-    timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT,
-    series_index REAL DEFAULT 1.0, path TEXT, uuid TEXT);
-CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT, link TEXT);
-CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
-CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT);
-CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT);
-CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT);
-CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT, rating INT);
-CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
-CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT);
-CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
-CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT);
-CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT,
-    uncompressed_size INT);
-CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT,
-    val TEXT, UNIQUE(book, type));
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
-CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT,
-    datatype TEXT, is_multiple BOOL);
-"""
+from _fixtures import SCHEMA as _SCHEMA
 
 _BOOKS = [
     (1, "Keeper Book", "Auth A/Keeper Book (1)"),
@@ -2430,6 +2407,143 @@ class TestDeviceCpShape(_IntegrateCase):
             )
         self.assertEqual(code, 0)
         self.assertEqual(calls[0], ["ebook-device", "cp", "book.epub", "carda:/books/"])
+
+
+class TestRemoveCover(_IntegrateCase):
+    """`run cover --remove-cover` (the 2026-09-20 test-gap audit's item 2):
+    the destructive half of the cover verb had zero coverage -- only
+    --cover FILE (the set half) was exercised. Removal clears the
+    catalogued flag, deletes cover.jpg/cover.png from the book directory
+    after the commit, and queues metadata_dirtied exactly when the flag
+    actually changed."""
+
+    def setUp(self):
+        super().setUp()
+        # _mark_dirty skips schemas predating the queue table; the real
+        # libraries have it, so the fixture carries it for the assertions.
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS metadata_dirtied "
+            "(id INTEGER PRIMARY KEY, book INTEGER NOT NULL, UNIQUE(book))"
+        )
+        con.commit()
+        con.close()
+
+    def _covered_book(self):
+        cover = self.tmpdir / "Auth A" / "Keeper Book (1)" / "cover.jpg"
+        cover.write_bytes(b"\xff\xd8fakejpeg")
+        con = sqlite3.connect(self.db_path)
+        con.execute("UPDATE books SET has_cover = 1 WHERE id = 1")
+        con.commit()
+        con.close()
+        return cover
+
+    def test_dry_run_names_the_action_and_writes_nothing(self):
+        cover = self._covered_book()
+        code, out, _ = self.run_cli(
+            "run", "cover", "--remove-cover", "--ids", "1", "--db", str(self.db_path)
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("cover plan (1):", out)
+        self.assertIn("#1 remove_cover", out)
+        self.assertIn("Dry run: nothing executed", out)
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute("SELECT has_cover FROM books WHERE id = 1").fetchone()[0],
+                1,
+            )
+        finally:
+            con.close()
+        self.assertTrue(cover.exists())
+
+    def test_apply_clears_the_flag_and_deletes_the_cover_files(self):
+        cover = self._covered_book()
+        png = self.tmpdir / "Auth A" / "Keeper Book (1)" / "cover.png"
+        png.write_bytes(b"\x89PNGfake")
+        code, out, _ = self.run_cli(
+            "run",
+            "cover",
+            "--remove-cover",
+            "--ids",
+            "1",
+            "--apply",
+            "--backup-dir",
+            str(self.backups),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("Applied 1, failed/skipped 0.", out)
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute("SELECT has_cover FROM books WHERE id = 1").fetchone()[0],
+                0,
+            )
+            queued = [r[0] for r in con.execute("SELECT book FROM metadata_dirtied")]
+        finally:
+            con.close()
+        self.assertEqual(queued, [1])  # the flag changed, so OPF sync is queued
+        self.assertFalse(cover.exists())  # both catalogued names go
+        self.assertFalse(png.exists())
+        self.assertEqual(len(list(self.backups.iterdir())), 1)
+
+    def test_apply_on_an_uncovered_book_is_already_so(self):
+        code, out, _ = self.run_cli(
+            "run",
+            "cover",
+            "--remove-cover",
+            "--ids",
+            "1",
+            "--apply",
+            "--backup-dir",
+            str(self.backups),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("Applied 0, failed/skipped 0.", out)
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                [r[0] for r in con.execute("SELECT book FROM metadata_dirtied")],
+                [],  # no change, no queue entry
+            )
+        finally:
+            con.close()
+
+    def test_cover_file_and_remove_cover_are_exclusive(self):
+        code, _, err = self.run_cli(
+            "run",
+            "cover",
+            "--cover",
+            "some.jpg",
+            "--remove-cover",
+            "--ids",
+            "1",
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("exclusive", err)
+
+    def test_json_plan_carries_the_remove_action(self):
+        self._covered_book()
+        code, out, _ = self.run_cli(
+            "run",
+            "cover",
+            "--remove-cover",
+            "--ids",
+            "1",
+            "--format",
+            "json",
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 0)
+        plan = json.loads(out)["plan"]
+        self.assertEqual(plan, [{"book": 1, "action": "remove_cover", "cover": None}])
 
 
 if __name__ == "__main__":

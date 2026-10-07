@@ -97,20 +97,15 @@ class CommentsWriteVerbTests(unittest.TestCase):
         os.close(fd)
         con = sqlite3.connect(self.db_path)
         con.executescript(_WRITE_SCHEMA)
-        # Calibre's comments table carries an id column (the write path
-        # addresses rows by it); the --set-title fixture's plainer shape
-        # never noticed.
-        con.executescript(
-            "DROP TABLE comments;"
-            "CREATE TABLE comments (id INTEGER PRIMARY KEY, book INT, text TEXT);"
-        )
         con.execute(
             "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
             "has_cover,last_modified,series_index,path,uuid) VALUES "
             "(1,'Commented','Commented','A, Author','2020-01-01','2020-01-01',0,"
             "'2020-01-01 00:00:00',1.0,'p1','u1')"
         )
-        con.execute("INSERT INTO authors VALUES (1, 'Author A', 'A, Author')")
+        con.execute(
+            "INSERT INTO authors (id, name, sort) VALUES (1, 'Author A', 'A, Author')"
+        )
         con.execute("INSERT INTO books_authors_link (book, author) VALUES (1, 1)")
         con.execute("INSERT INTO comments (book, text) VALUES (1, '<p>Old.</p>')")
         con.commit()

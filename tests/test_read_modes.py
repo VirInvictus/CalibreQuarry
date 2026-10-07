@@ -6,6 +6,7 @@ Calibre-shaped database) and through cli.main() for exit-code plumbing.
 Unknown-book ids must fail cleanly with exit 1, never a traceback.
 """
 
+import csv
 import io
 import json
 import os
@@ -22,34 +23,11 @@ from cquarry_cli.modes.detail import show_book
 from cquarry_cli.modes.display import show_entities, show_reading_progress
 from cquarry_cli.modes.info import show_columns, show_info
 
-_SCHEMA = """
-CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT,
-    timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT,
-    series_index REAL DEFAULT 1.0, path TEXT, uuid TEXT);
-CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT, link TEXT);
-CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
-CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT);
-CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT);
-CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT);
-CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT, rating INT);
-CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT);
-CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
-CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT);
-CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT,
-    uncompressed_size INT);
-CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
-CREATE TABLE comments (book INT, text TEXT);
-CREATE TABLE annotations (id INTEGER PRIMARY KEY, book INT, format TEXT,
-    user_type TEXT, user TEXT, timestamp TEXT, annot_id TEXT, annot_type TEXT,
-    annot_data TEXT);
-CREATE TABLE last_read_positions (id INTEGER PRIMARY KEY, book INT, format TEXT,
-    user TEXT, device TEXT, cfi TEXT, epoch INT, pos_frac REAL);
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
-CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT,
-    datatype TEXT, is_multiple BOOL);
+from _fixtures import SCHEMA as _SCHEMA
+
+# The fixture's #read column is direct-storage (bool: no value-table +
+# link pair); cquarry probes for the link table and reads (book, value).
+_SCHEMA += """
 CREATE TABLE custom_column_1 (id INTEGER PRIMARY KEY, book INT, value TEXT);
 """
 
@@ -488,6 +466,190 @@ class TestOutputGuard(_TempDBCase):
         self.assertFalse(os.path.exists(export_path + ".cquarry-tmp"))
         os.unlink(export_path)
         self.assertEqual(self._db_bytes(), self._sentinel)
+
+
+class TestExportltRowShape(unittest.TestCase):
+    """The 2026-09-20 test-gap audit's item 4: --exportlt's happy path
+    (the actual CSV row shape) had no coverage; only the self-check
+    failure verdict and the output-guard refusals were tested. LibraryThing's
+    importer takes a FIXED eleven-column template, so the rows are pinned
+    cell-exact: ISBN-10 folds to 13, the sentinel pubdate yields an empty
+    year, rating halves to stars, date-read truncates to the date, pages
+    <= 0 stay empty, translator credits split into one tag per name, and
+    a Read book lands in its own file (read/unread is a property of the
+    LT import batch, not of a row)."""
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db", prefix="cquarry_lt_")
+        os.close(fd)
+        self.outdir = self.db_path + ".lt"
+        con = sqlite3.connect(self.db_path)
+        con.executescript(_SCHEMA)
+        # Direct-storage custom columns (no link table): the read path
+        # probes for the link table and falls back to (book, value).
+        for cid, label, name in (
+            (2, "reading_status", "Reading Status"),
+            (3, "translators", "Translators"),
+            (4, "date_read", "Date Read"),
+        ):
+            con.execute(
+                "INSERT INTO custom_columns (id,label,name,datatype,is_multiple) "
+                "VALUES (?,?,?,?,?)",
+                (cid, label, name, "text", 1 if label == "translators" else 0),
+            )
+            con.execute(
+                f"CREATE TABLE custom_column_{cid} "
+                "(id INTEGER PRIMARY KEY, book INT, value TEXT)"
+            )
+        rows = [
+            (
+                1,
+                "Read Classic",
+                "Herbert, Frank",
+                "1965-08-01",
+                8,
+                "Ace",
+                "9780441172719",
+            ),
+            (2, "Translator Novel", "Aaa, Translator", "0101-01-01", None, None, None),
+            (3, "Negative Pages", "Zzz, Author", "1990-05-01", 10, "Deep Press", None),
+        ]
+        for bid, title, sort, pubdate, rating, publisher, isbn in rows:
+            con.execute(
+                "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+                "has_cover,last_modified,series_index,path,uuid) VALUES "
+                f"({bid},'{title}','{title}','{sort}','2024-01-01','{pubdate}',0,"
+                f"'2024-01-02 00:00:00',1.0,'a/t{bid}','uuid-{bid}')"
+            )
+            if rating:
+                con.execute(
+                    "INSERT INTO ratings (id,rating) VALUES (?,?)", (rating, rating)
+                )
+                con.execute(
+                    "INSERT INTO books_ratings_link (book,rating) VALUES (?,?)",
+                    (bid, rating),
+                )
+            if publisher:
+                row = con.execute(
+                    "SELECT id FROM publishers WHERE name = ?", (publisher,)
+                ).fetchone()
+                if row:
+                    pid = row[0]
+                else:
+                    cur = con.execute(
+                        "INSERT INTO publishers (name) VALUES (?)", (publisher,)
+                    )
+                    pid = cur.lastrowid
+                con.execute(
+                    "INSERT INTO books_publishers_link (book,publisher) VALUES (?,?)",
+                    (bid, pid),
+                )
+        con.execute(
+            "INSERT INTO identifiers (book,type,val) VALUES (1,'isbn','0441172717')"
+        )
+        con.execute("INSERT INTO tags (id,name) VALUES (1,'Fic.SciFi')")
+        con.execute("INSERT INTO books_tags_link (book,tag) VALUES (1,1)")
+        con.execute("INSERT INTO books_pages_link (book,pages) VALUES (1,412)")
+        con.execute("INSERT INTO custom_column_2 (book,value) VALUES (1,'Read')")
+        con.execute(
+            "INSERT INTO custom_column_3 (book,value) VALUES "
+            "(2,'Trevor Le Gassick, Salma Khadra Jayyusi')"
+        )
+        con.execute(
+            "INSERT INTO custom_column_4 (book,value) VALUES (1,'2025-06-01T10:00:00')"
+        )
+        con.commit()
+        con.close()
+
+    def tearDown(self):
+        os.unlink(self.db_path)
+        for stale in os.listdir(self.outdir):
+            os.unlink(os.path.join(self.outdir, stale))
+        os.rmdir(self.outdir)
+
+    def test_happy_path_rows_match_the_lt_template(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--exportlt", "--outdir", self.outdir, "--db", self.db_path])
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertEqual(
+            sorted(os.listdir(self.outdir)),
+            ["librarything_main.csv", "librarything_read.csv"],
+        )
+        with open(
+            os.path.join(self.outdir, "librarything_read.csv"),
+            encoding="utf-8",
+            newline="",
+        ) as handle:
+            rows = list(csv.reader(handle))
+        self.assertEqual(
+            rows,
+            [
+                [
+                    "'TITLE'",
+                    "'AUTHOR (last, first)'",
+                    "'DATE'",
+                    "'ISBN'",
+                    "'PUBLICATION INFO'",
+                    "'TAGS'",
+                    "'RATING'",
+                    "'REVIEW'",
+                    "'DATE READ'",
+                    "'PAGE COUNT'",
+                    "'CALL NUMBER'",
+                ],
+                [
+                    "Read Classic",
+                    "Herbert, Frank",
+                    "1965",
+                    "9780441172719",  # ISBN-10 0441172717 folded to 13
+                    "Ace",
+                    "Fic.SciFi",
+                    "4",  # stored 8 halves to 4 stars
+                    "",  # REVIEW deliberately empty
+                    "2025-06-01",  # the datetime truncates to the date
+                    "412",
+                    "",
+                ],
+            ],
+        )
+        with open(
+            os.path.join(self.outdir, "librarything_main.csv"),
+            encoding="utf-8",
+            newline="",
+        ) as handle:
+            rows = list(csv.reader(handle))
+        self.assertEqual(
+            rows[1:],  # rows[0] is the same header, asserted above
+            [
+                [
+                    "Translator Novel",
+                    "Aaa, Translator",
+                    "",  # the 0101 sentinel yields no year
+                    "",  # no ISBN stays blank (verbatim import)
+                    "",
+                    "translator:Trevor Le Gassick, translator:Salma Khadra Jayyusi",
+                    "",
+                    "",
+                    "",
+                    "",  # no pages row
+                    "",
+                ],
+                [
+                    "Negative Pages",
+                    "Zzz, Author",
+                    "1990",
+                    "",
+                    "Deep Press",
+                    "",
+                    "5",
+                    "",
+                    "",
+                    "",  # -2 pages is junk and stays empty
+                    "",
+                ],
+            ],
+        )
 
 
 if __name__ == "__main__":

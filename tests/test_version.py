@@ -123,3 +123,7 @@ class TestVersionSync(unittest.TestCase):
             f"roadmap.md's stamp (v{m.group(1)}) does not match code VERSION "
             f"({CODE_VERSION}); bump it with the release",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -20,6 +20,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from _fixtures import SCHEMA as _SCHEMA
+
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 
 
@@ -31,29 +33,6 @@ def _load(name):
 
 
 truncation = _load("audit_truncation")
-
-_SCHEMA = """
-CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT,
-    timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT,
-    series_index REAL DEFAULT 1.0, path TEXT, uuid TEXT);
-CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT, link TEXT);
-CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
-CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT);
-CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT);
-CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT);
-CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT, rating INT);
-CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT);
-CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
-CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT);
-CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT,
-    uncompressed_size INT);
-CREATE TABLE books_pages_link (book INT, pages INT, algorithm INT, format TEXT,
-    format_size INT, timestamp TEXT, needs_scan INT);
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
-"""
 
 
 def minimal_pdf(pages: int) -> bytes:

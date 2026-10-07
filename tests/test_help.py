@@ -372,3 +372,7 @@ class TestDocsPins(unittest.TestCase):
         spec = (Path(__file__).resolve().parent.parent / "spec.md").read_text()
         for flag in self._mode_flags():
             self.assertIn(flag, spec, flag)
+
+
+if __name__ == "__main__":
+    unittest.main()

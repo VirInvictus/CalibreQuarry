@@ -18,6 +18,8 @@ from cquarry.db import CalibreDB
 
 from cquarry_cli import tui
 
+from _fixtures import SCHEMA
+
 _GARBAGE = b"this is definitely not a sqlite database\n" * 8
 
 
@@ -152,36 +154,7 @@ class TestRestrictedPrompt(unittest.TestCase):
         fd, self.db_path = tempfile.mkstemp(suffix=".db", prefix="cquarry_tuir_")
         os.close(fd)
         con = sqlite3.connect(self.db_path)
-        con.executescript(
-            """
-            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT,
-                author_sort TEXT, timestamp TEXT, pubdate TEXT, has_cover INT,
-                last_modified TEXT, series_index REAL DEFAULT 1.0, path TEXT,
-                uuid TEXT);
-            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
-            CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT,
-                author INT);
-            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
-            CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT,
-                tag INT);
-            CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT);
-            CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT,
-                series INT);
-            CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT);
-            CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT,
-                rating INT);
-            CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT);
-            CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT,
-                publisher INT);
-            CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
-            CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT,
-                lang_code INT);
-            CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT,
-                name TEXT, uncompressed_size INT);
-            CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
-            CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
-            """
-        )
+        con.executescript(SCHEMA)
         con.execute(
             "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
             "has_cover,last_modified,series_index,path,uuid) VALUES "

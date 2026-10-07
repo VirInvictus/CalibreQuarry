@@ -21,38 +21,14 @@ from unittest import mock
 from cquarry_cli import writeops
 from cquarry_cli.cli import main
 
-_SCHEMA = """
-CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, sort TEXT, author_sort TEXT,
-    timestamp TEXT, pubdate TEXT, has_cover INT, last_modified TEXT,
-    series_index REAL DEFAULT 1.0, path TEXT, uuid TEXT);
-CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
-CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INT, author INT);
-CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_tags_link (id INTEGER PRIMARY KEY, book INT, tag INT,
-    UNIQUE (book, tag));
-CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT, sort TEXT);
-CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INT, series INT,
-    UNIQUE (book, series));
-CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INT);
-CREATE TABLE books_ratings_link (id INTEGER PRIMARY KEY, book INT, rating INT,
-    UNIQUE (book, rating));
-CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT);
-CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INT, publisher INT);
-CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
-CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code INT);
-CREATE TABLE data (id INTEGER PRIMARY KEY, book INT, format TEXT, name TEXT,
-    uncompressed_size INT);
-CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INT, type TEXT, val TEXT,
-    UNIQUE (book, type));
-CREATE TABLE comments (book INT, text TEXT);
-CREATE TABLE preferences (id INTEGER PRIMARY KEY, key TEXT, val TEXT);
-CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT, name TEXT,
-    datatype TEXT, is_multiple BOOL, editable BOOL, display TEXT);
+from _fixtures import SCHEMA as _SCHEMA
+
+# Set mode's audience column: the normalized value + link tables ride
+# with this fixture (the registry row is seeded per test).
+_SCHEMA += """
 CREATE TABLE custom_column_1 (id INTEGER PRIMARY KEY, value TEXT);
 CREATE TABLE books_custom_column_1_link (id INTEGER PRIMARY KEY, book INT,
     value INT, UNIQUE (book, value));
-CREATE TABLE metadata_dirtied (id INTEGER PRIMARY KEY, book INTEGER NOT NULL,
-    UNIQUE(book));
 """
 
 
@@ -97,13 +73,13 @@ class _TempDBCase(unittest.TestCase):
                 ),
             ],
         )
-        con.execute("INSERT INTO tags VALUES (1, 'Curated')")
+        con.execute("INSERT INTO tags (id, name) VALUES (1, 'Curated')")
         con.execute("INSERT INTO books_tags_link (book, tag) VALUES (1, 1)")
-        con.execute("INSERT INTO ratings VALUES (1, 9)")
+        con.execute("INSERT INTO ratings (id, rating) VALUES (1, 9)")
         con.execute("INSERT INTO books_ratings_link (book, rating) VALUES (1, 1)")
         con.execute(
-            "INSERT INTO custom_columns VALUES (1, 'audience', 'Audience', "
-            "'text', 1, 1, NULL)"
+            "INSERT INTO custom_columns (id, label, name, datatype, is_multiple, "
+            "editable, display) VALUES (1, 'audience', 'Audience', 'text', 1, 1, NULL)"
         )
         con.commit()
         con.close()

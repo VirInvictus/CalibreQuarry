@@ -2834,5 +2834,168 @@ class TestFetchWorkFallbackFlow(unittest.TestCase):
         self.assertTrue(misses)
 
 
+class TestValidatorCoreChecks(unittest.TestCase):
+    """The six checks the 2026-09-20 test-gap audit named as untested
+    (its item 5): duplicate ISBN, identifier types, amazon-isbn10, and
+    the pubdate parseable/sentinel and language pairs. Same shape as the
+    other validator classes: an in-memory library, the check function,
+    and the Reporter's code lists."""
+
+    def _cur(self, ddl, inserts=()):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.executescript(ddl)
+        for stmt in inserts:
+            cur.execute(stmt)
+        return cur
+
+    _BOOKS_DDL = """
+        CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, pubdate TEXT);
+        CREATE TABLE books_languages_link (book INT, lang_code INT);
+    """
+
+    def test_books_without_any_language_are_flagged(self):
+        cur = self._cur(
+            self._BOOKS_DDL,
+            [
+                "INSERT INTO books VALUES (1, 'Tagged', '2020-01-01')",
+                "INSERT INTO books VALUES (2, 'Bare', '2020-01-01')",
+                "INSERT INTO books_languages_link VALUES (1, 1)",
+            ],
+        )
+        report = validate_metadata.Reporter()
+        validate_metadata.check_every_book_language(cur, report)
+        self.assertEqual([c for c, _ in report.errors], ["EVERY_BOOK_LANGUAGE"])
+        self.assertIn("'Bare'", report.errors[0][1])
+
+    def test_every_book_language_clean_library_is_silent(self):
+        cur = self._cur(
+            self._BOOKS_DDL,
+            [
+                "INSERT INTO books VALUES (1, 'Tagged', '2020-01-01')",
+                "INSERT INTO books_languages_link VALUES (1, 1)",
+            ],
+        )
+        report = validate_metadata.Reporter()
+        validate_metadata.check_every_book_language(cur, report)
+        self.assertEqual(report.errors, [])
+
+    _ISBN_DDL = """
+        CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+        INSERT INTO identifiers VALUES (1, 'isbn', '9780441172719');
+        INSERT INTO identifiers VALUES (2, 'isbn', '9780441172719');
+        INSERT INTO identifiers VALUES (3, 'isbn', '9780765377067');
+        INSERT INTO identifiers VALUES (4, 'isbn', '');
+    """
+
+    def test_isbn_shared_by_two_books_is_flagged_once(self):
+        cur = self._cur(self._ISBN_DDL)
+        report = validate_metadata.Reporter()
+        validate_metadata.check_no_duplicate_isbn(cur, report)
+        self.assertEqual([c for c, _ in report.errors], ["NO_DUPLICATE_ISBN"])
+        self.assertIn("books: 1,2", report.errors[0][1])
+
+    def test_same_isbn_twice_on_one_book_is_not_a_duplicate(self):
+        cur = self._cur(
+            """
+            CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+            INSERT INTO identifiers VALUES (1, 'isbn', '9780441172719');
+            INSERT INTO identifiers VALUES (1, 'isbn', '9780441172719');
+        """
+        )
+        report = validate_metadata.Reporter()
+        validate_metadata.check_no_duplicate_isbn(cur, report)
+        self.assertEqual(report.errors, [])
+
+    _PUBDATE_DDL = """
+        CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, pubdate TEXT);
+        INSERT INTO books VALUES (1, 'Real Date', '1965-08-01');
+        INSERT INTO books VALUES (2, 'Sentinel', '0101-01-01');
+        INSERT INTO books VALUES (3, 'Garbage', 'not-a-date');
+        INSERT INTO books VALUES (4, 'Null', NULL);
+    """
+
+    def test_unparseable_pubdate_is_an_error(self):
+        cur = self._cur(self._PUBDATE_DDL)
+        report = validate_metadata.Reporter()
+        validate_metadata.check_pubdate_parseable(cur, report)
+        self.assertEqual([c for c, _ in report.errors], ["PUBDATE_PARSEABLE"])
+        self.assertIn("'Garbage'", report.errors[0][1])
+
+    def test_sentinel_pubdate_is_a_warning(self):
+        cur = self._cur(self._PUBDATE_DDL)
+        report = validate_metadata.Reporter()
+        validate_metadata.check_no_sentinel_pubdate(cur, report)
+        self.assertEqual([c for c, _ in report.warnings], ["NO_SENTINEL_PUBDATE"])
+        self.assertIn("'Sentinel'", report.warnings[0][1])
+        # The same rows through the parseable check: the sentinel PARSES,
+        # so it is a warning class, never an error class.
+        parse_report = validate_metadata.Reporter()
+        validate_metadata.check_pubdate_parseable(cur, parse_report)
+        self.assertEqual([c for c, _ in parse_report.errors], ["PUBDATE_PARSEABLE"])
+        self.assertIn("'Garbage'", parse_report.errors[0][1])
+
+    def test_identifier_type_forbidden_is_an_error_even_unstrict(self):
+        cur = self._cur(
+            """
+            CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+            INSERT INTO identifiers VALUES (1, 'url', 'https://x');
+            INSERT INTO identifiers VALUES (2, 'isbn', '9780441172719');
+        """
+        )
+        report = validate_metadata.Reporter()
+        validate_metadata.check_identifier_types(
+            cur,
+            report,
+            validate_metadata.DEFAULT_FORBIDDEN_TYPES,
+            validate_metadata.DEFAULT_CANONICAL_TYPES,
+            strict=False,
+        )
+        self.assertEqual([c for c, _ in report.errors], ["ID_TYPE_FORBIDDEN"])
+        self.assertIn("'url'", report.errors[0][1])
+
+    def test_identifier_type_undeclared_needs_strict(self):
+        ddl = """
+            CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+            INSERT INTO identifiers VALUES (1, 'libgen', '28374');
+        """
+        strict = validate_metadata.Reporter()
+        validate_metadata.check_identifier_types(
+            self._cur(ddl),
+            strict,
+            validate_metadata.DEFAULT_FORBIDDEN_TYPES,
+            validate_metadata.DEFAULT_CANONICAL_TYPES,
+            strict=True,
+        )
+        self.assertEqual([c for c, _ in strict.warnings], ["ID_TYPE_UNDECLARED"])
+        loose = validate_metadata.Reporter()
+        validate_metadata.check_identifier_types(
+            self._cur(ddl),
+            loose,
+            validate_metadata.DEFAULT_FORBIDDEN_TYPES,
+            validate_metadata.DEFAULT_CANONICAL_TYPES,
+            strict=False,
+        )
+        self.assertEqual(loose.warnings, [])
+
+    _AMAZON_DDL = """
+        CREATE TABLE identifiers (book INT, type TEXT, val TEXT);
+        INSERT INTO identifiers VALUES (1, 'amazon', '0441172717');
+        INSERT INTO identifiers VALUES (2, 'mobi-asin', 'B002RI9K5I');
+        INSERT INTO identifiers VALUES (3, 'amazon', '9780441172719');
+    """
+
+    def test_real_isbn10_filed_as_amazon_is_flagged(self):
+        cur = self._cur(self._AMAZON_DDL)
+        report = validate_metadata.Reporter()
+        validate_metadata.check_amazon_is_isbn10(cur, report)
+        self.assertEqual([c for c, _ in report.warnings], ["AMAZON_IS_ISBN10"])
+        # The ASIN (never a valid ISBN-10 checksum) and the ISBN-13 stay
+        # silent: only the misfiled ISBN-10 is named.
+        self.assertIn("'0441172717'", report.warnings[0][1])
+        self.assertIn("amazon", report.warnings[0][1])
+
+
 if __name__ == "__main__":
     unittest.main()
