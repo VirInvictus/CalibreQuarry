@@ -1,3 +1,5 @@
+> **Superseded record (2026-10-06).** Every gap listed below shipped in Phases 19-20 (3.37.0-3.55.0): `--fts`/`--fts-status`, `--restrict`, the tree audit, reading analytics, `--all-saved-searches`, and the C-list integration verbs. Kept as the provenance record for those phases; see roadmap.md for the shipped ledger.
+
 # REPORT-12-Sept: the upstream comparison (CalibreQuarry vs Calibre's management surface)
 
 Research date: 2026-09-10/11. Method: two read-only research passes

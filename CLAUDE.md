@@ -554,7 +554,9 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 - **External programs are subprocess seams**: ebook-convert,
   ebook-polish, calibredb, fetch-ebook-metadata. Every seam tolerates
   the binary being missing as a setup refusal (exit 2), never a
-  traceback. `run backfill` is the only verb that touches the network,
+  traceback. **[SUPERSEDED 3.59.1: `run phase2`'s post-commit download
+  segment also touches the network; backfill is no longer the only one.]**
+  `run backfill` is the only verb that touches the network,
   and only at `--apply` (fetch-ebook-metadata).
 - **run merge sends the duplicate to the trash**
   (`remove_book(..., delete_files="trash")`, cquarry 1.20's

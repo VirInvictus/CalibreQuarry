@@ -17,10 +17,18 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 > **Architecture Note:** CalibreQuarry acts as the frontend interface for the [cquarry](https://github.com/VirInvictus/cquarry) shared library. The database connection logic and the Calibre search grammar engine were extracted into the `cquarry` package so that other tools in the ecosystem (like Hermitage and Carrel-calibre-web) can guarantee identical behavior and query resolution.
 
-Reads `metadata.db` directly: no `calibredb` dependency, no JSON intermediaries.
+Reads `metadata.db` directly: no `calibredb` dependency for the read surface (the `run` verbs shell out to calibredb for their parity work), no JSON intermediaries.
 
 
 > **Note:** The core read/search surface is mature and stable, and is known to be fully functional on the primary development environment: **Fedora Linux 44 (Workstation Edition)**, using **Calibre 9.8** on **Python 3.14**. While it is pure Python and should be cross-platform, this specific setup is the only officially tested environment. Development is active again around the cquarry ecosystem (write verbs, batch curation, the pre-import screen); `roadmap.md` carries the current phases.
+
+## Quick start
+
+```bash
+pip install calibrequarry
+cquarry --stats --db "~/Calibre Library/metadata.db"
+cquarry            # no arguments: the interactive TUI
+```
 
 ## Contents
 
@@ -28,7 +36,7 @@ Reads `metadata.db` directly: no `calibredb` dependency, no JSON intermediaries.
 - [How this compares](#how-this-compares)
 - [Features](#features)
 - [Installation](#installation) · [Requirements](#requirements)
-- [Usage](#usage) · [Recipes](#recipes)
+- [Usage](#usage) · [Recipes](#recipes) · [Patch notes](patchnotes.md) · the behavioral contract is [spec.md](spec.md)
 - [Sample output](#sample-output)
 - [Search syntax & virtual library resolution](#search-syntax--virtual-library-resolution)
 - [Troubleshooting](#troubleshooting)
@@ -59,18 +67,21 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **All saved searches** | `--all-saved-searches` | Generate a catalog per saved search into `--outdir` (the `--all-wings` analog); each file is headed with the search's expression, zero-hit searches write nothing and say so, and a failed write drops the stale file and fails the sweep (exit 1) |
 | **Full-text search** | `--fts QUERY` | Content search over Calibre's `full-text-search.db` sidecar: what the books actually say, not their metadata. Case- and accent-folded; every match names its formats; each run ends with an index-staleness summary (unless `--quiet`), and `--fts-status` reports those classes on their own |
 | **Statistics** | `--stats` | Format breakdown, rating distribution, tag taxonomy, publisher counts |
-| **Health digest** | `--health` | The audit's finding counts in one short screen (book issues with the top problems, duplicate groups, series gaps, conversion overrides, the metadata-quality trio, filesystem tree, FTS coverage, pending OPF sync); always exit 0, composes with `--restrict` |
+| **Health digest** | `--health` | The audit's finding counts in one short screen (book issues with the top problems, duplicate groups, series gaps, conversion overrides, the metadata-quality trio, filesystem tree, FTS coverage, pending OPF sync); exit 0 unless `--fail-on-findings` turns it into a gate; composes with `--restrict` |
 | **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with manual conversion overrides and pending OPF sync; flag invalid uuids, sentinel pubdates, and non-ISO-639-2 language values (the metadata-quality rows, advisory); and audit the filesystem against the database (missing book dirs and format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths; root dot-entries and workspace docs whitelisted) |
+| **Identifierless** | `--identifierless` | Books with no identifiers (id and title): the curation queue for Calibre-Companion-style lookups |
 | **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
 | **Analytics** | `--analytics {author,pace,tags,genres,overlap,reading}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, genre share breakdown (`--genre-depth N` descends the tag hierarchy), Wing-overlap analysis, and reading analytics (status funnel in the column's enum order, recent finishes, days-from-added-to-finished; strictly read-only) |
+| Pace granularity | `--pace-granularity {month,year}` | Bucket size for `--analytics pace` (default: month) |
+| Author details | `--show-author-details` | With `--catalog`/`--all-wings`/`--export`/`--search`: append each author's sort key and link URL |
 | **Export** | `--export` | Full library export to JSON, CSV, or an AI-readable flat format (includes native page counts) |
 | **LibraryThing** | `--exportlt` | Export library to LibraryThing formatted CSVs (can be combined with `--search`) |
 | **Annotations** | `--export-annotations` | Dump e-reader highlights, bookmarks, and notes as JSON (scope to one book with `--id`) |
 | **Set title** | `--set-title BOOK_ID TITLE` | Rename a book through cquarry's opt-in write module (trigger-safe; refreshes the sort key and queues an OPF regeneration). Close Calibre first |
 | **Write verbs** | `--set-authors`, `--set-rating`, `--set-comments` / `--clear-comments`, `--set-column` / `--clear-column`, `--remove-book [--confirm-remove]` | Core opt-in write surface via cquarry ≥1.5: authors (author_sort recomputed), ratings (0–5), comments HTML, generic custom columns (enum-validated, non-editable refused) and guarded book removal (dry-run by default) |
 | **Curation verbs** | `--rename-entity KIND OLD NEW`, `--set-author-sort BOOK SORT`, `--set-title-sort BOOK SORT` | Rename a tag/author/series/publisher everywhere (a rename into an existing name merges the two); verbatim sort overrides that a later `--set-authors` / `--set-title` deliberately recomputes over |
-| **Write verbs, expanded** | `--add-tag` / `--remove-tag`, `--set-identifier` / `--clear-identifier`, `--set-series` (+ `--series-index`) / `--clear-series`, `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages`, `--add-format` / `--remove-format`, `--set-cover` | Full coverage of cquarry ≥1.5's write module: tags (orphaned rows pruned), identifier EAV upserts, series assignment with index, publisher, language lists (canonicalized `English` → `eng`), format registration/removal, and the has-cover flag. All queue OPF regeneration via `metadata_dirtied` |
+| **Write verbs, expanded** | `--add-tag` / `--remove-tag`, `--set-identifier` / `--clear-identifier`, `--set-series` (+ `--series-index`) / `--clear-series`, `--set-publisher` / `--clear-publisher`, `--set-languages` / `--clear-languages`, `--add-format` / `--remove-format`, `--set-cover`, `--set-pubdate` / `--clear-pubdate` | Full coverage of cquarry ≥1.5's write module: tags (orphaned rows pruned), identifier EAV upserts, series assignment with index, publisher, language lists (canonicalized `English` → `eng`), format registration/removal, and the has-cover flag. All queue OPF regeneration via `metadata_dirtied` |
 | **Run verbs (Phase 17)** | `run phase1 DIR`, `run sign --manifest F`, `run phase2 --manifest F --backup-dir D`, `run phase3 --manifest F [--answer-file A]` | The acquisition pathway as commands: phase 1 vets a downloads directory into an `acquisition-manifest/1` manifest (duplicate screen, DRM audit, PDF/DJVU battery via `scripts/check_pdf.py`, bindery's EPUB slice; embedded-metadata stamps (filename parse as fallback) and provenance seeds for the review to correct); `run sign` seals the reviewed manifest (an HMAC over the approved set, the stamps, the provenance, the lossy flags, and the decisions; any later edit refuses to load until re-signed); phase 1 is dry against book files unless `--stamp`/`--apply-lossy`/`--quarantine` are passed (quarantine moves true DRM hits only); phase 2 imports the SIGNED, SEALED manifest as one transaction (`add_book`, `#source`/`#audience` stamped, tags+rating cleared on the imported ids, timestamped backups, metadata downloads whose failures become decisions, resumable); phase 3 refuses a live Calibre and banned answer-file columns like every other write path, and its mechanical-pass trouble fails the verb |
 | **Set writes** | `--ids` / `--from-search` / `--from-untagged` / `--from-manifest` + `--batch-*` verbs, `--apply`, `--backup-dir`, `--format json` | One target set, many verbs, one transaction (Phase 16). Dry-run by default; `--apply` demands a closed Calibre and a backup of `metadata.db` outside the library directory, then commits as ONE `batch()` pass (all-or-nothing; `--commit-per-book` for very large sets). `--commit-per-book` really commits one transaction per book (a failing book rolls back alone; the report and JSON say which). `--batch-clear-rating` is legal ONLY against a valid, sealed batch manifest, and only for ids it imported (the bulk-ratings ban, mechanically enforced); empty-string values are refused; `#reading_status`/`status`/`date_read` are refused by name at every door; reporting counts applied / already-so / failed per verb, with a machine-readable JSON report that names the resolved ids |
 | **Custom columns (write)** | `--add-custom-column LABEL NAME DATATYPE [--column-is-multiple]`, `--remove-custom-column LABEL` | The calibredb schema-CRUD parity verbs, over cquarry's column DDL. Dry run by default; `--apply` demands a closed Calibre and a backup outside the library. A new column sets Calibre's `update_all_last_mod_dates_on_start` (the next GUI start refreshes every book's last_modified); deletion only FLAGS the column (`mark_for_delete`) and Calibre purges the storage at its next start. `#reading_status`/`status`/`date_read` are refused by label at both doors |
@@ -206,7 +217,7 @@ provenance, and every run of it takes a timestamped backup in
 
 Modifiers: `--restrict SEARCH` scopes every read mode to the books matching a search expression (or `vl:Name` for a wing): stats, audits, analytics, exports, catalogs, and full-text search all compute over the restricted set only; write verbs, the `run` verbs, and `--book`/`--id` refuse the combination, since explicit targets are not a set to narrow. `--show-tags` swaps ratings for tag display in catalogs, `--show-id` prefixes each book with its Calibre ID (useful for scripting against `calibredb set_metadata`), `--show-custom COL` loads a Calibre custom column (the display name or the `#label` both work since cquarry 1.9's dual resolution), `--primary-only` collapses multi-author entries to the first author, `--format {json,csv,ai,md}` selects the output shape for `--export` and `--search` (and emits the set writes' machine-readable report as JSON); `--catalog` and the catalog sweeps accept `md` for the Markdown shape, `--plugin-data NAME` appends a third-party plugin value (e.g. `goodreads_id`, `wordcount` from Calibre's `books_plugin_data` table) to catalog and search lines, `--output PATH` writes to a file instead of stdout (and no file output can ever be the database itself: the read surface refuses `metadata.db` and its sqlite sidecars before anything opens, and stages every file through a temp copy so a failed report never truncates), `--quiet` suppresses decorative output.
 
-Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager (supporting `/` search and `n`/`N` match jumping) or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions, and a corrupt or foreign database at the configured path is reported in prose and re-prompted, never a traceback. Its menu covers every read mode above including the Phase 19 surfaces (full-text content search, FTS index status, reading analytics, saved-search catalogs, the library health digest, each with an optional `--restrict`-style scope prompt) plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats, all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
+Running with no arguments launches a full-screen interactive TUI (arrow-key navigable) with a built-in scrollable output pager (supporting `/` search and `n`/`N` match jumping) or a text-based menu if `curses` is unavailable. The TUI remembers your database path between sessions, and a corrupt or foreign database at the configured path is reported in prose and re-prompted, never a traceback. Its menu covers the read modes above (minus `--identifierless`) including the Phase 19 surfaces (full-text content search, FTS index status, reading analytics, saved-search catalogs, the library health digest, each with an optional `--restrict`-style scope prompt) plus a **Write (Calibre closed)** section: an *Edit Book* submenu (title, authors, rating, tags, series, publisher, languages, identifiers, comments, custom columns, cover flag, formats, all backed by the same writeops executors as the CLI) and a guarded *Remove Book* flow (dry run first, then a double confirmation).
 
 ## Installation
 
@@ -528,7 +539,7 @@ cquarry --search "author:Anne Rice"  # Handled natively as author:Anne AND Rice
 
 ### Automated Test Suite
 
-The whole suite runs without a Calibre library (stdlib `unittest`; 615 tests across 31 files as of 3.49.0):
+The whole suite runs without a Calibre library (stdlib `unittest`; 854 tests across 33 files as of 3.59.1):
 
 - **Modes and renderers** (`tests/test_modes.py`, `tests/test_read_modes.py`, `tests/test_book_json.py`): catalog-mode cache isolation, output-directory creation and wing-filename uniqueness, the audit's cover checks, the read-mode renderers, and the machine-readable `--book --format json` dossier, all against a temporary database.
 - **Search and scoping** (`tests/test_restrict.py`): the `--restrict` view (book-row scoping, recounted aggregations, per-book getters, write-verb and run-verb refusals) and its mode-level composition.
@@ -617,8 +628,9 @@ modes (pick exactly one):
   --trash                   List the library's .caltrash entries (what run merge moved ...
   --book [BOOK_ID[,BOOK_ID...]]
       Show the full record for one book or a comma-separated list: identifiers, format
-      files, cover, comments, custom columns, annotations, reading progress. With
-      --untagged, give no ids to select every untagged book
+      files, cover, comments, custom columns, annotations, reading progress. --format
+      json emits the machine-readable dossier. With --untagged, give no ids to select
+      every untagged book (also a standalone mode)
   --entities KIND           List an entity class with book counts ...
   --reading-progress        Show per-device reading positions with progress bars, ...
   --columns                 List custom columns: type, editability, enum values
@@ -628,7 +640,7 @@ modes (pick exactly one):
   --format-stats            Show per-format book counts and total bytes
 
 scoping:
-  --db DB                   Path to Calibre metadata.db (auto-detected if omitted)
+  --db DB                   Path to Calibre metadata.db, or the library directory ...
   --restrict SEARCH         Scope every read mode to books matching this search ...
   --wing WING               Filter to a specific virtual library wing
 
@@ -637,8 +649,11 @@ also:
   set writes    --from-search/--ids + --batch-* edits          (see: --help set)
   run VERB      the acquisition pathway + headless calibre verbs   (see: --help run)
 
+also:
+  cquarry (no arguments)        the interactive TUI
+
 deep dives:
-  cquarry --help read|write|set|run|examples|all
+  cquarry --help read|write|set|run|examples|all|json  (-h works too)
   cquarry --version
   cquarry run --help VERB        e.g. run --help phase2
 
@@ -924,7 +939,7 @@ python3 scripts/fetch_library_codes.py --apply --write-ddc   # also store ddc
 python3 scripts/fetch_library_codes.py --apply --all-codes   # one pass, both codes
 ```
 
-Books that already have the requested code are skipped unless you pass `--refresh`, so the tool is naturally incremental: run it again after an import and it only queries the new books (`--all-codes` selects books missing *either* code). LCC and DDC arrive in the same SRU response, so `--all-codes` stores both in one pass and the old two-pass dance (an LCC `--apply`, then a `--apply --write-ddc` behind it) is retired: two concurrent writers on `metadata.db` were exactly the lock-contention incident that motivated it. `--apply` backs up `metadata.db` to the sibling `.backups` directory first and refuses to run while Calibre is open; the write itself goes through cquarry's `WritableCalibreDB` (so touched books land in the `metadata_dirtied` OPF-resync queue and `last_modified` moves) with retry/backoff over a busy database. Every book that ends the pass without an LCC is written to the misses worklist (`--misses-file`, default `fetch_library_codes_misses.txt` in the current directory) as `id<TAB>isbn<TAB>ddc<TAB>title`, so the manual-research pass starts from a file instead of terminal scrollback. Sample output:
+Books that already have the requested code are skipped unless you pass `--refresh`, so the tool is naturally incremental: run it again after an import and it only queries the new books (`--all-codes` selects books missing *either* code) `--sru-fallback` caches work-level lookups under `work:` keys so ISBN-level retries never re-query.. LCC and DDC arrive in the same SRU response, so `--all-codes` stores both in one pass and the old two-pass dance (an LCC `--apply`, then a `--apply --write-ddc` behind it) is retired: two concurrent writers on `metadata.db` were exactly the lock-contention incident that motivated it. `--apply` backs up `metadata.db` to the sibling `.backups` directory first and refuses to run while Calibre is open; the write itself goes through cquarry's `WritableCalibreDB` (so touched books land in the `metadata_dirtied` OPF-resync queue and `last_modified` moves) with retry/backoff over a busy database. Every book that ends the pass without an LCC is written to the misses worklist (`--misses-file`, default `fetch_library_codes_misses.txt` in the current directory) as `id<TAB>isbn<TAB>ddc<TAB>title`, so the manual-research pass starts from a file instead of terminal scrollback. Sample output:
 
 ```
 DRY RUN: 12 book(s) with an ISBN and no LCC

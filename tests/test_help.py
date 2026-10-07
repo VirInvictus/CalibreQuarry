@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from cquarry_cli import helpcli
@@ -349,3 +350,25 @@ class TestJsonTopic(unittest.TestCase):
         with mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}):
             self.assertNotIn("\x1b", handle_help(["--help", "json"])[1])
             self.assertIn("\x1b", paint("run VERB --flag FILE"))
+
+
+class TestDocsPins(unittest.TestCase):
+    """The docs audit's structural ask: the hand-written mode tables
+    (README Features, spec Modes) cannot silently drop a shipped mode.
+    Presence-only pin: each parser mode flag string must appear in both
+    files."""
+
+    def _mode_flags(self):
+        parser = build_parser()
+        modes = next(g for g in parser._action_groups if g.title == helpcli.MODES_TITLE)
+        return [a.option_strings[0] for a in modes._group_actions]
+
+    def test_readme_features_table_lists_every_mode(self):
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        for flag in self._mode_flags():
+            self.assertIn(flag, readme, flag)
+
+    def test_spec_modes_table_lists_every_mode(self):
+        spec = (Path(__file__).resolve().parent.parent / "spec.md").read_text()
+        for flag in self._mode_flags():
+            self.assertIn(flag, spec, flag)
