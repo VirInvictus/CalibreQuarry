@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.60.0.
+What's done, what's next. Updated as of v3.60.1.
 
 **Minimized 2026-09-29 (the cquarry precedent).** Phases 1-19, the maintenance
 sweeps, and every audit wave are shipped; their full findings-ledger text is
@@ -259,11 +259,13 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
 - **Do not "fix" as bugs:** the B023 hits in `tui.py` are false positives; every
   flagged lambda is invoked within the same loop iteration by `_run_with_capture`,
   so late binding never bites. Bind defaults only if the lint should be quiet.
-- **Deferred with dated notes:** the shared test `_SCHEMA` builder (six fixtures,
-  each tuned to its suite) and the two CI skips (`/usr/share/dict/words`,
+- **Deferred with dated notes:** the two CI skips (`/usr/share/dict/words`,
   ghostscript (host tools, not code)); the db_util consolidation (the private
   connect_ro copies have genuinely drifted: reconcile needs Row rows and its own tmp
-  layout).
+  layout). The shared test `_SCHEMA` builder deferred here on 2026-09-29 SHIPPED
+  in 3.60.1 (tests/_fixtures.py: one canonical schema over what had grown to 19
+  drifted DDL copies, plus build_library()/seed_book()); the CI skips and the
+  db_util consolidation stay deferred.
 - **By-author's-call records:** the "X, not Y" prose rhythm stays by author's call;
   the pre-v3.37.0 GitHub Release cutoff is deliberately scoped, never decided.
 - **Manager-pass records (2026-09-12):** `ids=` scoping on `get_entities`/analytics

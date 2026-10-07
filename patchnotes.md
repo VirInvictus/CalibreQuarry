@@ -1,5 +1,79 @@
 # CalibreQuarry Patch Notes
 
+# 3.60.1 (2026-10-07)
+
+### The 2026-09-20 test-gap list closes (tests only; no behavior changes)
+
+The fleet-sweep audit of 2026-09-20 named eight CalibreQuarry test gaps;
+this batch closes five of them with 49 new tests, consolidates the
+fixture schema drift the audit had counted at 10 copies (it had grown to
+19), and pins the guard-placement bug class behind the stranded
+`unittest.main()` finding. Zero `src/` changes: every verb, exit code,
+and report shape behaves exactly as 3.60.0. The suite runs 931 tests
+(was 882); CI's pinned ruff check and format are clean.
+
+- **The twelve destructive `--batch-*` mass verbs** (clear-identifier,
+  clear-languages, clear-pubdate, clear-publisher, clear-series,
+  remove-format, remove-tag, set-authors, set-identifier, set-languages,
+  set-pubdate, set-publisher) had zero coverage while the gentler verbs
+  were tested. Each now gets the full drill through `main()` on a
+  2-book temp library: the dry run writes nothing, `--apply` changes
+  both books AND queues both ids in `metadata_dirtied` (the OPF
+  regeneration contract every row mutation carries), one failed row
+  rolls the whole pass back with the queue empty, and an absent target
+  is an honest already-so. Two library contracts surface in the
+  assertions: new author rows store Calibre's legacy comma-as-pipe
+  display form, and `--batch-clear-pubdate` stores the `0101` sentinel,
+  not SQL NULL.
+- **`run cover --remove-cover`**, the destructive half of the cover
+  verb, was untested (the old test's name promised removal it never
+  exercised). Covered: the dry-run plan, the apply that clears the
+  flag and deletes both `cover.jpg` and `cover.png` from the book
+  directory after the commit, the queue entry landing exactly when the
+  flag changed (an uncovered book is an honest already-so with no queue
+  entry), and the `--cover`/`--remove-cover` exclusivity refusal.
+- **The run flags `--quarantine`, `--stamp`, and phase 3's
+  `--answer-file`** were tested only by calling the phase functions
+  directly; the argv-to-kwarg wiring through `main()` was invisible.
+  The phase functions are stubbed and the dispatch contract is pinned,
+  defaults included.
+- **`--exportlt`'s happy path** had only its self-check-failure and
+  output-guard refusals covered; the actual CSV rows were never
+  asserted. They are now pinned cell-exact against LibraryThing's fixed
+  eleven-column template: an ISBN-10 folds to 13, the sentinel pubdate
+  yields an empty year, the stored rating halves to stars, date-read
+  truncates to the date, junk page counts stay empty, translator
+  credits split into one tag per name, and a Read book lands in its own
+  file.
+- **Six `scripts/validate_metadata.py` checks** (duplicate ISBN,
+  identifier types, amazon-isbn10, pubdate parseable, pubdate sentinel,
+  every-book language) get the same in-memory Reporter treatment as
+  their three already-tested siblings, silence cases included.
+- **One fixture schema replaces nineteen.** Every test file carried its
+  own `_SCHEMA` DDL copy, drifted in both directions: the write-path
+  shapes (the id + UNIQUE(book, type) identifiers table, the
+  id-bearing comments table, the preferences UNIQUE(key) the 3.53
+  fixture trap pins, the modern custom_columns registry) were missing
+  from copies that later grew tests needing them, and one copy carried
+  a custom-column value table shape real Calibre never had.
+  `tests/_fixtures.py` is now the one canonical copy plus a
+  `build_library()`/`seed_book()` builder; files append only their
+  genuinely local extras (the FTS sidecar, conversion_options, the
+  reading funnel's columns, run's #source/#audience enumerations), and
+  the custom-column value tables stay per-fixture on purpose: their
+  ids and labels are file-specific, and an unregistered value table is
+  a state no real library is in.
+- **The stranded `unittest.main()` classes were already repaired**
+  (0051fb5, 2026-10-02); what ships now is the pin: `test_suite_hygiene.py`
+  fails if any test file's guard ever again sits above a class, and the
+  two files that carried no guard at all (`test_help.py`,
+  `test_version.py`) get the standard one.
+
+Audit items deliberately out of this batch's scope and still open: the
+`--all-wings` dispatch/failure-exit path (CI-invisible by machine
+binding), the release-bucketed test files' stranded coverage, and
+`--version` output.
+
 # 3.60.0 (2026-10-07)
 
 ### run news: the recipe-fetch verb (the last Phase 20 parity box)
