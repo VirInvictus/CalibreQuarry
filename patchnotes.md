@@ -1,5 +1,70 @@
 # CalibreQuarry Patch Notes
 
+# 3.60.0 (2026-10-07)
+
+### run news: the recipe-fetch verb (the last Phase 20 parity box)
+
+Brandon green-lit the `run news` candidate on 2026-10-07, and the verb
+shipped the same day: `cquarry run news` fetches news editions through
+Calibre's builtin recipes (`ebook-convert "<Recipe Title>.recipe"
+out.epub`, the seam upstream's own help documents), into
+`./news/<date>/` by default, one `<title>.epub` per edition.
+
+- **The default batch is a curated subset, not --all** (the recorded
+  design call): DEFAULT_RECIPES is nine free, subscription-free,
+  automation-tolerant sources (the wires, the public broadcasters, two
+  tech outlets, NASA), because all 1,099 recipes would be hours of
+  sequential fetches against sites that actively refuse automation.
+  `--recipe TITLE` (exact, repeatable) overrides; `--all` floods
+  deliberately; `--list` prints the enumeration one title per line
+  (`--format json` wraps it). The anti-bot caveats are on the verb's
+  help page, not a README secret: news sites treat scripted fetchers
+  as bots, upstream's recipes fight that war (browser user-agents; the
+  recipe source itself refreshes from calibre's server at fetch time),
+  and some recipes will fail anyway: that is expected, reported, and
+  retried on the next run.
+- **Addressing is by exact recipe title, and the verb refuses the
+  titles that cannot work.** Upstream's id-level addressing
+  (`builtin:<slug>` via the CALIBRE_RECIPE_URN env var its GUI sets)
+  has no public enumeration, so title is the only honest key, and
+  calibre 9.15 ships thirteen colliding titles (Deutsche Welle x7, The
+  Economist x2, The Wall Street Journal x2, ...), where title
+  resolution would silently fetch the first match. An explicit
+  `--recipe` naming one exits 2 naming the collision (the GUI
+  scheduler or a custom .recipe file is the escape hatch); inside the
+  curated default or an --all flood the same collision degrades to a
+  skip warning, never a dead batch. A curated default that went stale
+  across a calibre upgrade warns and skips the same way.
+- **Failure isolation and resume are the batch's spine.** One dead
+  recipe is one report row (`failed`/`timeout` with the stderr tail;
+  its partial output is DELETED, so a resume cannot skip on a
+  half-written file standing in for a real edition, which is the
+  catalog sweeps' stale-file rule), the batch continues, and exit 1
+  iff anything failed. An existing non-empty edition file means
+  "already" unless `--force`; the default destination is date-scoped
+  so yesterday's editions never shadow today's; an interrupt reports
+  the partial batch and keeps what landed. Fetches run strictly
+  sequentially: no hammering. `--timeout SECONDS` bounds each fetch
+  (default 1200: the live drill fetched NASA at 430 MB and BBC News
+  at 128 MB; editions are heavy).
+- **No library, no database, no guard**: the verb routes headless like
+  `run device` (it opens nothing), takes no backup, and the fetched
+  EPUBs are NOT imported. Vet the directory with `run phase1` like any
+  downloads dir. It is the third network verb (with backfill --apply
+  and phase2's post-commit downloads); the dry run plans offline.
+  `--format json` keeps both surfaces machine-clean (plan:
+  `{plan: {dest, recipes, warnings}}`; apply:
+  `{results, fetched, already, skipped, failed}`), and the per-recipe
+  progress lines only print in text mode.
+
+Live drill, calibre 9.15: three real editions through the verb (Ars
+Technica 12 MB in 16s, NASA 430 MB in 120s, BBC News 123 MB in 24s),
+the resume pass reporting both earlier editions "already", the
+enumeration at 1,099 titles with the collision census confirmed, and
+the help pages (text + json) checked around the new claims.
+
+26 new pins (882 total).
+
 # 3.59.2 (2026-10-06)
 
 ### The 12-agent docs audit: README/spec/CLAUDE truth + mode-table pins

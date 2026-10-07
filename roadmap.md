@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.59.2.
+What's done, what's next. Updated as of v3.60.0.
 
 **Minimized 2026-09-29 (the cquarry precedent).** Phases 1-19, the maintenance
 sweeps, and every audit wave are shipped; their full findings-ledger text is
@@ -160,10 +160,18 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
 
 ### Open unowned surface, owners-wanted (not committed; recorded in cquarry's ledger)
 
-- [ ] **run news** (candidate): wrap `ebook-convert <recipe> out.epub` for the 1,094
+- [x] **run news** (candidate): wrap `ebook-convert <recipe> out.epub` for the 1,094
       upstream recipes (recipes/; web/feeds/news.py; the 2026 anti-bot infra rides
       upstream). Becomes committed work only when Brandon wants recipe fetching in the
-      automation surface.
+      automation surface. *(Committed by Brandon's 2026-10-07 green light; shipped
+      2026-10-07 in 3.60.0: title-keyed addressing through the documented
+      `"<Title>.recipe"` seam with the colliding titles (Deutsche Welle x7, ...) refused
+      on explicit asks and skipped+warned in the curated/--all flows; a curated free
+      DEFAULT_RECIPES subset as the default batch because all 1,099 is hours of fetches
+      against sites that block automation; per-recipe failure isolation with partial
+      outputs deleted; resume = existing file unless --force over a date-scoped default
+      dest; sequential fetches and the anti-bot caveats on the verb's own help page.
+      The count in the original box is already stale: calibre 9.15 enumerates 1,099.)*
 
 ### Adopted from the existing queue (committed by the program; the boxes stay in place above)
 
