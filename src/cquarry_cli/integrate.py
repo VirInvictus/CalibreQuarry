@@ -1424,12 +1424,16 @@ def run_device(args) -> int:
 
 def dispatch_headless(args) -> int:
     """The no-library run verbs: routed by dispatch_run before any database
-    resolution, because none of them opens one. customize and debug-tools
-    today; device lands with its verb."""
+    resolution, because none of them opens one. customize, debug-tools,
+    device, and news."""
     if args.phase == "customize":
         return run_customize(args)
     if args.phase == "debug-tools":
         return run_debug_tools(args)
+    if args.phase == "news":
+        from cquarry_cli.news import run_news
+
+        return run_news(args)
     return run_device(args)
 
 

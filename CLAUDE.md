@@ -5,6 +5,42 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.60.0 onward, run news)
+
+- **`run news` addresses recipes by exact TITLE, and the seam cannot
+  do better.** The verb spawns `ebook-convert "<Title>.recipe"
+  out.epub` (what upstream's own help documents); upstream's internal
+  id addressing (`builtin:<slug>` via the `CALIBRE_RECIPE_URN` env var
+  its GUI sets) has no public enumeration, so title is the only honest
+  key. Consequence pinned by tests: a title `--list-recipes` ships
+  MORE THAN ONCE (calibre 9.15 carries 13 collisions; Deutsche Welle
+  x7) is a usage refusal on an explicit `--recipe` (title resolution
+  would silently fetch the first match), and inside the curated
+  default or `--all` it degrades to a skip warning instead. The
+  enumeration parse keeps the RAW post-tab bytes (titles with
+  leading/trailing spaces resolve exactly); `_title_for` accepts
+  stripped input and maps it back to the raw string.
+- **The batch rails are the verb's own** (`news.py`, routed headless
+  via dispatch_headless: no library, no db, no backup, no
+  closed-Calibre guard): curated DEFAULT_RECIPES default (a stale or
+  ambiguous entry warns and skips, never fatal), dry run by default,
+  network at `--apply` only, strictly sequential spawns (no
+  hammering), one report row per dead recipe with its PARTIAL output
+  deleted (the catalog sweeps' stale-file rule: a resume must not
+  skip on a half-written edition), resume = existing non-empty file
+  unless `--force`, default dest `./news/<date>/` (date-scoped so
+  yesterday's editions never shadow today's), default timeout 1200s
+  (the live drill: BBC News = 128 MB in ~4.5 min). Progress lines
+  print only in text mode; `--format json` output stays parseable
+  (plan: `{plan:{dest,recipes,warnings}}`, apply:
+  `{results,fetched,already,skipped,failed}`).
+- **`run news` is the third network verb** (backfill --apply, phase2's
+  post-commit downloads, news --apply) and the only one whose upstream
+  seam ALSO phones home by design: ebook-convert refreshes the recipe
+  source from calibre's server at fetch time ("Trying to get latest
+  version of recipe"); that is upstream's default, kept deliberately
+  (fresher recipes fail less), not a hidden fetch.
+
 ## Programmer-facing contract notes (3.59.0 onward, the truthed-up + json help)
 
 - **Verb pages are claim-map truth.** `VERB_FLAGS` claims `backup_dir`
@@ -555,7 +591,8 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   ebook-polish, calibredb, fetch-ebook-metadata. Every seam tolerates
   the binary being missing as a setup refusal (exit 2), never a
   traceback. **[SUPERSEDED 3.59.1: `run phase2`'s post-commit download
-  segment also touches the network; backfill is no longer the only one.]**
+  segment also touches the network; backfill is no longer the only one.
+  SUPERSEDED 3.60.0: `run news` --apply is the third network verb.]**
   `run backfill` is the only verb that touches the network,
   and only at `--apply` (fetch-ebook-metadata).
 - **run merge sends the duplicate to the trash**

@@ -307,7 +307,7 @@ class TestJsonTopic(unittest.TestCase):
 
         self.assertEqual(data["version"], VERSION)
         self.assertEqual(data["tool"], "cquarry")
-        self.assertEqual(len(data["run"]["verbs"]), 22)
+        self.assertEqual(len(data["run"]["verbs"]), 23)
 
     def test_json_covers_every_top_level_flag(self):
         import json as jsonlib

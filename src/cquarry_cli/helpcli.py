@@ -136,6 +136,7 @@ RUN_STAGES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ("customize", "manage Calibre plugins without the GUI"),
             ("debug-tools", "explode / implode / diff / kepubify / inspect-mobi"),
             ("device", "list, read, and (at --apply) change files on a reader"),
+            ("news", "fetch news editions via Calibre's recipes (network at --apply)"),
         ),
     ),
 )
@@ -169,6 +170,7 @@ APPLY_VERBS = frozenset(
         "customize",
         "debug-tools",
         "device",
+        "news",
     }
 )
 
@@ -230,6 +232,7 @@ VERB_FLAGS: dict[str, tuple[str, ...]] = {
         "device_touch",
         "device_cp",
     ),
+    "news": ("recipe", "all", "list", "dest", "timeout", "force"),
 }
 
 # Per-verb prose: what it does, what it needs, what it writes. The guard
@@ -387,6 +390,33 @@ VERB_PROSE: dict[str, str] = {
         "--device-rm / --device-touch PATH and --device-cp SRC DST (dry-run\n"
         "by default; --apply executes). Needs no library. Without hardware\n"
         "the upstream no-device answer is surfaced as-is."
+    ),
+    "news": (
+        "Fetch news editions through Calibre's builtin recipes\n"
+        '(ebook-convert "<Recipe Title>.recipe" out.epub), into --dest DIR\n'
+        "(default ./news/<date>/; one <title>.epub per recipe). The default\n"
+        "batch is a CURATED SUBSET of free, subscription-free sources, not\n"
+        "--all: 1,099 recipes would be hours of fetches against sites that\n"
+        "actively block automation. --recipe TITLE (exact; repeatable)\n"
+        "overrides; --all floods deliberately; --list prints every title.\n"
+        "ANTI-BOT CAVEATS: news sites treat scripted fetchers as bots;\n"
+        "upstream fights that war for you (recipes carry browser\n"
+        "user-agents and calibre refreshes recipe sources from its own\n"
+        "server at fetch time), but expect SOME recipes to fail anyway\n"
+        "(bot walls, paywalls, redesigns). Failures are isolated: one dead\n"
+        "recipe is one report row (its partial output is deleted), the\n"
+        "batch continues, exit 1 iff anything failed. Fetches run\n"
+        "sequentially: no hammering. Re-running the same command skips the\n"
+        "editions already on disk (--force re-fetches). Recipes are\n"
+        "addressed by exact title; the handful of titles calibre ships\n"
+        "more than once (Deutsche Welle, The Economist, ...) are refused\n"
+        "(use Calibre's GUI scheduler for those). Needs no library; no\n"
+        "database, no backup, no closed-Calibre guard. The fetched EPUBs\n"
+        "are NOT imported: vet them like any downloads dir with\n"
+        "`run phase1 <dest>`.\n"
+        "Network at --apply only (plus the recipe-source refresh calibre\n"
+        "itself performs). --timeout SECONDS bounds each fetch (default\n"
+        "1200: a full edition can be a 100+ MB download)."
     ),
 }
 

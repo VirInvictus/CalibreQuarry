@@ -952,6 +952,7 @@ def build_parser() -> argparse.ArgumentParser:
             "customize",
             "debug-tools",
             "device",
+            "news",
         ),
         help="phase1: vet a downloads dir into a manifest; sign: seal the "
         "reviewed manifest for phase 2; approve: re-derive the approved set "
@@ -971,7 +972,9 @@ def build_parser() -> argparse.ArgumentParser:
         "disable/list), debug-tools (the curated calibre-debug subset: "
         "explode/implode/diff/kepubify/un-kepubify/inspect-mobi; never "
         "-e/--exec-file), device (the ebook-device USBMS subset: ls/df/"
-        "books/cat/mkdir/cp/rm/touch; MTP and wireless stay excluded)",
+        "books/cat/mkdir/cp/rm/touch; MTP and wireless stay excluded), "
+        "news (fetch news editions through Calibre's builtin recipes; "
+        "curated free defaults, --recipe overrides, network at --apply)",
     )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
@@ -983,7 +986,34 @@ def build_parser() -> argparse.ArgumentParser:
         dest="all",
         action="store_true",
         help="backup-metadata: regenerate sidecar OPFs for EVERY book "
-        "(the default is the dirtied queue only)",
+        "(the default is the dirtied queue only); news: fetch EVERY "
+        "builtin recipe (hours of sequential fetches and many sites "
+        "will refuse; the curated free defaults need no flag)",
+    )
+    run_p.add_argument(
+        "--recipe",
+        dest="recipe",
+        action="append",
+        default=None,
+        metavar="TITLE",
+        help="news: fetch this recipe (exact title from `run news "
+        "--list`); repeatable, overrides the curated defaults",
+    )
+    run_p.add_argument(
+        "--list",
+        dest="list",
+        action="store_true",
+        help="news: print every builtin recipe title (one per line) and "
+        "exit; --format json wraps them",
+    )
+    run_p.add_argument(
+        "--timeout",
+        dest="timeout",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="news: per-recipe fetch ceiling (default 1200; image-heavy "
+        "editions are the norm)",
     )
     run_p.add_argument(
         "--list-plugins",
@@ -1140,7 +1170,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="force",
         action="store_true",
         help="restore-database: replace an existing --target/metadata.db "
-        "(upstream keeps the old one as metadata_pre_restore.db)",
+        "(upstream keeps the old one as metadata_pre_restore.db); news: "
+        "re-fetch editions whose output file already exists",
     )
     run_p.add_argument(
         "--empty",
@@ -1204,7 +1235,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="export: destination directory; catalog-epub/catalog-bibtex: "
-        "the destination FILE (extension enforced: .epub / .bib); required by all three",
+        "the destination FILE (extension enforced: .epub / .bib) and "
+        "export: the directory, both required; news: the edition "
+        "directory (default ./news/<date>)",
     )
     run_p.add_argument(
         "--template",

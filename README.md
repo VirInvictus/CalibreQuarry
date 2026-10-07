@@ -110,7 +110,7 @@ through cquarry's write module; `run restore-database` and
 `run fts-index` queues Calibre's own extractor;
 `run catalog-epub` / `run catalog-bibtex` produce catalogs through
 calibredb's plugins (the library is only read); and `run customize`,
-`run debug-tools`, and `run device` need no library at all
+`run debug-tools`, `run device`, and `run news` need no library at all
 (`run trash`, below, is the pure filesystem lifecycle). Every verb is
 a dry run until `--apply`, which demands a closed Calibre and (for the
 metadata-mutating verbs) a `--backup-dir` outside the library. A
@@ -187,6 +187,18 @@ cquarry run catalog-bibtex --dest refs.bib --apply
 # 14 days (the dry run is the listing)
 cquarry run trash --db ~/Calibre/metadata.db
 cquarry run trash --expire 14 --apply --db ~/Calibre/metadata.db
+
+# Fetch today's news editions through Calibre's builtin recipes. The
+# default batch is a curated free subset; --recipe TITLE (exact, from
+# --list) overrides and --list prints all 1,099 titles. Network only
+# at --apply, sequential by design; editions land as <title>.epub in
+# ./news/<date>/ and a re-run skips what is already on disk. News
+# sites block scripted fetchers, so some recipes WILL fail: one
+# report row per dead recipe, never a dead batch. The EPUBs are not
+# imported -- vet the directory with run phase1 like any downloads dir
+cquarry run news                                   # dry run: the plan
+cquarry run news --apply
+cquarry run news --recipe "BBC News" --recipe "Ars Technica" --apply
 ```
 
 ### The acquisition run verbs (Phase 17)
@@ -592,7 +604,7 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 overview below, `--help read|write|set|run|examples|all|json` prints the
 focused deep dives (flag tables generated from the live parser, so they
 cannot drift from the real flags), and `run --help VERB` prints a
-per-verb page for each of the 22 run verbs. `--help json` dumps the
+per-verb page for each of the 23 run verbs. `--help json` dumps the
 complete parser surface (every group and flag, every run verb with its
 claimed flags and prose) as machine-readable JSON, generated from the
 live parser and never colored. On a terminal the output is
