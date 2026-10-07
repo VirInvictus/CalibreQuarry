@@ -1,5 +1,42 @@
 # CalibreQuarry Patch Notes
 
+# 3.59.2 (2026-10-06)
+
+### The 12-agent docs audit: README/spec/CLAUDE truth + mode-table pins
+
+Four lenses (a completeness census, a usability walk, a doc-drift
+fact-check, and a human+AI dual read) audited the documentation set.
+The deep behavioral claims held everywhere; the failures were
+propagation and two false guarantees, all fixed here (help text and
+docs only, no behavior changes):
+
+- **--health's "always exit 0" (README and spec) was false** since
+  --fail-on-findings shipped: both state the gate now, and the flag is
+  documented in both files for the first time. --identifierless and
+  the --trash read mode joined the README Features and spec Modes
+  tables (both were absent from the "complete" tables);
+  --set-pubdate/--clear-pubdate, --pace-granularity, and
+  --show-author-details are documented now.
+- **spec's "the one network-touching verb is run backfill"
+  contradicted its own phase2 row** (phase2's post-commit download
+  segment drives fetch-ebook-metadata too). CLAUDE.md's 3.39.0 note
+  carries an in-place SUPERSEDED marker now.
+- The README's embedded help block is regenerated from live output
+  (drifted by exactly the 3.59.1 help fixes); the reconcile section
+  states the verify-after-embed RESIDUAL contract and the dc:date
+  normalization; the TUI paragraph no longer claims a menu entry that
+  does not exist and names the pubdate edits; the fetch_library_codes
+  section names --sru-fallback; the intro's "no calibredb dependency"
+  is scoped to the read surface; the test count is current.
+- docs/REPORT-12-Sept.md carries a SUPERSEDED banner (every gap it
+  lists shipped in Phases 19-20).
+- Structure: a Quick Start above the fold, spec.md handed off from the
+  Contents, and two new pins (TestDocsPins): every parser mode flag
+  must appear in both hand-written tables, so neither can silently
+  drop a shipped mode again.
+
+2 new pins (856 total).
+
 # 3.59.1 (2026-10-06)
 
 ### The 12-agent help audit: the docs-truth wave

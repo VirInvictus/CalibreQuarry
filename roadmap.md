@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.59.1.
+What's done, what's next. Updated as of v3.59.2.
 
 **Minimized 2026-09-29 (the cquarry precedent).** Phases 1-19, the maintenance
 sweeps, and every audit wave are shipped; their full findings-ledger text is
