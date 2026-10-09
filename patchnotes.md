@@ -1,5 +1,53 @@
 # CalibreQuarry Patch Notes
 
+# 3.61.0 (2026-10-09)
+
+### The EPUB3 dc:date round-trip fix (issue #4)
+
+reconcile and `run flush` now embed the canonical dc:date as a full ISO
+instant, the database pubdate's date at UTC midnight
+(`2020-10-01T00:00:00Z`), replacing 3.56.0's date-only canonical form.
+The date-only form never round-tripped calibre's EPUB3 reader: that
+reader nudges a date-only value off month boundaries (fix_only_date in
+calibre's utils/date: day 1 becomes day 2, a month's last day is pulled
+back one), so every day-1 pubdate read back one day off through
+ebook-meta and the read-back re-diff reported permanent pubdate
+residuals no --apply pass could close. Issue #4's five-book live case:
+Cognitive Behavior Therapy (2020-10-01, reading back
+2020-10-02T00:00:00+00:00), the Byzantium trilogy (1988/1991/1995-01-01),
+and Merkel's Freedom (2024-01-01); all five are day-1 books, while the
+same batch's 11 mid-month EPUB3s reconciled clean. The EPUB2 reader
+uses calibre's general date parser, which never nudges, which is why
+the 3.56.0 EPUB2 multi-date class (#9177/#9635) converged while these
+five stayed permanent. The diff (`diff_fields`) was never at fault: it
+compares date-only on both sides, exactly as the issue's repro guessed
+it should; the defect was the shape the normalizer wrote, which a
+midnight-UTC DB edit (the #9740 experiment) could not reach.
+
+- **`canonical_date_target()` joins `src/cquarry_cli/epubdates.py`**
+  (`norm_date` + `T00:00:00Z`; the sentinel stays '' -> zero dates) and
+  both embed paths take the target from it: the reconcile apply pass
+  and `run flush`. The 3.56.0 surgery (`canonical_dc_dates`) is
+  unchanged and generic. A full ISO instant round-trips exactly under
+  both readers, and it is the shape calibre's own EPUB3 writer emits
+  (opf3.py's `set_pubdate` writes `isoformat(val)`). Live-verified
+  against calibre 9.15: #9740's EPUB, previously reading back
+  2020-10-02T00:00:00+00:00 forever, reads back exactly
+  2020-10-01T00:00:00+00:00 after one normalization with the new
+  target.
+- **Books already carrying the 3.56.0 date-only canonical** stay
+  in-sync when their pubdate is mid-month (the nudge never fires) and
+  keep reporting DRIFT when it is day-1 or a month's last day, until
+  the next `--apply` or `flush` rewrites them with the full-ISO shape.
+  Nothing forces a migration; convergent states remain convergent.
+- **Tests** (the suite runs 935, was 931): `canonical_date_target`
+  unit pins; the reconcile wiring pin and the flush target pin flip to
+  the full-ISO form; the script re-export pin covers the new helper;
+  and a live class (skipUnless ebook-meta) pins the day-1 round-trip
+  end to end against the real binary, plus a second-pass
+  byte-identity pin. CI (no calibre binaries) skips the live class as
+  designed.
+
 # 3.60.1 (2026-10-07)
 
 ### The 2026-09-20 test-gap list closes (tests only; no behavior changes)
