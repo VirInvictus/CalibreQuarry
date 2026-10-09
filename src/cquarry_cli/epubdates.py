@@ -10,8 +10,8 @@ forever: the embed "converged" only while the minimum happened to equal the
 database date, and any leftover date older than it read back as permanent
 pubdate drift (the #9177/#9635 live class; both files are EPUB2 packages
 carrying three dc:date elements). Every embed therefore ends with this pass:
-the OPF is forced to exactly one canonical dc:date, the database pubdate in
-date-only form."""
+the OPF is forced to exactly one canonical dc:date built by
+canonical_date_target from the database pubdate."""
 
 import os
 import re
@@ -51,10 +51,27 @@ def norm_date(value: str | None) -> str:
     return "" if d.startswith("0101-01-01") else d
 
 
+def canonical_date_target(pubdate: str | None) -> str:
+    """The dc:date value a normalized EPUB carries: the database pubdate's
+    date at UTC midnight as a full ISO instant; '' for the sentinel/empty
+    (the zero-dates case, matching how the diff compares). Full ISO, not
+    date-only, because calibre's EPUB3 reader nudges a date-only value off
+    month boundaries (fix_only_date: day 1 becomes day 2, a month's last
+    day is pulled back one), so the date-only canonical read back one day
+    off through ebook-meta for every day-1 pubdate and the read-back
+    re-diff never converged (issue #4, the five-book live case; the EPUB2
+    reader uses the general parser and never nudges, which is why the
+    EPUB2 class converged). A full ISO instant round-trips exactly under
+    both readers, the same shape calibre's own EPUB3 writer emits."""
+    d = norm_date(pubdate)
+    return f"{d}T00:00:00Z" if d else ""
+
+
 def canonical_dc_dates(opf_text: str, target: str) -> str | None:
     """Rewrite the OPF so its metadata block carries exactly one dc:date with
-    `target` (date-only), or none when target is '' (the unset/sentinel case,
-    matching how the diff compares). Returns byte-identical text when the
+    `target` as its element text, or none when target is '' (the unset/sentinel
+    case, matching how the diff compares; callers build the target with
+    canonical_date_target). Returns byte-identical text when the
     file is already canonical, or None when the shape cannot be safely
     rewritten: no metadata block, or dates the document carries without the
     standard dc prefix binding (a file this function cannot name elements in

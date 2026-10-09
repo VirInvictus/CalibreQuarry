@@ -5,6 +5,28 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.61.0 onward, the EPUB3 dc:date round-trip fix)
+
+- **The canonical dc:date is a full ISO instant, not date-only.**
+  `canonical_date_target(pubdate)` in `src/cquarry_cli/epubdates.py`
+  (`norm_date` + `T00:00:00Z`; '' stays '' -> zero dates) builds the
+  target, and BOTH embed paths take it from there (reconcile's apply
+  pass and `run flush`). Why: calibre's EPUB3 reader nudges a date-only
+  dc:date off month boundaries (`fix_only_date`, calibre utils/date:
+  day 1 becomes day 2, a month's last day pulls back one), so the
+  3.56.0 date-only canonical read back one day off through ebook-meta
+  for every day-1 pubdate and the read-back re-diff never converged
+  (issue #4: five EPUB3 residuals, all day-1 pubdates; CBT 2020-10-01
+  read back 2020-10-02T00:00:00+00:00). The EPUB2 reader uses the
+  general date parser, which never nudges; that is why the EPUB2
+  multi-date class converged and only EPUB3 residuals remained. A full
+  ISO instant round-trips exactly under both readers (calibre's own
+  EPUB3 writer emits full ISO via `isoformat`). The 3.56.0 surgery
+  (`canonical_dc_dates`) is unchanged and still generic; books already
+  carrying a date-only canonical stay in-sync when mid-month and keep
+  reporting DRIFT when day-1/month-end until the next `--apply`/`flush`
+  rewrites them.
+
 ## Programmer-facing contract notes (3.60.0 onward, run news)
 
 - **`run news` addresses recipes by exact TITLE, and the seam cannot
@@ -97,7 +119,9 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   (`normalize_epub_dates`, after the calibredb chunks, before the
   read-back): every embedded EPUB's metadata block is forced to exactly
   one `dc:date` carrying `norm_date(db pubdate)`, or zero dates when the
-  DB pubdate is the sentinel (matching diff_fields' comparison). The
+  DB pubdate is the sentinel (matching diff_fields' comparison; the
+  date-only target superseded 3.61.0 by `canonical_date_target`'s full
+  ISO instant, see the issue-#4 note). The
   live class it closes (#9177/#9635): calibredb's EPUB2 writer rewrites
   only the EARLIEST dc:date in place and leaves the rest standing,
   while calibre's EPUB2 reader reports the MINIMUM, so multi-dated

@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import io
 import re
+import shutil
 import sys
 import sqlite3
 import pathlib
@@ -442,16 +443,18 @@ class TestVerifyWiring(unittest.TestCase):
         self.assertIn("pubdate", out)
         self.assertEqual(embeds, 1)
 
-    def test_normalization_targets_the_date_only_db_pubdate(self):
+    def test_normalization_targets_the_db_pubdate_at_utc_midnight(self):
         # The dc:date pass runs once per embedded EPUB with the database
-        # pubdate reduced to date-only form (the canonical element value).
+        # pubdate reduced to its date at UTC midnight as a full ISO instant
+        # (the canonical element value; see TestEpub3DateRoundTripLive for
+        # why it is not date-only).
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, embeds, norm, err = self._run_main(tmp, [drifted, file_meta()])
         self.assertEqual(rc, 0, out + err)
         args = norm.call_args.args
         self.assertEqual(args[0].name, "The Hobbit.epub")
-        self.assertEqual(args[1], "1937-09-21")
+        self.assertEqual(args[1], "1937-09-21T00:00:00Z")
 
     def test_failed_normalization_fails_the_run(self):
         # An OPF the normalizer cannot rewrite is a named failure, not a
@@ -479,6 +482,7 @@ class TestEpubDateNormalization(unittest.TestCase):
     def test_script_reexports_are_the_module_objects(self):
         # Single source: the script must not carry a fork of the surgery.
         self.assertIs(rfm.norm_date, epd.norm_date)
+        self.assertIs(rfm.canonical_date_target, epd.canonical_date_target)
         self.assertIs(rfm.normalize_epub_dates, epd.normalize_epub_dates)
 
     LIVE_OPF = (
@@ -645,6 +649,107 @@ class TestEpubDateNormalization(unittest.TestCase):
             with zipfile.ZipFile(path, "w") as z:
                 z.writestr("mimetype", "application/epub+zip")
             self.assertFalse(epd.normalize_epub_dates(path, "2023-09-28"))
+
+
+class TestCanonicalDateTarget(unittest.TestCase):
+    """The caller-facing policy over canonical_dc_dates's generic target:
+    the database pubdate's date at UTC midnight as a full ISO instant."""
+
+    def test_full_iso_utc_midnight_from_any_db_shape(self):
+        self.assertEqual(
+            epd.canonical_date_target("2020-10-01 07:00:00+00:00"),
+            "2020-10-01T00:00:00Z",
+        )
+        self.assertEqual(
+            epd.canonical_date_target("2020-10-01T23:15:00-04:00"),
+            "2020-10-01T00:00:00Z",
+        )
+        self.assertEqual(
+            epd.canonical_date_target("2020-10-01"), "2020-10-01T00:00:00Z"
+        )
+
+    def test_sentinel_and_garbage_stay_empty(self):
+        self.assertEqual(epd.canonical_date_target("0101-01-01 00:00:00+00:00"), "")
+        self.assertEqual(epd.canonical_date_target(None), "")
+        self.assertEqual(epd.canonical_date_target("not a date"), "")
+
+
+@unittest.skipUnless(shutil.which("ebook-meta"), "ebook-meta not on PATH")
+class TestEpub3DateRoundTripLive(unittest.TestCase):
+    """Issue #4, the five-book live class. calibre's EPUB3 reader nudges a
+    date-only dc:date off month boundaries (fix_only_date: day 1 becomes
+    day 2, a month's last day is pulled back one), so the 3.56.0 date-only
+    canonical read back as the NEXT day through ebook-meta for every day-1
+    pubdate and the read-back re-diff never converged (2020-10-01 in the
+    file read 2020-10-02T00:00:00+00:00). The canonical target is a full
+    ISO instant, which round-trips exactly; pinned against the real
+    ebook-meta, which CI (no calibre) skips."""
+
+    DAY_ONE_OPF = (
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        '<package version="3.0" xmlns="http://www.idpf.org/2007/opf" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="uid">\n'
+        "  <metadata>\n"
+        '    <dc:identifier id="uid">urn:uuid:date-probe</dc:identifier>\n'
+        "    <dc:title>Day One Probe</dc:title>\n"
+        "    <dc:creator>Probe Author</dc:creator>\n"
+        "    <dc:language>en</dc:language>\n"
+        "    <dc:date>2020-10-01</dc:date>\n"
+        '    <meta property="dcterms:modified">2020-10-01T23:59:59Z</meta>\n'
+        "  </metadata>\n"
+        '  <manifest><item id="c1" href="c1.xhtml" '
+        'media-type="application/xhtml+xml"/></manifest>\n'
+        '  <spine><itemref idref="c1"/></spine>\n'
+        "</package>\n"
+    )
+
+    CONTAINER_XML = (
+        '<?xml version="1.0"?>\n'
+        '<container version="1.0" '
+        'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+        "  <rootfiles>\n"
+        '    <rootfile full-path="OEBPS/content.opf" '
+        'media-type="application/oebps-package+xml"/>\n'
+        "  </rootfiles>\n"
+        "</container>\n"
+    )
+
+    def _build_epub(self, root, opf_text):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER_XML)
+            z.writestr("OEBPS/content.opf", opf_text)
+        path = pathlib.Path(root) / "book.epub"
+        path.write_bytes(buf.getvalue())
+        return path
+
+    def test_day_one_pubdate_survives_the_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.DAY_ONE_OPF)
+            target = epd.canonical_date_target("2020-10-01 07:00:00+00:00")
+            self.assertEqual(target, "2020-10-01T00:00:00Z")
+            self.assertTrue(epd.normalize_epub_dates(path, target))
+            fm = rfm.read_ebook_meta(path)
+            self.assertIsNotNone(fm)
+            # calibre renders the instant in UTC with a +00:00 suffix; the
+            # date part must be the curated day, not the reader-nudged next
+            # day the date-only form produced.
+            self.assertTrue(
+                fm.get("published", "").startswith("2020-10-01"),
+                f"day-1 pubdate read back as {fm.get('published')!r} "
+                "(the issue #4 class)",
+            )
+            self.assertEqual(rfm.norm_date(fm.get("published")), "2020-10-01")
+
+    def test_second_normalize_pass_is_byte_identical(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.DAY_ONE_OPF)
+            target = epd.canonical_date_target("2020-10-01 00:00:00+00:00")
+            self.assertTrue(epd.normalize_epub_dates(path, target))
+            raw = path.read_bytes()
+            self.assertTrue(epd.normalize_epub_dates(path, target))
+            self.assertEqual(path.read_bytes(), raw)
 
 
 if __name__ == "__main__":

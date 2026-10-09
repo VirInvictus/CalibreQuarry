@@ -33,7 +33,7 @@ from pathlib import Path
 from cquarry.helpers import to_isbn13
 from cquarry.write import WritableCalibreDB
 from cquarry_cli.backups import make_backup
-from cquarry_cli.epubdates import norm_date, normalize_epub_dates
+from cquarry_cli.epubdates import canonical_date_target, normalize_epub_dates
 
 _PGREP_TIMEOUT = 10
 
@@ -543,8 +543,9 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
     # The dc:date cleanup rides every EPUB embed (the 3.56.0 pass, issue
     # #3): calibredb's EPUB2 writer rewrites only the earliest dc:date and
     # leaves the rest standing, so a flushed multi-dated EPUB2 kept the
-    # junk dates forever. The same normalization
-    # scripts/reconcile_file_metadata.py runs, from the shared module.
+    # junk dates forever. The same normalization and canonical target
+    # (issue #4's full-ISO instant) scripts/reconcile_file_metadata.py
+    # runs, from the shared module.
     normalized = 0
     for bid in ids:
         entry = db.get_formats(bid).get("EPUB")
@@ -553,7 +554,9 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
         fpath = Path(entry["path"])
         if not fpath.exists():
             continue
-        if normalize_epub_dates(fpath, norm_date(db.get_book(bid)["pubdate"])):
+        if normalize_epub_dates(
+            fpath, canonical_date_target(db.get_book(bid)["pubdate"])
+        ):
             normalized += 1
         else:
             print(

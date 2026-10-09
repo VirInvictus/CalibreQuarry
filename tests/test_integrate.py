@@ -982,7 +982,9 @@ class TestFlushIdTargets(unittest.TestCase):
         self.assertEqual(code, 0, out)
         names = sorted(c.args[0].name for c in self.norm.call_args_list)
         self.assertEqual(names, ["Book1.epub", "Book3.epub"])
-        self.assertEqual({c.args[1] for c in self.norm.call_args_list}, {"2024-01-01"})
+        self.assertEqual(
+            {c.args[1] for c in self.norm.call_args_list}, {"2024-01-01T00:00:00Z"}
+        )
         self.assertIn("dc:date normalized in 2 EPUB file(s)", out)
 
     def test_apply_normalization_failure_fails_flush(self):

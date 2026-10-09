@@ -24,14 +24,18 @@ What it does:
 With --apply (only the drifted books are touched):
   * EPUB/MOBI/AZW3: `calibredb embed_metadata`, which writes the full record
     (and the cover) straight from the database. For EPUB, the OPF is then
-    normalized to exactly one dc:date: the database pubdate, date-only form.
-    calibredb's EPUB2 writer rewrites only the earliest dc:date and leaves
-    every other one standing (a fetch-era run-clock value, the publisher
-    original), and calibre's EPUB2 reader reports the minimum of the dates it
-    finds, so such a file stayed multi-dated forever and read back as
-    permanent pubdate drift (the #9177/#9635 class). The normalization
-    deduplicates to the single canonical value; dcterms:modified and
-    everything else in the package are untouched.
+    normalized to exactly one dc:date: the database pubdate's date at UTC
+    midnight, as a full ISO instant. calibredb's EPUB2 writer rewrites only
+    the earliest dc:date and leaves every other one standing (a fetch-era
+    run-clock value, the publisher original), and calibre's EPUB2 reader
+    reports the minimum of the dates it finds, so such a file stayed
+    multi-dated forever and read back as permanent pubdate drift (the
+    #9177/#9635 class). The normalization deduplicates to the single
+    canonical value; dcterms:modified and everything else in the package
+    are untouched. The instant is full ISO, not date-only, because
+    calibre's EPUB3 reader nudges a date-only value off month boundaries
+    (day 1 becomes day 2), which read back one day off forever for every
+    day-1 pubdate (issue #4).
   * PDF: `exiftool` writes title/author/publisher/date to the Info dict and
     XMP. calibredb is skipped for PDF because it silently leaves some PDFs
     unchanged; exiftool wrote every PDF tested. A few PDFs have a damaged xref
@@ -95,10 +99,18 @@ from urllib.parse import quote
 from vir_tui import core as ui
 
 try:
-    from cquarry_cli.epubdates import norm_date, normalize_epub_dates
+    from cquarry_cli.epubdates import (
+        canonical_date_target,
+        norm_date,
+        normalize_epub_dates,
+    )
 except ImportError:  # a repo checkout run without the package importable
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-    from cquarry_cli.epubdates import norm_date, normalize_epub_dates
+    from cquarry_cli.epubdates import (
+        canonical_date_target,
+        norm_date,
+        normalize_epub_dates,
+    )
 
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 RED = "\033[31m" if USE_COLOR else ""
@@ -905,7 +917,9 @@ def main() -> int:
         if epubs:
             print(f"  normalizing dc:date in {len(epubs)} EPUB file(s)...")
             for rec, fpath in epubs:
-                if not normalize_epub_dates(fpath, norm_date(rec["pubdate"])):
+                if not normalize_epub_dates(
+                    fpath, canonical_date_target(rec["pubdate"])
+                ):
                     print(
                         f"  {RED}dc:date normalization failed{RESET} on {fpath.name}",
                         file=sys.stderr,
