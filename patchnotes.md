@@ -1,5 +1,37 @@
 # CalibreQuarry Patch Notes
 
+# 3.62.2 (2026-10-11)
+
+### Every text-mode spawn decodes lossily (issue #9)
+
+The strict-decode hole that killed the 2026-10-11 battery (3.62.1) was
+not check_pdf's alone. Raised in the #8 close-out and approved as a
+follow-up batch: 40 more spawn sites across `run.py`, `integrate.py`,
+`news.py`, and seven scripts read piped tool output with `text=True`
+and no `errors=`, so one non-UTF-8 byte in any tool's output (qpdf
+echoing a PDF's raw bytes is the live teacher; `pdfinfo`, `exiftool`,
+`calibredb`, and `ebook-convert` all write tool-chosen bytes) raised
+`UnicodeDecodeError` inside `communicate()` and killed the caller.
+All 41 text-mode sites in the tree carry `errors='replace'` now;
+decode only, no rc handling or timeout semantics touched.
+
+- **The blanket cannot rot.** A new AST tripwire in the suite walks
+  every `subprocess.*` call under `src/` and `scripts/` and refuses
+  any text-mode call (`text=`, `universal_newlines=`, or `encoding=`)
+  whose `errors=` is not the string `"replace"`. The survey found 13
+  sites; the tripwire's own first run found the rest
+  (`compress_pdf.py`'s `check_output` spawns and `audit_truncation`'s
+  capture are invisible to a capture-shaped grep), which is exactly
+  the failure mode it exists to close for the next seam.
+- **The tests absorb the kwarg.** The mocked seam fakes (28:
+  24 in `test_integrate.py`, 4 in `test_news.py`) gained `**kwargs`, so the
+  new argument rides through without weakening any assertion; the
+  fakes still bind cmd/capture/text/timeout by name. Real-subprocess
+  decode tests drive `run.py`'s `_run` and the stamp helpers'
+  `ebook-meta`/`exiftool`/`qpdf` wrappers; the replacement-character
+  assertions are locale-gated (a single-byte codec decodes every byte,
+  so the crash class only exists under UTF-8).
+
 # 3.62.1 (2026-10-11)
 
 ### check_pdf: a hung battery degrades per file (issue #8)

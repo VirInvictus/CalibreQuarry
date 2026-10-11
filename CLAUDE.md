@@ -5,6 +5,20 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.62.2 onward, the decode blanket)
+
+- **Every text-mode subprocess call carries errors="replace", and an
+  AST tripwire enforces it.** `tests/test_scripts.py`'s
+  `test_every_text_spawn_carries_errors_replace` walks every
+  `subprocess.*` call under `src/` and `scripts/` and fails on any
+  text-mode call (`text=`, `universal_newlines=`, `encoding=`) whose
+  `errors=` is missing or is not the literal `"replace"`. New seams
+  get the flag for free or the suite refuses; bare-name subprocess
+  imports (`from subprocess import run`) and `import subprocess as
+  sp` are outside the walk's shape and against tree convention. The
+  3.62.1 note's "raised, not fixed" tail is hereby resolved: the
+  sibling holes closed in this release (issue #9), decode only.
+
 ## Programmer-facing contract notes (3.62.1 onward, the battery-degrade fix)
 
 - **check_pdf's `_run` never raises and never hides a timeout.** It
