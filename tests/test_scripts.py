@@ -2952,6 +2952,133 @@ class TestDrmCsvCarriesNaRows(unittest.TestCase):
         self.assertEqual(rows[0]["kind"], "djvu")
 
 
+class TestCodeClassificationGuards(unittest.TestCase):
+    """Issue #10: LoC's LCDB answers mix real classifications with placeholder
+    050s (ebook-preview control numbers, CPB box numbers, ACQUISITION IN
+    PROCESS) and non-numeric Dewey values ([Fic]). All of them read as a
+    miss now: never written, worklisted like any other gap."""
+
+    def test_valid_lcc_shapes_pass(self):
+        for value in (
+            "BF637.S4 G63 2007",
+            "B563",
+            "QA 76.73 .P98",
+            "PR9199.3 .M55 1998",
+            "PZ 7",
+        ):
+            self.assertTrue(fetch_library_codes.valid_lcc(value), value)
+
+    def test_placeholder_050_values_fail(self):
+        for value in (
+            "MLCM 2024/43047 (B)",
+            "MLCS 2023/01234",
+            "CPB Box no. 305 vol. 19",
+            "ACQUISITION IN PROCESS",
+            "Ephemera collection [item]",
+            "",
+            None,
+        ):
+            self.assertFalse(fetch_library_codes.valid_lcc(value), repr(value))
+
+    def test_ddc_guard_takes_numbers_only(self):
+        self.assertTrue(fetch_library_codes.valid_ddc("813.54"))
+        self.assertTrue(fetch_library_codes.valid_ddc("823/.914"))
+        self.assertTrue(fetch_library_codes.valid_ddc("001"))
+        for value in ("[Fic]", "Fic", "Ephemera collection [item]", "", None):
+            self.assertFalse(fetch_library_codes.valid_ddc(value), repr(value))
+
+    def test_sanitize_codes_drops_only_the_guards_keys(self):
+        f = fetch_library_codes
+        self.assertEqual(
+            f.sanitize_codes({"lcc": "MLCM 2024/43047 (B)", "ddc": "188"}),
+            {"ddc": "188"},
+        )
+        self.assertEqual(
+            f.sanitize_codes({"lcc": "B563", "ddc": "[Fic]"}), {"lcc": "B563"}
+        )
+        self.assertEqual(f.sanitize_codes({}), {})
+
+    @staticmethod
+    def _mods_response(*record_bodies: str) -> bytes:
+        records = "".join(
+            "<record><recordData>"
+            '<mods:mods xmlns:mods="http://www.loc.gov/mods/v3">'
+            + body
+            + "</mods:mods></recordData></record>"
+            for body in record_bodies
+        )
+        return (
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            f"<records>{records}</records></searchRetrieveResponse>"
+        ).encode()
+
+    def test_parse_mods_skips_junk_and_takes_a_later_real_record(self):
+        raw = self._mods_response(
+            '<mods:classification authority="lcc">MLCM 2024/43047 (B)</mods:classification>',
+            '<mods:classification authority="lcc">B563</mods:classification>'
+            '<mods:classification authority="ddc">188</mods:classification>',
+        )
+        self.assertEqual(
+            fetch_library_codes.parse_mods(raw), {"lcc": "B563", "ddc": "188"}
+        )
+
+    def test_parse_mods_junk_only_reads_as_a_clean_miss(self):
+        # A junk-only response must look like a miss so --sru-fallback fires
+        # against it: the work genuinely has no classification yet.
+        raw = self._mods_response(
+            '<mods:classification authority="lcc">ACQUISITION IN PROCESS</mods:classification>',
+            '<mods:classification authority="ddc">[Fic]</mods:classification>',
+        )
+        self.assertEqual(fetch_library_codes.parse_mods(raw), {})
+
+
+class TestJunkClassificationGuardFlow(unittest.TestCase):
+    """The issue #10 guard end to end through main(): a pre-guard cache entry
+    carrying a placeholder 050 must not be written, must not print as a HIT,
+    and must land in the misses worklist (with the work-level retry, since a
+    sanitized junk-only entry reads as a miss); a junk value that arrives past
+    parse_mods entirely (the mocked seam here) is caught by the
+    consumption-side sanitize. Reuses the fallback harness's library and
+    runner unchanged."""
+
+    def _run(self, tmp, **kwargs):
+        return TestFetchWorkFallbackFlow()._run(tmp, **kwargs)
+
+    def test_cached_placeholder_050_is_a_miss_with_the_work_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, misses = self._run(
+                tmp,
+                seed_cache={"9780465032001": {"lcc": "MLCM 2024/43047 (B)"}},
+                fetch_results=[{}],
+            )
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("HIT", out)
+        self.assertTrue(misses, "the book must land in the worklist")
+        self.assertIn("no codes found", out)
+
+    def test_fresh_junk_from_the_seam_is_caught_at_consumption(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, misses = self._run(
+                tmp, fetch_results=[{"lcc": "ACQUISITION IN PROCESS"}]
+            )
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("HIT", out)
+        self.assertTrue(misses)
+        self.assertIn("no codes found", out)
+
+    def test_valid_cached_code_is_untouched(self):
+        # The control: a real classification rides the cache to a HIT with
+        # no network, and the guards reject nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, misses = self._run(
+                tmp, seed_cache={"9780465032001": {"lcc": "B563"}}
+            )
+        self.assertEqual(rc, 0, out)
+        self.assertIn("HIT", out)
+        self.assertIn("B563", out)
+        self.assertFalse(misses)
+
+
 class TestFetchWorkFallbackFlow(unittest.TestCase):
     """The --sru-fallback flow through main(): the work-level hit (tagged,
     cached under its work: key), the cached work hit (no network), the

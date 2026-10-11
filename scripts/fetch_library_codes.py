@@ -39,6 +39,13 @@ miss gets one paced title/author query; hits are tagged work-level in the
 report because the classification belongs to the matched work, not necessarily
 this edition, and deserve a glance before they are trusted.
 
+Placeholder classifications are refused, not stored (issue #10): LoC
+ebook-preview records carry 050 control numbers (`MLCM 2024/43047 (B)`,
+`CPB Box no. 305 vol. 19`), `ACQUISITION IN PROCESS` placeholders, and
+children's records put `[Fic]` where a Dewey number belongs. A value that
+fails the classification guard reads as a miss: it is never written, and
+the book lands in the misses worklist like any other gap.
+
 Run from the library directory:
     python3 fetch_library_codes.py                    # dry run, whole library
     python3 fetch_library_codes.py --sample 200       # dry run, random sample
@@ -61,6 +68,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import json
 import os
 import random
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -95,6 +103,57 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 # Seconds the "is Calibre running" probe gets before it is treated as hung.
 PGREP_TIMEOUT = 10
+
+
+# --------------------------------------------------------------------------
+# classification guards (issue #10)
+# --------------------------------------------------------------------------
+# LoC's LCDB answers mix real classifications with placeholder 050s: the
+# ebook-preview program's records carry MLCM/MLCS control numbers, CPB box
+# numbers, and "ACQUISITION IN PROCESS" placeholders, and children's records
+# put "[Fic]" where a Dewey number belongs. Stored verbatim (80 such values
+# found in the live library, 2026-10-11), each poisons the composite column
+# and rides reconcile into every embed. Both guards treat junk as a miss: the
+# work genuinely has no classification yet, so it lands in the misses
+# worklist like any other gap.
+_LCC_SHAPE = re.compile(r"^[A-Z]{1,3} ?\d{1,4}(?:\.\d+)?")
+_LCC_PLACEHOLDER_PREFIXES = ("MLCM", "MLCS", "CPB")
+_DDC_SHAPE = re.compile(r"^\d{1,3}(?:\.\d+)?")
+
+
+def valid_lcc(value: str) -> bool:
+    """Does this 050 look like a classification and not a control number or
+    acquisition placeholder? The shape gate is the issue's suggested one; the
+    prefix/keyword gate names the families that can still wear a
+    classification shape ("MLC 2024/..." would pass the regex)."""
+    v = (value or "").strip()
+    if not v:
+        return False
+    head = v.upper()
+    if head.startswith(_LCC_PLACEHOLDER_PREFIXES) or "IN PROCESS" in head:
+        return False
+    return bool(_LCC_SHAPE.match(v))
+
+
+def valid_ddc(value: str) -> bool:
+    """Dewey is numeric; bracketed shelf marks ([Fic]) and word values are
+    not Dewey numbers, whatever the record's authority tag claims."""
+    v = (value or "").strip()
+    return bool(v) and bool(_DDC_SHAPE.match(v))
+
+
+_CODE_GUARDS = {"lcc": valid_lcc, "ddc": valid_ddc}
+
+
+def sanitize_codes(codes: dict[str, str]) -> dict[str, str]:
+    """Drop junk classifications from a codes dict. Applied in parse_mods and
+    again wherever codes are read back, because the on-disk cache carries
+    entries written before the guard existed."""
+    out = dict(codes)
+    for key, guard in _CODE_GUARDS.items():
+        if key in out and not guard(out[key]):
+            del out[key]
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -156,7 +215,10 @@ def work_cache_key(title: str, author: str) -> str:
 
 
 def parse_mods(raw: bytes) -> dict[str, str]:
-    """Return {'lcc': ..., 'ddc': ...} from the first record carrying each."""
+    """Return {'lcc': ..., 'ddc': ...} from the first record carrying each,
+    validated by the classification guards (issue #10): a junk 050 on the
+    first record is skipped, not stored, and a later record's real
+    classification still wins."""
     out: dict[str, str] = {}
     try:
         root = ET.fromstring(raw)
@@ -176,7 +238,9 @@ def parse_mods(raw: bytes) -> dict[str, str]:
                 continue
             el = mods.find(f"./mods:classification[@authority='{authority}']", MODS_NS)
             if el is not None and el.text and el.text.strip():
-                out[authority] = el.text.strip()
+                value = el.text.strip()
+                if _CODE_GUARDS[authority](value):
+                    out[authority] = value
     return out
 
 
@@ -619,7 +683,7 @@ def main() -> int:
             isbn = t["isbn"]
             cached = cache.get(isbn)
             if cached is not None:
-                codes = cached
+                codes = sanitize_codes(cached)
                 src = "cache"
             else:
                 try:
@@ -676,7 +740,7 @@ def main() -> int:
                 wcached = None if args.no_cache else cache.get(wkey)
                 if wcached is not None:
                     if wcached:
-                        codes = wcached
+                        codes = sanitize_codes(wcached)
                         src = "cache-work"
                 else:
                     time.sleep(args.delay)
@@ -702,6 +766,10 @@ def main() -> int:
                             codes = wcodes
                             src = "loc-work"
 
+            # The catch-all guard (issue #10): whatever path produced codes
+            # (fresh parse, old cache entry, a future seam), nothing junk
+            # reaches the writes, the report, or the worklist from here.
+            codes = sanitize_codes(codes)
             lcc, ddc = codes.get("lcc"), codes.get("ddc")
             via = "work" if src in ("loc-work", "cache-work") else "isbn"
             results.append({**t, "lcc": lcc, "ddc": ddc, "via": via})
