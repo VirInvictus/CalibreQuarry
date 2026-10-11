@@ -70,7 +70,11 @@ def _ebook_meta(path: Path) -> dict[str, str]:
     "identifiers": ...}. Missing keys simply stay absent.
     """
     proc = subprocess.run(
-        ["ebook-meta", str(path)], capture_output=True, text=True, timeout=120
+        ["ebook-meta", str(path)],
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=120,
     )
     out: dict[str, str] = {}
     for line in proc.stdout.splitlines():

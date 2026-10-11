@@ -197,6 +197,7 @@ def run_convert(db, args, *, apply: bool, take_backup=None) -> int:
             ["ebook-convert", p["src"], p["dst"]],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=1800,
         )
         if proc.returncode != 0 or not Path(p["dst"]).exists():
@@ -277,6 +278,7 @@ def run_polish(db, args, *, apply: bool, take_backup=None) -> int:
             ["ebook-polish", *p["flags"], p["src"], p["src"]],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=1800,
         )
         after = os.path.getsize(p["src"]) if os.path.exists(p["src"]) else 0
@@ -383,7 +385,9 @@ def run_export(db, args, *, apply: bool, take_backup=None) -> int:
     if not shutil.which("calibredb"):
         print("ERROR: calibredb is not on PATH.", file=sys.stderr)
         return 2
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace", timeout=3600
+    )
     if proc.returncode != 0:
         print(f"ERROR: calibredb export failed: {proc.stderr[:300]}", file=sys.stderr)
         return 1
@@ -531,6 +535,7 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
             ["calibredb", "embed_metadata", "--library", library, *targets],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=1800,
         )
         if proc.returncode != 0:
@@ -662,6 +667,7 @@ def run_backfill(db, args, *, apply: bool, take_backup=None) -> int:
                 query,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=300,
             )
             if proc.returncode != 0 or not proc.stdout.strip():
@@ -798,7 +804,9 @@ def run_backup_metadata(db, args, *, apply: bool, take_backup=None) -> int:
     cmd = ["calibredb", "backup_metadata", "--library", library]
     if getattr(args, "all", False):
         cmd.append("--all")
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace", timeout=3600
+    )
     if proc.returncode != 0:
         print(f"ERROR: backup_metadata failed: {proc.stderr[:300]}", file=sys.stderr)
         return 1
@@ -898,6 +906,7 @@ def run_restore_database(db, args, *, apply: bool, take_backup=None) -> int:
             ],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=3600,
         )
     except subprocess.TimeoutExpired:
@@ -980,6 +989,7 @@ def run_clone(db, args, *, apply: bool, take_backup=None) -> int:
         ["calibredb", "clone", "--library", plan["source"], plan["target"]],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=1800,
     )
     if proc.returncode != 0:
@@ -1021,6 +1031,7 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
             ["calibredb", "fts_index", "--library", library, "status"],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=300,
         )
         # Upstream exits 2 when indexing is disabled: that is a report, not
@@ -1064,6 +1075,7 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
             ["calibredb", "fts_index", "--library", library, "enable"],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=300,
         )
         if proc.returncode != 0:
@@ -1101,6 +1113,7 @@ def run_fts_index(db, args, *, apply: bool, take_backup=None) -> int:
         ["calibredb", "fts_index", "--library", library, "reindex", *items],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=3600,
     )
     if proc.returncode != 0:
@@ -1175,7 +1188,11 @@ def run_customize(args) -> int:
             print("ERROR: calibre-customize is not on PATH.", file=sys.stderr)
             return 2
         proc = subprocess.run(
-            ["calibre-customize", "-l"], capture_output=True, text=True, timeout=300
+            ["calibre-customize", "-l"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=300,
         )
         if proc.returncode != 0:
             print(
@@ -1228,6 +1245,7 @@ def run_customize(args) -> int:
         ["calibre-customize", flag, str(value)],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=600,
     )
     if proc.returncode != 0:
@@ -1327,7 +1345,9 @@ def run_debug_tools(args) -> int:
     if not shutil.which("calibre-debug"):
         print("ERROR: calibre-debug is not on PATH.", file=sys.stderr)
         return 2
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace", timeout=1800
+    )
     if proc.returncode != 0:
         print(
             f"ERROR: calibre-debug {action} failed: {proc.stderr[:300]}",
@@ -1403,6 +1423,7 @@ def run_device(args) -> int:
         ["ebook-device", command, *targets],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=1800,
     )
     if proc.returncode != 0:
@@ -1501,6 +1522,7 @@ def run_catalog(db, args, *, apply: bool, take_backup=None) -> int:
         ],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=3600,
     )
     if proc.returncode != 0:

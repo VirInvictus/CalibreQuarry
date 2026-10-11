@@ -296,6 +296,7 @@ def check_pdf(path: Path) -> list[str]:
                 ["exiftool", "-m", "-s3", "-PageCount", str(path)],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=TOOL_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
@@ -319,6 +320,7 @@ def check_djvu(path: Path) -> list[str]:
             ["djvused", str(path), "-e", "n"],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=TOOL_TIMEOUT,
         )
     except subprocess.TimeoutExpired:

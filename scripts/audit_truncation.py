@@ -53,6 +53,7 @@ def real_pdf_pages(path: Path) -> int | None:
             ["pdfinfo", str(path)],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=60,
             check=True,
         )

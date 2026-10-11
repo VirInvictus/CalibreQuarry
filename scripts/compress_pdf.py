@@ -85,6 +85,7 @@ def page_count(path: Path) -> int | None:
             [pdfinfo, str(path)],
             stderr=subprocess.DEVNULL,
             text=True,
+            errors="replace",
             timeout=PROBE_TIMEOUT,
         )
     except subprocess.CalledProcessError, subprocess.TimeoutExpired:
@@ -117,6 +118,7 @@ def pdf_features(path: Path) -> dict:
                 [pdfinfo, str(path)],
                 stderr=subprocess.DEVNULL,
                 text=True,
+                errors="replace",
                 timeout=PROBE_TIMEOUT,
             )
             for line in out.splitlines():
@@ -143,6 +145,7 @@ def pdf_features(path: Path) -> dict:
                 [pdfdetach, "-list", str(path)],
                 stderr=subprocess.DEVNULL,
                 text=True,
+                errors="replace",
                 timeout=PROBE_TIMEOUT,
             )
             # Count entries; pdfdetach prefixes "0 embedded files" or a numbered list
@@ -163,6 +166,7 @@ def pdf_features(path: Path) -> dict:
                 [pdfimages, "-list", str(path)],
                 stderr=subprocess.DEVNULL,
                 text=True,
+                errors="replace",
                 timeout=PROBE_TIMEOUT,
             )
             dpis: list[int] = []

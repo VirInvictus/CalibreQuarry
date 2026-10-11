@@ -93,6 +93,7 @@ def list_recipe_titles() -> list[str]:
         [exe, "--list-recipes"],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=_ENUM_TIMEOUT,
     )
     if proc.returncode != 0:
@@ -307,6 +308,7 @@ def run_news(args) -> int:
                     [exe, f"{row['recipe']}.recipe", str(target)],
                     capture_output=True,
                     text=True,
+                    errors="replace",
                     timeout=timeout,
                 )
             except subprocess.TimeoutExpired:

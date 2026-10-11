@@ -92,7 +92,9 @@ def _scripts_dir() -> Path:
 def _run(
     cmd: list[str], *, cwd: str | None = None, timeout: int = 600
 ) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    return subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace", timeout=timeout, cwd=cwd
+    )
 
 
 def calibre_running() -> bool:

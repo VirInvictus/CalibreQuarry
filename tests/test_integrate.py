@@ -134,7 +134,7 @@ class TestConvertVerb(_IntegrateCase):
         self.assertIn("unknown book id 999", err)
 
     def test_apply_converts_and_registers(self):
-        def fake_ebook_convert(cmd, capture_output, text, timeout):
+        def fake_ebook_convert(cmd, capture_output, text, timeout, **kwargs):
             dst = Path(cmd[2])
             dst.write_bytes(b"converted bytes" * 10)
             return mock.Mock(returncode=0, stdout="", stderr="")
@@ -380,7 +380,7 @@ class TestPolishCoverFlush(unittest.TestCase):
         self.assertIn("polish plan", out)
         epub = self.tmpdir / "Auth B" / "Polish Me (3)" / "Book3.epub"
 
-        def fake_polish(cmd, capture_output, text, timeout):
+        def fake_polish(cmd, capture_output, text, timeout, **kwargs):
             epub.write_bytes(b"polished " * 20)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -621,7 +621,7 @@ class TestMatrixCFixes(unittest.TestCase):
             "<dc:publisher>Real Press</dc:publisher></metadata></package>"
         )
 
-        def fake_fetch(cmd, capture_output, text, timeout):
+        def fake_fetch(cmd, capture_output, text, timeout, **kwargs):
             # The tool prints the OPF to stdout under `-o` (the 3.39.2
             # cut passed --opf <file>, which fetch-ebook-metadata does
             # not even know); the verb stages stdout to a temp file.
@@ -1231,7 +1231,7 @@ class TestBackupMetadata(_IntegrateCase):
         self._dirty(1, 2)
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -1339,7 +1339,7 @@ class TestRestoreDatabase(_IntegrateCase):
         target = self._target(db=True)
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(
                 returncode=0, stdout="Restoring database succeeded", stderr=""
@@ -1445,7 +1445,7 @@ class TestClone(_IntegrateCase):
         target = self._target()
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -1565,7 +1565,7 @@ class TestFtsIndex(_IntegrateCase):
         self._sidecar_queue((1, "EPUB"), (3, "PDF"))
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -1588,7 +1588,7 @@ class TestFtsIndex(_IntegrateCase):
     def test_status_disabled_reads_as_a_report(self):
         # Upstream exits 2 when indexing is disabled: a report outcome here,
         # not a usage error.
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             return mock.Mock(returncode=2, stdout="", stderr="disabled")
 
         with (
@@ -1672,7 +1672,7 @@ class TestCatalogVerbs(_IntegrateCase):
     def test_apply_drives_calibredb_catalog_with_ids(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -1745,7 +1745,7 @@ class TestCustomize(unittest.TestCase):
     def test_list_drives_calibre_customize(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="Type|Name|Version", stderr="")
 
@@ -1784,7 +1784,7 @@ class TestCustomize(unittest.TestCase):
             zip_path = Path(tmp) / "bindery_repair.zip"
             zip_path.write_bytes(b"zip")
 
-            def fake_run(cmd, capture_output, text, timeout):
+            def fake_run(cmd, capture_output, text, timeout, **kwargs):
                 calls.append(cmd)
                 return mock.Mock(
                     returncode=0, stdout="Plugin added: Bindery", stderr=""
@@ -1885,7 +1885,7 @@ class TestDebugTools(unittest.TestCase):
             book = Path(tmp) / "book.epub"
             book.write_bytes(b"epub")
 
-            def fake_run(cmd, capture_output, text, timeout):
+            def fake_run(cmd, capture_output, text, timeout, **kwargs):
                 calls.append(cmd)
                 return mock.Mock(returncode=0, stdout="converted", stderr="")
 
@@ -1910,7 +1910,7 @@ class TestDebugTools(unittest.TestCase):
             a.write_bytes(b"a")
             b.write_bytes(b"b")
 
-            def fake_run(cmd, capture_output, text, timeout):
+            def fake_run(cmd, capture_output, text, timeout, **kwargs):
                 calls.append(cmd)
                 return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -1966,7 +1966,7 @@ class TestDevice(unittest.TestCase):
     def test_read_drives_ebook_device_immediately(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="/books", stderr="")
 
@@ -1990,7 +1990,7 @@ class TestDevice(unittest.TestCase):
     def test_write_apply_drives_ebook_device(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -2014,7 +2014,7 @@ class TestDevice(unittest.TestCase):
         self.assertIn("ebook-device is not on PATH", err)
 
     def test_upstreams_no_device_error_is_exit_one(self):
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             return mock.Mock(
                 returncode=1,
                 stdout="",
@@ -2052,7 +2052,7 @@ class TestVerbFailureArms(_IntegrateCase):
         con.close()
 
     def _assert_failure_arm(self, *argv):
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             return mock.Mock(returncode=3, stdout="", stderr="tool exploded")
 
         with (
@@ -2098,7 +2098,7 @@ class TestVerbFailureArms(_IntegrateCase):
         self._assert_failure_arm("run", "catalog-epub", "--dest", "out.epub", "--apply")
 
     def test_restore_database_timeout_is_an_exit_not_a_traceback(self):
-        def hang(cmd, capture_output, text, timeout):
+        def hang(cmd, capture_output, text, timeout, **kwargs):
             raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
 
         with (
@@ -2160,7 +2160,7 @@ class TestFtsIndexGaps(_IntegrateCase):
     def test_enable_apply_writes_the_preference_behind_a_backup(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="enabled", stderr="")
 
@@ -2189,7 +2189,7 @@ class TestFtsIndexGaps(_IntegrateCase):
     def test_reindex_failure_arm_surfaces_calibres_message(self):
         self._sidecar_queue((1, "EPUB"))
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             return mock.Mock(
                 returncode=1,
                 stdout="",
@@ -2240,7 +2240,7 @@ class TestCustomizeMapping(_IntegrateCase):
     def _apply(self, *argv, stdout=""):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout=stdout, stderr="")
 
@@ -2280,7 +2280,7 @@ class TestCustomizeMapping(_IntegrateCase):
     def test_failure_arm_is_exit_one_with_stderr(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=1, stdout="", stderr="no such plugin")
 
@@ -2349,7 +2349,7 @@ class TestDebugToolsGaps(_IntegrateCase):
         calls = []
         book = self._book()
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
@@ -2388,7 +2388,7 @@ class TestDeviceCpShape(_IntegrateCase):
     def test_cp_maps_two_positionals(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 

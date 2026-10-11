@@ -3232,5 +3232,83 @@ class TestValidatorCoreChecks(unittest.TestCase):
         self.assertIn("amazon", report.warnings[0][1])
 
 
+class TestSeamDecoding(unittest.TestCase):
+    """Issue #8's class across the sibling seams (3.62.2): every spawn
+    decodes with errors='replace', so non-UTF-8 tool output (qpdf
+    echoing a PDF's raw bytes, exiftool on a mojibake Info dict) reads
+    as replacement characters instead of raising UnicodeDecodeError in
+    communicate(). Real subprocesses: the mocked seam tests never
+    exercise the decoder. Driven through the spawn helpers, which take
+    any argv, so no calibre tool needs to exist."""
+
+    BAD = "import sys; sys.stdout.buffer.write(b'x \\xa0\\xff y')"
+
+    def _assert_lossy(self, proc):
+        import locale
+
+        self.assertEqual(proc.returncode, 0)
+        if "UTF" in locale.getpreferredencoding(False).upper():
+            self.assertIn("\ufffd", proc.stdout)
+
+    def test_stamp_pdf_helpers_decode_lossily(self):
+        for helper in (
+            stamp_pdf._run_exiftool,
+            stamp_pdf._run_ebook_meta,
+            stamp_pdf._run_qpdf,
+        ):
+            with self.subTest(helper=helper.__name__):
+                self._assert_lossy(helper([sys.executable, "-c", self.BAD]))
+
+    def test_stamp_epub_helper_decodes_lossily(self):
+        self._assert_lossy(stamp_epub._run_ebook_meta([sys.executable, "-c", self.BAD]))
+
+    def test_every_text_spawn_carries_errors_replace(self):
+        # The 3.62.2 blanket: ANY subprocess call in src/ or scripts/
+        # that passes text=True must also pass errors='replace' (the
+        # issue-#8 class: strict decoding/encoding of piped output is
+        # one non-UTF-8 byte from an unhandled exception). AST walk, so
+        # formatting and kwarg order cannot rot the pin.
+        import ast
+
+        roots = [
+            Path(__file__).resolve().parent.parent / "scripts",
+            Path(__file__).resolve().parent.parent / "src",
+        ]
+        for root in roots:
+            for py in sorted(root.rglob("*.py")):
+                tree = ast.parse(py.read_text())
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    func = node.func
+                    if not (
+                        isinstance(func, ast.Attribute)
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id == "subprocess"
+                    ):
+                        continue
+                    keywords = {kw.arg for kw in node.keywords if kw.arg}
+                    textmode = (
+                        "text" in keywords
+                        or "universal_newlines" in keywords
+                        or "encoding" in keywords
+                    )
+                    if not textmode:
+                        continue
+                    values = {
+                        kw.arg: kw.value
+                        for kw in node.keywords
+                        if kw.arg and isinstance(kw.value, ast.Constant)
+                    }
+                    errors = values.get("errors")
+                    self.assertEqual(
+                        getattr(errors, "value", errors),
+                        "replace",
+                        f"{py.relative_to(roots[0].parent)}:"
+                        f"{node.lineno}: a text-mode spawn without "
+                        'errors="replace"',
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

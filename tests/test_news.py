@@ -39,7 +39,7 @@ def _fake_conversions(succeed=(True, True)):
     calls = []
     state = {"n": 0}
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, timeout, **kwargs):
         calls.append(cmd)
         if "--list-recipes" in cmd:
             return mock.Mock(returncode=0, stdout=_ENUMERATION, stderr="")
@@ -445,7 +445,7 @@ class TestNewsApply(_NewsCase):
     def test_timeout_is_one_report_row_and_the_batch_continues(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             if "--list-recipes" in cmd:
                 return mock.Mock(returncode=0, stdout=_ENUMERATION, stderr="")
@@ -482,7 +482,7 @@ class TestNewsApply(_NewsCase):
         self.assertFalse((dest / "BBC News.epub").exists())
 
     def test_rc_zero_without_a_file_is_a_failure(self):
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             if "--list-recipes" in cmd:
                 return mock.Mock(returncode=0, stdout=_ENUMERATION, stderr="")
             return mock.Mock(returncode=0, stdout="", stderr="")
@@ -546,7 +546,7 @@ class TestNewsApply(_NewsCase):
     def test_interrupt_reports_the_partial_batch(self):
         calls = []
 
-        def fake_run(cmd, capture_output, text, timeout):
+        def fake_run(cmd, capture_output, text, timeout, **kwargs):
             calls.append(cmd)
             if "--list-recipes" in cmd:
                 return mock.Mock(returncode=0, stdout=_ENUMERATION, stderr="")

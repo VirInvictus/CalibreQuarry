@@ -345,6 +345,7 @@ def read_ebook_meta(path: Path) -> dict[str, str] | None:
             ["ebook-meta", str(path)],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=READ_TIMEOUT,
         )
     except OSError, subprocess.TimeoutExpired:
@@ -382,6 +383,7 @@ def read_djvu_meta(path: Path) -> dict[str, str] | None:
             ["djvused", str(path), "-e", "print-meta"],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=READ_TIMEOUT,
         )
     except OSError, subprocess.TimeoutExpired:
@@ -406,6 +408,7 @@ def read_pdf_meta(path: Path) -> dict[str, str] | None:
             ["exiftool", "-j", "-Title", "-Author", "-Publisher", "-Date", str(path)],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=READ_TIMEOUT,
         )
     except OSError, subprocess.TimeoutExpired:
@@ -540,7 +543,11 @@ def embed_calibredb(ids: list[int], library_root: Path, failures: list[str]) -> 
         span = f"#{chunk[0]}" if len(chunk) == 1 else f"#{chunk[0]}-#{chunk[-1]}"
         try:
             res = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=CALIBREDB_TIMEOUT
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=CALIBREDB_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
             line = (
@@ -581,6 +588,7 @@ def embed_djvu(db: dict, path: Path, failures: list[str] | None = None) -> bool:
                 ["djvused", str(path), "-e", f'set-meta "{meta_file}"', "-s"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=WRITE_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
@@ -647,7 +655,11 @@ def _run_exiftool(db: dict, path: Path) -> subprocess.CompletedProcess:
     args.append(str(path))
     try:
         return subprocess.run(
-            args, capture_output=True, text=True, timeout=WRITE_TIMEOUT
+            args,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=WRITE_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         # Synthesize the failure shape the callers already handle, so a hung
@@ -678,6 +690,7 @@ def embed_pdf(
                 ["qpdf", "--replace-input", str(path)],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=WRITE_TIMEOUT,
             )
         except subprocess.TimeoutExpired:

@@ -87,11 +87,15 @@ def _derive_from_filename(path: Path) -> tuple[str, str]:
 
 
 def _run_exiftool(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True, timeout=300)
+    return subprocess.run(
+        args, capture_output=True, text=True, errors="replace", timeout=300
+    )
 
 
 def _run_ebook_meta(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True, timeout=300)
+    return subprocess.run(
+        args, capture_output=True, text=True, errors="replace", timeout=300
+    )
 
 
 #: exiftool PARSE-crash signatures: a Perl-space error means it could not
@@ -108,7 +112,9 @@ _PARSE_CRASH_RE = re.compile(
 
 
 def _run_qpdf(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True, timeout=300)
+    return subprocess.run(
+        args, capture_output=True, text=True, errors="replace", timeout=300
+    )
 
 
 def _crash_detail(proc: subprocess.CompletedProcess) -> str:
@@ -186,7 +192,11 @@ def _erase_ebook_meta_args(title: str, authors: list[str], publisher: str) -> li
 def _read_ebook_meta(path: Path) -> dict[str, str]:
     """ebook-meta read-back, parsed the same tolerant way for verification."""
     proc = subprocess.run(
-        ["ebook-meta", str(path)], capture_output=True, text=True, timeout=120
+        ["ebook-meta", str(path)],
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=120,
     )
     out: dict[str, str] = {}
     for line in proc.stdout.splitlines():

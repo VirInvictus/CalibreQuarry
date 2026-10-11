@@ -16,6 +16,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -26,6 +27,7 @@ from cquarry_cli.backups import make_backup
 from cquarry_cli.cli import main
 from cquarry_cli.run import (
     _apply_opf,
+    _run,
     _bindery_phase1,
     _date_only,
     _drive_stamp,
@@ -891,6 +893,29 @@ class TestPhase1Seams(RunCase):
     report was read as a dict, and bindery's --json was invoked with no
     value). Mocked here at the subprocess boundary with the real payload
     shapes, plus one run against the actual screen_duplicate.py."""
+
+    def test_run_decodes_non_utf8_tool_output(self):
+        # Issue #8's class, run.py's copy: _run spawned check_pdf,
+        # bindery, and audit_drm with text=True and no errors=, so any
+        # non-UTF-8 byte in their output raised UnicodeDecodeError (a
+        # ValueError, outside any seam handler) and killed the phase
+        # verb. The decode is lossy-replace now; real subprocess, since
+        # the mocked seam tests never exercise the decoder.
+        proc = _run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(b'x \\xa0\\xff y')",
+            ]
+        )
+        # The strict-decode crash only exists under a UTF-8 locale (a
+        # single-byte codec decodes every byte), so the replacement
+        # assertion is locale-gated.
+        import locale
+
+        self.assertEqual(proc.returncode, 0)
+        if "UTF" in locale.getpreferredencoding(False).upper():
+            self.assertIn("\ufffd", proc.stdout)
 
     def test_screen_duplicates_keeps_only_hit_records(self):
         # screen_duplicate's JSON report is a bare list holding EVERY
