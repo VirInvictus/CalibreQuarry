@@ -12,7 +12,9 @@ display form, the way Calibre's own AuthorsTable behaves.
 
 - **Floor: `cquarry>=1.27.0`.** pyproject, the spec Dependencies line,
   and spec section 2.1's prose floor sentence and per-bump list all
-  move together.
+  move together, and a new version-sync pin holds the prose sentence
+  to pyproject's floor, closing the unpinned-carrier class the
+  release-auditor caught going stale on 3.63.1.
 - **The one frontend consumer is `--rename-entity authors`.** Its
   author lookup (cquarry's `rename_entity`: old-name resolution AND
   merge detection) now resolves the display comma form of a

@@ -108,6 +108,28 @@ class TestVersionSync(unittest.TestCase):
             "spec.md's cquarry floor does not match pyproject.toml's",
         )
 
+    def test_spec_prose_floor_sentence_matches_pyproject(self):
+        """Section 2.1's prose floor sentence is a floor carrier the
+        Dependencies-line guard above never saw: it went stale a fourth
+        time on the 1.24.0 -> 1.26.3 bump (caught by the release-auditor,
+        post-commit) and a fifth was cut off here. Same pin, second
+        carrier."""
+        root_dir = Path(__file__).parent.parent
+        spec_text = (root_dir / "spec.md").read_text(encoding="utf-8")
+        pyproject_text = (root_dir / "pyproject.toml").read_text(encoding="utf-8")
+        pyproject_floor = re.search(r'"cquarry>=([\d.]+)"', pyproject_text)
+        self.assertIsNotNone(pyproject_floor, "pyproject.toml has no cquarry floor")
+        m = re.search(r"The floor is `cquarry >= ([\d.]+)`", spec_text)
+        self.assertIsNotNone(
+            m, "spec.md section 2.1 carries no 'The floor is' sentence"
+        )
+        self.assertEqual(
+            m.group(1),
+            pyproject_floor.group(1),
+            "spec.md 2.1's prose floor sentence does not match "
+            "pyproject.toml's (the 3.63.1 release-auditor catch class)",
+        )
+
     def test_roadmap_header_matches(self):
         """The roadmap's 'Updated as of' stamp is a carrier too: it sat at
         v3.26.0 for six releases."""
