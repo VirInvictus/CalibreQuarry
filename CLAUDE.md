@@ -5,6 +5,37 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.62.0 onward, the three-issue fixes)
+
+- **The screen's filename fallback feeds classify_titles parsed seeds.**
+  For a file with no embedded metadata, ebook-meta reports the whole
+  filename stem as the title and Author(s) "Unknown" (verified live,
+  calibre 9.15). `_screen`'s within-batch loop now compares
+  `_filename_seed()` output when BOTH records look metadata-less (no
+  authors, or the placeholder): first parenthesized group = author
+  segment (order-free token set, "Last, First" == "First Last"), text
+  before it = title. A second gate requires the whole stems' token sets
+  to agree, so a site-first `(z-library.sk)` group cannot over-match
+  two different works. classify_titles stays the one title-pair judge;
+  the seed only chooses WHICH strings it judges. Any real author
+  (non-placeholder) on either side never takes the path, and a
+  token-set disagreement falls through to the raw stem comparison,
+  unchanged.
+- **reconcile's apply failures collect into a `failures` list** printed
+  as a FAILURES block on stdout immediately before the summary, and the
+  summary carries the count (`COMPLETED WITH ERRORS: N failed
+  operation(s) (listed above); M file(s) still drifted on read-back.`,
+  issue #6). `embed_calibredb(ids, library_root, failures)` takes the
+  list as a required third param and names the failed chunk's id span;
+  `embed_pdf`/`embed_djvu` take an optional `failures=` kwarg and carry
+  book id and format. The inline stderr lines stay. A residual-only
+  failure (every embed rc 0, the #9177 class) prints no dangling
+  "(listed above)".
+- **fetch_library_codes' misses default is beside the script**
+  (`default_misses_file()`), never CWD-relative: the documented
+  invocation runs from the library root, and the worklist must not land
+  inside the library (issue #7). `--misses-file PATH` overrides.
+
 ## Programmer-facing contract notes (3.61.0 onward, the EPUB3 dc:date round-trip fix)
 
 - **The canonical dc:date is a full ISO instant, not date-only.**

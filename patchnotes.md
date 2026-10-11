@@ -1,5 +1,71 @@
 # CalibreQuarry Patch Notes
 
+# 3.62.0 (2026-10-10)
+
+### The within-batch screen reads filename-shaped records (issue #5)
+
+Two z-lib rips of one book whose filenames render the author in
+different orders (`Title (Bjarne Stroustrup) (z-library.sk, ...)` vs
+`Title (Stroustrup, Bjarne) (...)`) passed the within-batch screen
+silently on the 2026-10-10 wave (270 files). Both files were stripped
+OPFs, so `ebook-meta` had nothing and fell back to the filename: the
+whole stem as the title, Author(s) "Unknown" (verified live on calibre
+9.15). The two records therefore already agreed at the author gate
+("Unknown" == "Unknown"), and the miss was the title verdict, which
+compared stems carrying the bracketed author segments in different
+orders. The pair differed in every physical dimension, so nothing
+downstream would have caught it either.
+
+- **`_filename_seed()` parses the fallback shape.** When BOTH records
+  of a pair look metadata-less (no authors, or the "Unknown"
+  placeholder), the screen compares parsed seeds instead of the raw
+  stems: the first parenthesized group as the author segment, the text
+  before it as the title, and the author as an order-free token set, so
+  "Last, First" matches "First Last". A second gate requires the whole
+  stems' token sets to agree, so a marker the parse mistook for an
+  author (a site-first `(z-library.sk)` group) cannot over-match two
+  different works. The reported pair now surfaces as `batch_duplicates`
+  both ways; a pair whose token sets disagree falls through to the raw
+  stem comparison, unchanged, and records with real metadata never take
+  the path. Verified end to end against the live ebook-meta fallback
+  with the issue's exact filenames: 2 file(s) screened, 2 candidate
+  pair(s), both directions.
+
+### reconcile --apply: failures are listed, not implied (issue #6)
+
+A 268-book apply pass ended `COMPLETED WITH ERRORS: some operations
+failed (see above)` with nothing above. The failure lines ride stderr
+inline as they happen, so a capture that lost stderr was left pointing
+at an empty above, and the follow-up read-only verify (268/268 in sync)
+could not say what had failed either. A routine close-out became a
+re-investigation.
+
+- **Every failed operation is collected.** `embed_calibredb` failure
+  lines name the failed chunk's id span plus the stderr tail (`#1201-
+  #1234`, up to 100 books per chunk); the exiftool, djvused, and
+  dc:date normalization failures carry the book id and format (`#9
+  [PDF] file.pdf: exiftool failed: ...`).
+- **A FAILURES block prints on stdout before the summary**, and the
+  summary carries the count: `COMPLETED WITH ERRORS: 2 failed
+  operation(s) (listed above); 1 file(s) still drifted on read-back.`
+  A residual-only failure (the #9177 class, every embed rc 0) no
+  longer prints a dangling "(listed above)". The inline stderr lines
+  stay for live progress; the block is the capture-proof record.
+
+### fetch_library_codes: the misses worklist never lands in the library (issue #7)
+
+The misses worklist defaulted to `fetch_library_codes_misses.txt` in
+the current directory, and the documented invocation runs from the
+library root, so the manual-research worklist landed INSIDE the
+library (seen twice: the 2026-10-09 22-book wave and the 2026-10-11
+268-book wave), where the tree audit flags it as a root stray.
+
+- **The default is now beside the script** (`default_misses_file()`):
+  the script directory, absolute, stable across runs, outside any
+  library, and `*.txt` is gitignored in the checkout so the tree stays
+  clean. `--misses-file PATH` overrides it (it already existed) and
+  the help text states the new default.
+
 # 3.61.0 (2026-10-09)
 
 ### The EPUB3 dc:date round-trip fix (issue #4)
