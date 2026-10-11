@@ -1,5 +1,41 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.1 (2026-10-11)
+
+### The cquarry 1.26.3 floor (issue #12)
+
+A dependency-floor adoption; no frontend behavior changes, one seam
+test. cquarry 1.26.3 fixed `set_authors`/`add_book` crashing on
+comma-bearing author names over piped artifact rows (upstream issue
+VirInvictus/cquarry#5): the import path (`run phase2`'s
+`wdb.set_authors(book_id, creators)` over verbatim metadata creator
+strings), the set-write fixes path, and `add_book`'s author creation
+all looked up only the raw spelling and died on `UNIQUE(authors.name)`
+whenever a piped row already existed. The live teacher was a 143-book
+import batch aborting at book 10083 on 2026-10-11; the batch machinery
+rolled back cleanly and no data was hurt. 1.26.3 resolves incoming
+author names through both spellings (raw first, then the piped form
+the create path stores), mirroring upstream Calibre, whose author
+lookups are keyed by display form and therefore never collide.
+
+- **Floor: `cquarry>=1.26.3`.** pyproject and the spec Dependencies
+  line move together (the version-sync test pins them).
+- **One regression test at the frontend seam.**
+  `TestSetAuthorsPipedRowParity` (version-gated, skipUnless the
+  installed cquarry is at least 1.26.3) drives the `--set-authors` verb
+  over a pre-seeded piped artifact row with the comma display name and
+  asserts the reuse: the existing row linked, its stored spelling and
+  hand-tuned sort untouched, no second author row, the book's
+  author_sort recomputed to the display form, the OPF-resync queue
+  carrying the book. Model: cquarry's
+  `test_comma_name_reuses_existing_piped_row`.
+- **Reuse semantics worth knowing (changed upstream, in the safe
+  direction):** `set_author_sort_name` still resolves STORED spellings
+  only, so repairing a reused piped row's sort means passing the piped
+  form (`'John William Strutt| Baron Rayleigh'`), never the display
+  comma name, or it raises `ValueError`; the display-form extension
+  across the author write surface is recorded upstream as a follow-up.
+
 # 3.63.0 (2026-10-11)
 
 ### fetch_library_codes: placeholder classifications read as a miss (issue #10)

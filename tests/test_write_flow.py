@@ -621,5 +621,71 @@ class TestRenameEntityAndSortSetters(_TempDBCase):
         self.assertIn("cannot be combined", err.getvalue())
 
 
+def _cquarry_at_least(major: int, minor: int, patch: int) -> bool:
+    try:
+        from importlib.metadata import version
+
+        parts = tuple(int(p) for p in version("cquarry").split(".")[:3])
+    except Exception:
+        return False
+    return parts >= (major, minor, patch)
+
+
+@unittest.skipUnless(
+    _cquarry_at_least(1, 26, 3),
+    "needs cquarry >= 1.26.3 (the piped-author row resolution)",
+)
+class TestSetAuthorsPipedRowParity(_TempDBCase):
+    """Issue #12, the cquarry 1.26.3 adoption: run.py's import path feeds
+    verbatim creator strings to wdb.set_authors, so a comma-bearing byline
+    over a piped artifact row died on UNIQUE(authors.name) before 1.26.3
+    resolved incoming names through both spellings (the live 2026-10-11
+    failure: a 143-book batch aborted at book 10083, rolled back cleanly).
+    This pins the resolution at this repo's seam so a library regression
+    cannot come back through the floor. Model: cquarry tests/test_write.py
+    TestAuthorCreationParity.test_comma_name_reuses_existing_piped_row."""
+
+    def _seed_piped_artifact(self):
+        con = sqlite3.connect(self.db_path)
+        # The pipe-import artifact: the create path's stored spelling of
+        # the display form "A, Author", already in the table.
+        con.execute(
+            "UPDATE authors SET name = 'A| Author', sort = 'A, Author' WHERE id = 1"
+        )
+        con.commit()
+        con.close()
+
+    def test_comma_display_name_reuses_the_piped_row(self):
+        self._seed_piped_artifact()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--set-authors", "1", "A, Author", "--db", self.db_path])
+        self.assertEqual(rc, 0, out.getvalue() + err.getvalue())
+        con = sqlite3.connect(self.db_path)
+        try:
+            # The existing row is linked: stored spelling never rewritten,
+            # its sort kept, no second author row created.
+            self.assertEqual(
+                con.execute("SELECT id, name, sort FROM authors").fetchall(),
+                [(1, "A| Author", "A, Author")],
+            )
+            self.assertEqual(
+                con.execute(
+                    "SELECT book, author FROM books_authors_link ORDER BY book"
+                ).fetchall(),
+                [(1, 1), (2, 1)],
+            )
+            self.assertEqual(
+                con.execute("SELECT author_sort FROM books WHERE id = 1").fetchone()[0],
+                "A, Author",
+            )
+            self.assertEqual(
+                [r[0] for r in con.execute("SELECT book FROM metadata_dirtied")],
+                [1],
+            )
+        finally:
+            con.close()
+
+
 if __name__ == "__main__":
     unittest.main()

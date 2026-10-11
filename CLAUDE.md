@@ -5,6 +5,19 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.1 onward, the cquarry 1.26.3 floor)
+
+- **The floor is 1.26.3 for the piped-author resolution.** Every author
+  write seam (`run phase2`'s import over verbatim creator strings, the
+  set-write fixes path, `add_book`, the `--set-authors` verb) relies on
+  cquarry resolving incoming author names through BOTH spellings: raw
+  first, then the piped form the create path stores. Below 1.26.3 a
+  comma-bearing byline over a piped artifact row dies on
+  `UNIQUE(authors.name)`. `set_author_sort_name` still resolves STORED
+  spellings only: repairing a reused piped row's sort takes the piped
+  form (`'Name| Piped'`), never the display comma name.
+  `TestSetAuthorsPipedRowParity` (version-gated) pins the seam.
+
 ## Programmer-facing contract notes (3.63.0 onward, the issue-#10/#11 fixes)
 
 - **fetch_library_codes refuses placeholder classifications at every

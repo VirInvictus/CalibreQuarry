@@ -1,8 +1,8 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.63.0  
+**Version:** 3.63.1  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry` (>= 1.24.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.26.3), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
