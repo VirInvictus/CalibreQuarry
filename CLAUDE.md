@@ -5,6 +5,32 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.0 onward, the issue-#10/#11 fixes)
+
+- **fetch_library_codes refuses placeholder classifications at every
+  seam.** `valid_lcc`/`valid_ddc` (the issue's classification-shape
+  regexes plus the MLCM/MLCS/CPB/`IN PROCESS` placeholder gate, which
+  catches shapes the regex alone admits like `MLC 2024/...`) run in
+  `parse_mods` per element (a junk 050 on the first record is skipped;
+  a later record's real classification still wins), at both cache-read
+  sites, and once as a catch-all at the single consumption point
+  before values become writes/report/worklist (the point a mocked or
+  future seam cannot bypass). Junk reads as a miss everywhere: nothing
+  written, worklisted, and a sanitized junk-only entry fires
+  `--sru-fallback` exactly like a fresh miss. Pre-guard cache entries
+  need no bump; the read-side sanitize covers them.
+- **reconcile's identifier diff is two-directional.** A file-side
+  identifier type the DB lacks is drift (issue #11: after
+  `clear_identifier` the OPF value stood and reconcile read in-sync),
+  because `calibredb embed_metadata` regenerates the OPF wholesale and
+  `--apply` removes it. `FILE_ONLY_IDENTIFIERS` (`uri`, `ean`) stays
+  exempt: every embed re-adds the book uuid and publisher `ean`s were
+  already recorded as legitimate, so strict equality is still not the
+  rule and a freshly embedded book still reads in sync.
+  `verify_embedded` shares `diff_fields`, so the post-embed read-back
+  judges the removal direction by the same rule. PDFs are unchanged:
+  their read-back never compares identifiers.
+
 ## Programmer-facing contract notes (3.62.2 onward, the decode blanket)
 
 - **Every text-mode subprocess call carries errors="replace", and an

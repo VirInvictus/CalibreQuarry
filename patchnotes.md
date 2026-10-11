@@ -1,5 +1,60 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.0 (2026-10-11)
+
+### fetch_library_codes: placeholder classifications read as a miss (issue #10)
+
+The SRU parser took the 050 verbatim, so LoC's ebook-preview records
+stored control numbers and acquisition placeholders as lcc identifiers
+(`MLCM 2024/43047 (B)`, `CPB Box no. 305 vol. 19`, `ACQUISITION IN
+PROCESS`, `Ephemera collection [item]`), and the children's-record
+`[Fic]` shelf mark landed in ddc. 80 such values were found in the live
+library on 2026-10-11 (roughly 70 pre-existing from earlier waves plus
+10 from the 324-book `--sru-fallback` pass, whose work-level records
+hit placeholder records more often); each one poisons the composite
+column and rides reconcile into every embed.
+
+- **`valid_lcc`/`valid_ddc` guard every path into the database.** The
+  shape gates are the issue's suggested classification regexes, plus a
+  placeholder gate naming the families that can still wear a
+  classification shape (`MLC 2024/...` would pass the regex) or read as
+  a placeholder outright (`IN PROCESS`). `parse_mods` checks per
+  element, so a junk 050 on the first record is skipped and a later
+  record's real classification still wins.
+- **Cache reads sanitize too.** The on-disk cache carries entries
+  written before the guard, so both cache-read sites sanitize, and one
+  catch-all sanitize sits at the single consumption point before values
+  become writes, report rows, or worklist lines (a value that arrives
+  past `parse_mods` entirely is still caught). A sanitized junk-only
+  entry reads as a clean miss, so `--sru-fallback` fires on it exactly
+  like a fresh one.
+- **Junk is a miss, not a code.** Nothing is written, the book lands in
+  the misses worklist like any other gap, and no cache bump or
+  migration is needed.
+
+### reconcile: file-side identifiers the DB lacks are drift (issue #11)
+
+After `wdb.clear_identifier` removed an identifier DB-side, the book's
+EPUB OPF still carried the deleted `dc:identifier` (the deletion only
+queues OPF resync; reconcile is the tool that embeds), and the
+identifier diff's one-directional shape read that book as in sync: a
+dry run said in sync, `--apply` embedded nothing, and the stale value
+survived in the file until Calibre's next launch regenerated the OPF.
+Observed live on the 2026-10-11 junk sweep: 72 EPUBs read in-sync with
+stale values, 1 PDF drifted and embedded.
+
+- **DB-is-source-of-truth runs both directions now.** A file-side
+  identifier type the DB lacks is drift, because `calibredb
+  embed_metadata` regenerates the OPF wholesale and `--apply` removes
+  it. `verify_embedded` shares `diff_fields`, so the post-embed
+  read-back judges the removal direction by the same rule and
+  converges.
+- **The recorded legitimate extras stay exempt.** `FILE_ONLY_IDENTIFIERS`
+  (`uri`: the book uuid every embed re-adds; `ean`: publisher files
+  keep them untracked) are still not drift, so strict equality is
+  still not the rule and a freshly embedded book still reads in sync.
+  PDFs are unchanged: their read-back never compares identifiers.
+
 # 3.62.2 (2026-10-11)
 
 ### Every text-mode spawn decodes lossily (issue #9)
