@@ -2663,6 +2663,77 @@ class TestCheckPdf(unittest.TestCase):
         self.assertEqual(report["avg_dpi"], 72.0)
         self.assertIn("low_dpi", kinds)
 
+    def test_qpdf_check_timeout_degrades_to_advisory_finding(self):
+        # Issue #8: a slow or hung qpdf --check (a 733-page file under
+        # battery contention fired this live) was swallowed as a bare
+        # None and reported "unavailable", hiding the cause, while the
+        # crash that actually killed the battery (rc 1, JSON report
+        # unwritten, phase-1 verb dead on the empty report) was _run's
+        # strict decode of non-UTF-8 tool output. A timeout now degrades
+        # to a per-file verdict + finding, advisory: not in the
+        # structural tuple, so the exit contract is unchanged.
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.write(fd, b"%PDF-1.4 fake")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+
+        def fake_run(cmd, timeout=120, **kwargs):
+            if cmd[:2] == ["qpdf", "--check"]:
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            return mock.Mock(returncode=0, stdout="7\n")
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            report = self.check_pdf.check_file(path)
+        self.assertEqual(report["qpdf_check"], "timeout")
+        kinds = [f["kind"] for f in report["findings"]]
+        self.assertIn("qpdf_timeout", kinds)
+        self.assertNotIn("qpdf_timeout", self.check_pdf._STRUCTURAL_KINDS)
+
+    def test_every_tool_timeout_degrades_never_raises(self):
+        # The whole battery timing out (contention worst case) leaves a
+        # coherent report: the qpdf verdict names the timeout, the other
+        # seams read the _TimedOut sentinel as unavailable, and
+        # check_file returns instead of raising.
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.write(fd, b"%PDF-1.4 fake")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+
+        with mock.patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["qpdf"], 120),
+        ):
+            report = self.check_pdf.check_file(path)
+        self.assertEqual(report["qpdf_check"], "timeout")
+        self.assertIsNone(report["pages"])
+        self.assertNotIn("unembedded_fonts", report)
+        # pages is None, so the sampler falls back to one sample at
+        # page 1, labeled "last" (the label dict's keys collapse).
+        self.assertEqual(report["text_layer"], {"last": "unavailable"})
+        self.assertEqual([f["kind"] for f in report["findings"]], ["qpdf_timeout"])
+
+    def test_run_decodes_non_utf8_tool_output(self):
+        # Issue #8's second crash mode: _run used text=True without
+        # errors='replace', so qpdf echoing a PDF's raw non-UTF-8 bytes
+        # into its warning context raised UnicodeDecodeError in
+        # communicate() (a ValueError, outside the except clause). The
+        # decode is lossy-replace now; this drives the REAL subprocess
+        # path, which the mocked classes above never touch.
+        proc = self.check_pdf._run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(b'x \\xa0\\xff y')",
+            ]
+        )
+        self.assertIsNotNone(proc)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("\ufffd", proc.stdout)
+
 
 class TestAuthorSortSanity(unittest.TestCase):
     """Phase 19 B.3: advisory author_sort sweep, hosted locally in the

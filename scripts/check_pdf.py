@@ -9,7 +9,9 @@ For each file it reports, without changing anything:
   pages         page count (qpdf --show-npages; djvused -e n for DJVU)
   qpdf_check    qpdf --check classified: clean / warnings (benign; qpdf
                 exits 3 on warning-only files all the time) / errors
-                (a real structural problem) / unavailable (no qpdf)
+                (a real structural problem) / timeout (the check blew
+                its time budget: environmental, not structural) /
+                unavailable (no qpdf)
   fonts         pdffonts: how many fonts are NOT embedded (print hazard)
   text_layer    pdftotext sampled at pages 1, middle, and last (the
                 page-1-only sample used to pass OCR-once scans)
@@ -29,11 +31,33 @@ import sys
 _PDF_MAGIC = b"%PDF-"
 _DJVU_MAGIC = b"AT&TFORM"
 
+# The finding kinds that count toward the structural total (exit 1).
+# Everything else (warnings, fonts, text layer, dpi, timeouts) is
+# advisory.
+_STRUCTURAL_KINDS = ("header", "qpdf_errors")
 
-def _run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess | None:
+
+class _TimedOut:
+    """_run's timeout marker (subprocess.run itself never returns a
+    None returncode): CompletedProcess-shaped, so the `proc is None or
+    proc.returncode != 0` callers read it as unavailable while the
+    qpdf --check caller can still name the cause."""
+
+    returncode = None
+    stdout = ""
+    stderr = ""
+
+
+def _run(
+    cmd: list[str], timeout: int = 120
+) -> subprocess.CompletedProcess | _TimedOut | None:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except OSError, subprocess.TimeoutExpired:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, errors="replace", timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return _TimedOut()
+    except OSError:
         return None
 
 
@@ -171,9 +195,28 @@ def check_file(path: str) -> dict:
         return report
 
     proc = _run(["qpdf", "--check", path])
-    verdict = classify_qpdf(proc.returncode if proc else None)
+    if isinstance(proc, _TimedOut):
+        verdict = "timeout"
+    else:
+        verdict = classify_qpdf(proc.returncode if proc else None)
     report["qpdf_check"] = verdict
-    if verdict == "errors":
+    if verdict == "timeout":
+        # Issue #8: a slow or hung qpdf --check (a 733-page file under
+        # battery contention fired this live) was swallowed as a bare
+        # None and reported "unavailable", hiding the cause, while the
+        # crash that actually killed the battery was _run's strict
+        # decode (an unhandled UnicodeDecodeError exits 1 with the JSON
+        # report unwritten, and the phase-1 verb dies on the empty
+        # report). A timeout now names itself, per file; advisory
+        # because the trigger is environmental (the same file re-checks
+        # clean without contention), not file damage.
+        report["findings"].append(
+            {
+                "kind": "qpdf_timeout",
+                "detail": "qpdf --check exceeded the 120 s budget",
+            }
+        )
+    elif verdict == "errors":
         detail = (proc.stderr or proc.stdout).strip().splitlines()
         report["findings"].append(
             {"kind": "qpdf_errors", "detail": detail[0][:120] if detail else ""}
@@ -256,10 +299,7 @@ def main() -> int:
                 f"{len(report['findings'])} finding(s)"
             )
     structural = sum(
-        1
-        for r in reports
-        for f in r["findings"]
-        if f["kind"] in ("header", "qpdf_errors")
+        1 for r in reports for f in r["findings"] if f["kind"] in _STRUCTURAL_KINDS
     )
     print(f"\n{len(reports)} file(s) checked, {structural} structural finding(s).")
     if args.json:

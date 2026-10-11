@@ -876,10 +876,12 @@ error. Report-only, always.
 ### `check_pdf.py`: the PDF/DJVU battery (read-only)
 
 The per-file battery behind `run phase1`: header, page count, `qpdf --check`
-with real-vs-benign classification, fonts, text layer, images. Per-file
-report plus `--json FILE` for the machine shape. Exit codes: 0 clean, 1
-structural findings (the normal trouble outcome, report still written), 2
-a file it could not read at all.
+with real-vs-benign classification (a check that exceeds its 120 s budget
+reports `timeout` with an advisory finding instead of crashing the
+battery: environmental, re-check the file without contention), fonts,
+text layer, images. Per-file report plus `--json FILE` for the machine
+shape. Exit codes: 0 clean, 1 structural findings (the normal trouble
+outcome, report still written), 2 a file it could not read at all.
 
 ### `comments_census.py`: description-field defect census (read-only)
 
