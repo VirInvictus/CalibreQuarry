@@ -233,6 +233,16 @@ def parse_identifiers(value: str | None) -> dict[str, str]:
     return out
 
 
+# File-side identifier types that are not drift when the database lacks
+# them: every calibredb embed re-adds the book uuid (ebook-meta surfaces it
+# as a `uri` id), and some publisher files keep an `ean` the library does
+# not track. Anything else file-side that the DB lacks IS drift (issue #11):
+# DB-is-source-of-truth runs both directions, because embed_metadata
+# regenerates the OPF wholesale, so an --apply removes an identifier the DB
+# deleted and the file still carries.
+FILE_ONLY_IDENTIFIERS = frozenset({"uri", "ean"})
+
+
 # --- database side ---------------------------------------------------------
 
 
@@ -482,12 +492,21 @@ def diff_fields(db: dict, fm: dict[str, str], fmt: str) -> list[str]:
             if norm_set(db["tags"]) != norm_set(re.split(r",\s*", fm.get("tags", ""))):
                 drift.append("tags")
         elif field == "identifiers":
-            # Directional: every curated identifier must be embedded. The file
-            # may legitimately carry extras the library does not track (the
+            # Two-directional (issue #11): every curated identifier must be
+            # embedded, and an identifier the file still carries after the DB
+            # dropped it is drift too -- embed_metadata regenerates the OPF
+            # wholesale, so --apply removes it. The file may legitimately
+            # carry FILE_ONLY_IDENTIFIERS the library does not track (the
             # EPUB's own urn:uuid surfaces as a `uri` id; some files keep an
-            # `ean`), so a strict equality would false-flag those.
+            # `ean`), so those stay exempt; strict equality would false-flag
+            # every freshly embedded book.
             file_ids = parse_identifiers(fm.get("identifiers"))
-            if any(file_ids.get(k) != v for k, v in db["identifiers"].items()):
+            missing = any(file_ids.get(k) != v for k, v in db["identifiers"].items())
+            extra = any(
+                k not in db["identifiers"] and k not in FILE_ONLY_IDENTIFIERS
+                for k in file_ids
+            )
+            if missing or extra:
                 drift.append("identifiers")
         elif field == "comments":
             # ebook-meta truncates long comments in its readout, so a correctly

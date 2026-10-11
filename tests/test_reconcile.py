@@ -200,11 +200,29 @@ class TestDiff(unittest.TestCase):
 
     def test_extra_file_identifiers_are_not_drift(self):
         # File carries the curated isbn plus its own urn:uuid and an ean; the
-        # curated id is present, so no drift (directional subset check).
+        # curated id is present and both extras are FILE_ONLY_IDENTIFIERS
+        # (the recorded legitimate extras), so no drift.
         fm = file_meta(
             identifiers="uri:urn:uuid:abc, ean:4057664648839, isbn:9780000000001"
         )
         self.assertNotIn("identifiers", rfm.diff_fields(db_record(), fm, "EPUB"))
+
+    def test_deleted_db_identifier_still_in_file_is_drift(self):
+        # Issue #11, the live class: the DB identifier was cleared but the
+        # OPF still carries it (a deletion only queues OPF resync; reconcile
+        # is the tool that embeds). DB-is-source-of-truth runs both
+        # directions, and embed_metadata regenerates the OPF wholesale, so
+        # this is drift --apply can close -- never a silent "in sync".
+        db = db_record(identifiers={})
+        fm = file_meta(identifiers="isbn:9780000000001, lcc:mlcm 2024/43047 (b)")
+        self.assertIn("identifiers", rfm.diff_fields(db, fm, "EPUB"))
+
+    def test_file_side_tracked_type_extra_is_drift(self):
+        # A file-side identifier of an ordinary tracked type (not uri/ean)
+        # that the DB lacks counts in the removal direction too; --apply
+        # regenerates the OPF without it and the read-back converges.
+        fm = file_meta(identifiers="isbn:9780000000001, goodreads:12345")
+        self.assertIn("identifiers", rfm.diff_fields(db_record(), fm, "EPUB"))
 
     def test_comment_html_insensitive(self):
         # File stores plain text, DB stores HTML of the same blurb -> no drift.
