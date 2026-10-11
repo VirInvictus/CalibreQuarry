@@ -54,6 +54,12 @@ embed claimed is read back and re-diffed after the pass; files still drifted
 are reported as RESIDUAL rows (and fail the run), converting the silent no-op
 into an actionable finding.
 
+Failed operations (a calibredb chunk, an exiftool or djvused write, a dc:date
+normalization) are also collected as they happen and printed as a FAILURES
+block on stdout immediately before the summary, and the summary counts them
+(issue #6): the inline failure lines ride stderr, so a capture that lost
+stderr showed "COMPLETED WITH ERRORS (see above)" over an empty above.
+
 Usage:
     python3 reconcile_file_metadata.py                 # dry-run report, ./metadata.db
     python3 reconcile_file_metadata.py ~/Calibre       # a library directory
@@ -516,8 +522,11 @@ def calibre_running() -> bool:
         return True
 
 
-def embed_calibredb(ids: list[int], library_root: Path) -> bool:
-    """`calibredb embed_metadata` for the given ids, in chunks. True on success."""
+def embed_calibredb(ids: list[int], library_root: Path, failures: list[str]) -> bool:
+    """`calibredb embed_metadata` for the given ids, in chunks. True on success.
+    Every failed chunk is appended to `failures` naming its id range (issue #6:
+    the summary said "see above" over an empty above whenever the inline stderr
+    lines were lost to the capture), so the final report can list them."""
     ok = True
     for i in range(0, len(ids), 100):
         chunk = [str(x) for x in ids[i : i + 100]]
@@ -528,29 +537,34 @@ def embed_calibredb(ids: list[int], library_root: Path) -> bool:
             str(library_root),
             *chunk,
         ]
+        span = f"#{chunk[0]}" if len(chunk) == 1 else f"#{chunk[0]}-#{chunk[-1]}"
         try:
             res = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=CALIBREDB_TIMEOUT
             )
         except subprocess.TimeoutExpired:
-            print(
-                f"  {RED}embed_metadata timed out{RESET} after {CALIBREDB_TIMEOUT}s "
-                f"on {len(chunk)} book(s) starting at #{chunk[0]}",
-                file=sys.stderr,
+            line = (
+                f"calibredb embed_metadata timed out after {CALIBREDB_TIMEOUT}s "
+                f"on {span} ({len(chunk)} book(s))"
             )
+            print(f"  {RED}{line}{RESET}", file=sys.stderr)
+            failures.append(line)
             ok = False
             continue
         if res.returncode != 0:
-            print(
-                f"  {RED}embed_metadata failed{RESET}: {res.stderr.strip()[:200]}",
-                file=sys.stderr,
+            line = (
+                f"calibredb embed_metadata failed on {span} "
+                f"({len(chunk)} book(s)): {res.stderr.strip()[:200]}"
             )
+            print(f"  {RED}{line}{RESET}", file=sys.stderr)
+            failures.append(line)
             ok = False
     return ok
 
 
-def embed_djvu(db: dict, path: Path) -> bool:
-    """Set DJVU title/author via djvused (the only fields DJVU metadata holds)."""
+def embed_djvu(db: dict, path: Path, failures: list[str] | None = None) -> bool:
+    """Set DJVU title/author via djvused (the only fields DJVU metadata holds).
+    A failure is appended to `failures` when given (issue #6)."""
 
     def esc(v: str) -> str:
         return norm_text(v).replace("\\", "\\\\").replace('"', '\\"')
@@ -570,16 +584,22 @@ def embed_djvu(db: dict, path: Path) -> bool:
                 timeout=WRITE_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
-            print(
-                f"  {RED}djvused timed out{RESET} on {path.name}",
-                file=sys.stderr,
+            line = (
+                f"#{db['id']} [DJVU] {path.name}: djvused timed out "
+                f"after {WRITE_TIMEOUT}s"
             )
+            print(f"  {RED}{line}{RESET}", file=sys.stderr)
+            if failures is not None:
+                failures.append(line)
             return False
         if res.returncode != 0:
-            print(
-                f"  {RED}djvused failed{RESET} on {path.name}: {res.stderr.strip()[:160]}",
-                file=sys.stderr,
+            line = (
+                f"#{db['id']} [DJVU] {path.name}: djvused failed: "
+                f"{res.stderr.strip()[:160]}"
             )
+            print(f"  {RED}{line}{RESET}", file=sys.stderr)
+            if failures is not None:
+                failures.append(line)
             return False
         return True
     finally:
@@ -637,11 +657,14 @@ def _run_exiftool(db: dict, path: Path) -> subprocess.CompletedProcess:
         )
 
 
-def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
+def embed_pdf(
+    db: dict, path: Path, repair: bool = False, failures: list[str] | None = None
+) -> bool:
     """exiftool is more reliable than calibredb for PDF (calibredb silently
     leaves some PDFs unchanged). When `repair` is on and the write fails on a
     broken cross-reference table, rebuild it in place with `qpdf --replace-input`
-    (page count preserved) and retry once.
+    (page count preserved) and retry once. A final failure is appended to
+    `failures` when given (issue #6).
 
     `qpdf --replace-input` leaves the pre-repair original beside the file as
     `<name>.~qpdf-orig`; we delete it once qpdf succeeds, otherwise these
@@ -670,10 +693,10 @@ def embed_pdf(db: dict, path: Path, repair: bool = False) -> bool:
                 print(f"  {YELLOW}repaired xref{RESET} on {path.name} (qpdf), embedded")
                 return True
             res = retry
-    print(
-        f"  {RED}exiftool failed{RESET} on {path.name}: {res.stderr.strip()[:160]}",
-        file=sys.stderr,
-    )
+    line = f"#{db['id']} [PDF] {path.name}: exiftool failed: {res.stderr.strip()[:160]}"
+    print(f"  {RED}{line}{RESET}", file=sys.stderr)
+    if failures is not None:
+        failures.append(line)
     return False
 
 
@@ -901,10 +924,15 @@ def main() -> int:
     # Files whose embed reported success get read back and re-diffed below;
     # a writer's rc 0 is not proof the file changed.
     verify_rows: list[tuple[dict, Path, str]] = []
+    # Every failed operation collects here and is printed as a block before
+    # the final summary (issue #6: the inline failure lines go to stderr as
+    # they happen, so a capture that lost stderr showed "COMPLETED WITH
+    # ERRORS (see above)" over an empty above).
+    failures: list[str] = []
     unique_ids = sorted(set(drifted_calibredb))
     if unique_ids:
         print(f"  embedding {len(unique_ids)} book(s) via calibredb...")
-        ok = embed_calibredb(unique_ids, library_root) and ok
+        ok = embed_calibredb(unique_ids, library_root, failures) and ok
         # Every attempted row verifies, not just the chunks that exited 0: a
         # failed chunk may still have embedded some of its books, and the
         # ones it missed are exactly the silent no-op class.
@@ -920,22 +948,24 @@ def main() -> int:
                 if not normalize_epub_dates(
                     fpath, canonical_date_target(rec["pubdate"])
                 ):
-                    print(
-                        f"  {RED}dc:date normalization failed{RESET} on {fpath.name}",
-                        file=sys.stderr,
+                    line = (
+                        f"#{rec['id']} [EPUB] {fpath.name}: "
+                        "dc:date normalization failed"
                     )
+                    print(f"  {RED}{line}{RESET}", file=sys.stderr)
+                    failures.append(line)
                     ok = False
     if drifted_pdf:
         via = "exiftool, qpdf-repairing broken ones" if args.repair_pdf else "exiftool"
         print(f"  embedding {len(drifted_pdf)} PDF(s) via {via}...")
         for rec, fpath in drifted_pdf:
-            if embed_pdf(rec, fpath, repair=args.repair_pdf):
+            if embed_pdf(rec, fpath, repair=args.repair_pdf, failures=failures):
                 verify_rows.append((rec, fpath, "PDF"))
             else:
                 ok = False
     for rec, fpath in drifted_djvu:
         print(f"  djvused #{rec['id']} {fpath.name}")
-        if embed_djvu(rec, fpath):
+        if embed_djvu(rec, fpath, failures=failures):
             verify_rows.append((rec, fpath, "DJVU"))
         else:
             ok = False
@@ -961,7 +991,19 @@ def main() -> int:
             f"{len(verify_rows)} file(s) verified by read-back."
         )
         return 0
-    print(f"\n{RED}COMPLETED WITH ERRORS{RESET}: some operations failed (see above).")
+    if failures:
+        print(f"\n{RED}{BOLD}FAILURES ({len(failures)}){RESET}:")
+        shown = failures if not args.quiet else failures[:40]
+        for line in shown:
+            print(f"  {line}")
+        if len(failures) > len(shown):
+            print(f"  ... and {len(failures) - len(shown)} more")
+    parts = []
+    if failures:
+        parts.append(f"{len(failures)} failed operation(s) (listed above)")
+    if residuals:
+        parts.append(f"{len(residuals)} file(s) still drifted on read-back")
+    print(f"\n{RED}COMPLETED WITH ERRORS{RESET}: " + "; ".join(parts) + ".")
     return 1
 
 

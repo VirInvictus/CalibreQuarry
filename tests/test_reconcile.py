@@ -333,7 +333,7 @@ class TestVerifyWiring(unittest.TestCase):
     embed whose read-back still (or no longer) drifts, which is the
     #9177 shape the whole feature exists for."""
 
-    def _library(self, tmp):
+    def _library(self, tmp, fmt="EPUB"):
         root = pathlib.Path(tmp)
         con = sqlite3.connect(root / "metadata.db")
         con.executescript(
@@ -384,13 +384,13 @@ class TestVerifyWiring(unittest.TestCase):
         )
         con.execute(
             "INSERT INTO data (book,format,name,uncompressed_size) "
-            "VALUES (1,'EPUB','The Hobbit',10)"
+            f"VALUES (1,'{fmt}','The Hobbit',10)"
         )
         con.commit()
         con.close()
         book_dir = root / "a" / "b"
         book_dir.mkdir(parents=True)
-        (book_dir / "The Hobbit.epub").write_bytes(b"epub")
+        (book_dir / f"The Hobbit.{fmt.lower()}").write_bytes(b"book")
         return root
 
     def _run_main(self, tmp, read_backs, normalize_result=True):
@@ -467,6 +467,96 @@ class TestVerifyWiring(unittest.TestCase):
         self.assertEqual(rc, 1, out + err)
         self.assertIn("normalization failed", err)
         self.assertIn("The Hobbit.epub", err)
+
+    def test_failed_normalization_reaches_a_stdout_failures_block(self):
+        # Issue #6: the inline failure line rides stderr, so a capture that
+        # lost stderr saw "COMPLETED WITH ERRORS (see above)" over an empty
+        # above. The durable record is the FAILURES block on stdout, with
+        # the count and the book id in the summary's reach.
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, embeds, norm, err = self._run_main(
+                tmp, [drifted, file_meta()], normalize_result=False
+            )
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("FAILURES (1)", out)
+        self.assertIn("#1 [EPUB] The Hobbit.epub: dc:date normalization failed", out)
+        self.assertIn("COMPLETED WITH ERRORS: 1 failed operation(s)", out)
+
+    def test_pdf_failure_reaches_a_stdout_failures_block(self):
+        # Issue #6 again, through the exiftool seam: a failed write must
+        # reach the stdout FAILURES block with its book id, not only the
+        # stderr line.
+        failure = SimpleNamespace(returncode=1, stderr="Error: Permission denied")
+        drifted = file_meta(title="Wrong")
+        root = self._library(tempfile.mkdtemp(), fmt="PDF")
+        argv = ["reconcile_file_metadata.py", str(root), "--apply"]
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(rfm, "shutil"),
+                mock.patch.object(rfm, "file_metadata", side_effect=[drifted, drifted]),
+                mock.patch.object(rfm, "_run_exiftool", return_value=failure),
+                mock.patch.object(rfm, "calibre_running", return_value=False),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                rc = rfm.main()
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+        text = out.getvalue()
+        self.assertEqual(rc, 1, text + err.getvalue())
+        self.assertIn("FAILURES (1)", text)
+        self.assertIn("#1 [PDF] The Hobbit.pdf: exiftool failed", text)
+        self.assertIn(
+            "COMPLETED WITH ERRORS: 1 failed operation(s) (listed above).", text
+        )
+
+
+class TestEmbedFailureCollection(unittest.TestCase):
+    """Issue #6: every embed seam appends its failure line to the caller's
+    list (embed_calibredb names the chunk's id span), so the summary's
+    FAILURES block can never be empty when the run failed. The wiring tests
+    above pin the stdout block; these pin the appends at the seams."""
+
+    def test_calibredb_chunk_failure_is_collected_with_id_span(self):
+        failures: list[str] = []
+        with mock.patch.object(
+            rfm.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=1, stderr="boom"),
+        ):
+            ok = rfm.embed_calibredb([7], pathlib.Path("/lib"), failures)
+        self.assertFalse(ok)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("#7", failures[0])
+        self.assertIn("boom", failures[0])
+
+    def test_calibredb_timeout_is_collected(self):
+        failures: list[str] = []
+
+        def hang(*args, **kwargs):
+            raise rfm.subprocess.TimeoutExpired(cmd="calibredb", timeout=1)
+
+        with mock.patch.object(rfm.subprocess, "run", side_effect=hang):
+            ok = rfm.embed_calibredb([1, 2], pathlib.Path("/lib"), failures)
+        self.assertFalse(ok)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("timed out", failures[0])
+
+    def test_djvu_failure_is_collected_with_book_id(self):
+        failures: list[str] = []
+        db = {"id": 3, "title": "T", "authors": ["A"]}
+        with mock.patch.object(
+            rfm.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=1, stderr="nope"),
+        ):
+            ok = rfm.embed_djvu(db, pathlib.Path("/x/d.djvu"), failures)
+        self.assertFalse(ok)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("#3 [DJVU]", failures[0])
 
 
 class TestEpubDateNormalization(unittest.TestCase):

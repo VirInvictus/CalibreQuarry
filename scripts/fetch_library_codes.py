@@ -398,6 +398,16 @@ def _needs_query(t: dict, want_ddc: bool) -> bool:
     return not t["has_lcc"]
 
 
+def default_misses_file() -> str:
+    """The misses worklist default: beside this script, never the working
+    directory (issue #7). The documented invocation runs from the library
+    root, so the old CWD default wrote the worklist INSIDE the library,
+    where the tree audit flags it as a stray. The script directory is
+    stable across runs, outside any library, and *.txt is gitignored in
+    the checkout; --misses-file overrides it."""
+    return str(Path(__file__).resolve().parent / "fetch_library_codes_misses.txt")
+
+
 def write_misses_worklist(results: list[dict], path: str) -> int:
     """Emit the manual-research worklist: every book the SRU pass could not
     code, one per line as `id<TAB>isbn<TAB>ddc<TAB>title`, so the follow-up
@@ -490,10 +500,11 @@ def main() -> int:
     )
     ap.add_argument(
         "--misses-file",
-        default="fetch_library_codes_misses.txt",
+        default=default_misses_file(),
         help="worklist file for the manual-research pass, written whenever a "
-        "book ends the pass with no LCC (default: "
-        "fetch_library_codes_misses.txt in the current directory)",
+        f"book ends the pass with no LCC (default: {default_misses_file()}, "
+        "beside this script; the documented invocation runs from the library "
+        "root and the worklist must not land inside the library)",
     )
     ap.add_argument("--sample", type=int, metavar="N", help="random sample of N books")
     ap.add_argument(

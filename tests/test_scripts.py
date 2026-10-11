@@ -652,6 +652,34 @@ class TestFetchMissesWorklist(unittest.TestCase):
             self.assertFalse(path.exists())
 
 
+class TestFetchMissesDefault(unittest.TestCase):
+    """Issue #7: the default worklist path must never be CWD-relative. The
+    documented invocation runs from the library root, so the old default
+    wrote fetch_library_codes_misses.txt INSIDE the library, where the tree
+    audit flags it as a stray. The default now sits beside the script."""
+
+    def test_default_is_absolute_and_beside_the_script(self):
+        path = pathlib.Path(fetch_library_codes.default_misses_file())
+        self.assertTrue(path.is_absolute())
+        self.assertEqual(
+            path.parent,
+            pathlib.Path(fetch_library_codes.__file__).resolve().parent,
+        )
+        self.assertEqual(path.name, "fetch_library_codes_misses.txt")
+
+    def test_default_is_independent_of_the_working_directory(self):
+        # chdir into a fake library root: the default must not follow.
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                path = pathlib.Path(fetch_library_codes.default_misses_file())
+            finally:
+                os.chdir(cwd)
+        self.assertNotEqual(path.parent, pathlib.Path(tmp))
+        self.assertNotIn(str(pathlib.Path(tmp)), str(path))
+
+
 class TestFetchWorkFallback(unittest.TestCase):
     """The title/author SRU fallback (--sru-fallback): the query form the
     September 2026 hand pass used to recover 15 of 17 ISBN misses, a cache
@@ -1277,6 +1305,142 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         self.assertNotIn("batch_duplicates", out[1])
         self.assertEqual(out[0]["batch_related"], ["/dl/deadfall.pdf"])
         self.assertEqual(out[1]["batch_related"], ["/dl/arcana.pdf"])
+
+    def test_filename_fallback_swapped_author_order_is_a_batch_duplicate(self):
+        # Issue #5 (the Stroustrup pair): two metadata-less z-lib rips of one
+        # book. ebook-meta reports the whole filename stem as the title and
+        # Author(s) "Unknown", so the compared stems carried the bracketed
+        # author segments in different orders and the screen passed silently.
+        # The parsed seeds (first paren group = author, text before it =
+        # title) with order-free token sets flag the pair.
+        files = [Path("/dl/design1.pdf"), Path("/dl/design2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "The Design and Evolution of C++ (Bjarne Stroustrup) "
+                    "(z-library.sk, Libgen, Z-Lib)",
+                    "author(s)": "Unknown",
+                },
+                {
+                    "title": "The design and evolution of C++ (Stroustrup, Bjarne) "
+                    "(z-library.sk, Libgen, Z-Lib)",
+                    "author(s)": "Unknown",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/design2.pdf"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/design1.pdf"])
+
+    def test_filename_fallback_never_crosses_authors(self):
+        # The token gate keeps different works by different authors apart
+        # even when the parsed titles agree: "Last, First" matches "First
+        # Last", "Alice Smith" does not match "Bob Jones".
+        files = [Path("/dl/math1.pdf"), Path("/dl/math2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "A History of Math (Alice Smith) (z-library.sk)",
+                    "author(s)": "Unknown",
+                },
+                {
+                    "title": "A history of math (Bob Jones) (z-library.sk)",
+                    "author(s)": "Unknown",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_related", rec)
+            self.assertNotIn("batch_volumes", rec)
+
+    def test_filename_fallback_ignores_records_with_real_metadata(self):
+        # One side carries a real author: the seed path is asymmetric (a
+        # genuine title is never rewritten), so the pair falls back to the
+        # raw stem comparison, unchanged.
+        files = [Path("/dl/real.epub"), Path("/dl/loose.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "A History of Math",
+                    "author(s)": "Alice Smith",
+                    "identifiers": "isbn:9780140445688",
+                },
+                {
+                    "title": "A History of Math (Alice Smith) (z-library.sk)",
+                    "author(s)": "Unknown",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_related", rec)
+
+    def test_filename_fallback_site_first_parens_do_not_over_match(self):
+        # The review case: a site marker as the FIRST paren group is not an
+        # author. Identical site groups make the author-token gate agree,
+        # but the whole-stem token gate still separates two different works
+        # whose real authors sit in a later group: the pair falls back to
+        # the raw stem comparison (today's behavior).
+        files = [Path("/dl/sf1.pdf"), Path("/dl/sf2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Star Fortune (z-library.sk) (Alice Smith)",
+                    "author(s)": "Unknown",
+                },
+                {
+                    "title": "star fortune (z-library.sk) (Bob Jones)",
+                    "author(s)": "Unknown",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_related", rec)
+
+    def test_filename_seed_parses_and_tokenizes(self):
+        seed = screen_duplicate._filename_seed(
+            {"title": "Foo (Stroustrup, Bjarne) (z-library.sk)", "authors": ["Unknown"]}
+        )
+        assert seed is not None
+        self.assertEqual(seed["title"], "Foo")
+        self.assertEqual(
+            seed["tokens"],
+            screen_duplicate._filename_seed(
+                {
+                    "title": "Foo (Bjarne Stroustrup) (z-library.sk)",
+                    "authors": ["Unknown"],
+                }
+            )["tokens"],
+        )
+
+    def test_filename_seed_refuses_real_metadata_and_parenless_stems(self):
+        self.assertIsNone(
+            screen_duplicate._filename_seed(
+                {"title": "Foo (Bar) (z-lib)", "authors": ["Alice Smith"]}
+            )
+        )
+        self.assertIsNone(
+            screen_duplicate._filename_seed(
+                {"title": "Author - Title", "authors": ["Unknown"]}
+            )
+        )
+        # An empty authors list is the other shape a stripped file takes.
+        self.assertIsNotNone(
+            screen_duplicate._filename_seed({"title": "Foo (Alice)", "authors": []})
+        )
 
 
 class TestStampPdfGuards(unittest.TestCase):

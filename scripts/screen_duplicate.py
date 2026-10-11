@@ -28,7 +28,15 @@ The 2026-09-21 waves added three verdict classes to that equality:
   series/store prefix can MASK a true duplicate ("Mothership: Wages of
   Sin" vs the bare "Wages of Sin" download) exactly as easily as it can
   join two distinct products ("Arcana Unleashed" vs "...: Deadfall"), so
-  the screen surfaces it and never auto-refuses.
+  the screen surfaces it and never auto-refuses;
+- when NEITHER file carries embedded metadata (ebook-meta falls back to
+  the raw filename stem as the title and Author(s) "Unknown"), the stem
+  is parsed instead: the first parenthesized group is the author segment,
+  the text before it the title, and the pair is judged on the parsed
+  titles plus an ORDER-FREE author token set ("Stroustrup, Bjarne" ==
+  "Bjarne Stroustrup"). The 2026-10-10 Stroustrup pair (issue #5) passed
+  silently because the author brackets sat inside the compared stems in
+  different orders; one side with real metadata never takes this path.
 
 Report-only: nothing is deleted or moved here. Removing a library duplicate
 needs Brandon's explicit OK in phase 3; loose-file removal is his too.
@@ -301,6 +309,43 @@ def normalize_author_brackets(author: str) -> str:
     return re.sub(r"\s*\[[^\]]*\]\s*", " ", author or "").strip()
 
 
+_FILENAME_PARENS = re.compile(r"^(.*?)\s*\(([^)]+)\)")
+
+
+def _filename_seed(rec: dict[str, object]) -> dict[str, object] | None:
+    """The title/author a filename-shaped record carries, when the read is
+    really a filename fallback.
+
+    For a file with no embedded metadata, ebook-meta reports the whole
+    filename stem as the title and Author(s) "Unknown" (verified live on
+    calibre 9.15). When BOTH records of a pair are in that state, the
+    within-batch screen compares the parsed seeds instead of the raw
+    stems: the first parenthesized group as the author segment, the text
+    before it as the title, and the author as an order-free token set so
+    "Last, First" matches "First Last" (issue #5). The gate additionally
+    requires the WHOLE stems' token sets to agree, so a marker the parse
+    mistook for an author (a site-first "(z-library.sk)" group, a
+    publisher bracket) cannot over-match two different works; pure
+    word-order differences keep matching. A record that could be real
+    metadata (any author other than the placeholder) returns None, so a
+    genuine title is never rewritten; a pair whose token sets disagree
+    falls through to the raw stem comparison, unchanged.
+    """
+    authors = rec.get("authors") or []
+    if authors and not all(str(a).strip().casefold() == "unknown" for a in authors):
+        return None
+    stem = str(rec.get("title") or "").strip()
+    m = _FILENAME_PARENS.match(stem)
+    if not m:
+        return None
+    seed_title, author_seg = m.group(1).strip(), m.group(2).strip()
+    tokens = frozenset(t for t in re.split(r"[^0-9a-z]+", _fold(author_seg)) if t)
+    stem_tokens = frozenset(t for t in re.split(r"[^0-9a-z]+", _fold(stem)) if t)
+    if not seed_title or not tokens:
+        return None
+    return {"title": seed_title, "tokens": tokens, "stem_tokens": stem_tokens}
+
+
 def _search_escape(value: str) -> str:
     """Quote a value for Calibre's search grammar, escaping inner quotes."""
     return '"' + value.replace('"', r"\"") + '"'
@@ -385,17 +430,32 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
         records.append(rec)
 
     titles = {str(r["file"]): r.get("title") or "" for r in records}
+    seeds = {str(r["file"]): _filename_seed(r) for r in records}
     for i, rec in enumerate(records):
         for other in records[i + 1 :]:
+            key_a, key_b = str(rec["file"]), str(other["file"])
             same_author = bool(
                 rec.get("authors")
                 and other.get("authors")
                 and normalize_author(rec["authors"][0])
                 == normalize_author(other["authors"][0])
             )
-            verdict = classify_titles(
-                titles[str(rec["file"])], titles[str(other["file"])]
-            )
+            seed_a, seed_b = seeds[key_a], seeds[key_b]
+            if (
+                seed_a
+                and seed_b
+                and seed_a["tokens"] == seed_b["tokens"]
+                and seed_a["stem_tokens"] == seed_b["stem_tokens"]
+            ):
+                # No embedded metadata on either side (issue #5): the parsed
+                # filename seeds are the evidence. The author token sets
+                # already agree; the parsed titles are judged on their own,
+                # free of the bracket segments that made the raw stems
+                # disagree ("Bjarne Stroustrup" vs "Stroustrup, Bjarne").
+                same_author = True
+                verdict = classify_titles(str(seed_a["title"]), str(seed_b["title"]))
+            else:
+                verdict = classify_titles(titles[key_a], titles[key_b])
             same_isbn = bool(rec.get("isbn")) and rec["isbn"] == other.get("isbn")
             if same_isbn or (same_author and verdict == "duplicate"):
                 rec.setdefault("batch_duplicates", []).append(other["file"])
