@@ -5,6 +5,24 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.62.1 onward, the battery-degrade fix)
+
+- **check_pdf's `_run` never raises and never hides a timeout.** It
+  decodes with `errors="replace"` (the crash that actually killed the
+  2026-10-11 battery: `text=True` + strict decode turned qpdf's
+  non-UTF-8 warning echo into an unhandled UnicodeDecodeError, exit 1,
+  no JSON report, and `_pdf_battery`'s rc-in-(0,1) seam then died on
+  the empty temp file) and returns a `_TimedOut` sentinel (returncode
+  None, empty outputs) when a subprocess blows its budget: None still
+  means no-binary/OSError, `_TimedOut` means out of time. Only
+  check_file's `qpdf --check` caller names the cause (verdict
+  "timeout" + advisory `qpdf_timeout` finding); every other caller
+  treats the sentinel exactly like None. `qpdf_timeout` sits outside
+  `_STRUCTURAL_KINDS` on purpose (environmental trigger, not file
+  damage), so the exit contract is unchanged. The sibling `text=True`
+  seams (run.py's `_run`, integrate.py, the other scripts) still carry
+  the strict-decode hole; raised, not fixed in 3.62.1.
+
 ## Programmer-facing contract notes (3.62.0 onward, the three-issue fixes)
 
 - **The screen's filename fallback feeds classify_titles parsed seeds.**

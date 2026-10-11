@@ -1,5 +1,38 @@
 # CalibreQuarry Patch Notes
 
+# 3.62.1 (2026-10-11)
+
+### check_pdf: a hung battery degrades per file (issue #8)
+
+On a 268-file phase-1 run, the PDF battery died on one file (Building
+Git, 733 pages) and took the phase-1 verb with it: `check_pdf report
+unreadable: Expecting value: line 1 column 1`. Two crash modes shared
+the one seam, `_run`.
+
+- **The killer was the decode, not the timeout.** `_run` read tool
+  output with `text=True` and no `errors=`, so any non-UTF-8 byte in a
+  tool's output raised `UnicodeDecodeError` inside `communicate()`:
+  qpdf echoes a PDF's raw bytes into its warning context (the live
+  file's DocBook/FOP metadata and a damaged object stream supplied
+  them), and an unhandled exception exits 1 with the `--json` report
+  unwritten. The phase-1 verb's battery seam reads child rc 1 as
+  "findings, report written", so it died on the empty temp file.
+  `_run` now decodes lossily (`errors='replace'`); the consumers
+  (detail-line truncation, presence checks, int parses) do not care
+  about replacement characters.
+- **A timeout no longer hides.** A `qpdf --check` that blows its
+  120 s budget was caught and swallowed as a bare None, reported
+  "unavailable", and the cause vanished (run alone, the live file
+  checks in 0.5 s with benign warnings; the trigger was battery
+  contention, environmental). It now names itself: the `qpdf_check`
+  verdict is "timeout" with an advisory `qpdf_timeout` finding,
+  deliberately outside the structural count, so the exit contract
+  (0 clean / 1 findings / 2 setup error) is unchanged. The structural
+  kinds moved to the `_STRUCTURAL_KINDS` constant to make that
+  pinable. The other tool seams (page counts, fonts, text samples,
+  images) read the `_TimedOut` sentinel as unavailable, unchanged;
+  DJVU keeps its djvused-only path.
+
 # 3.62.0 (2026-10-10)
 
 ### The within-batch screen reads filename-shaped records (issue #5)
