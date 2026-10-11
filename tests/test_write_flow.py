@@ -687,5 +687,87 @@ class TestSetAuthorsPipedRowParity(_TempDBCase):
             con.close()
 
 
+@unittest.skipUnless(
+    _cquarry_at_least(1, 27, 0),
+    "needs cquarry >= 1.27.0 (the author display-form resolution)",
+)
+class TestRenameEntityDisplayFormParity(_TempDBCase):
+    """The cquarry 1.27.0 adoption (the author display-form parity wave,
+    the three issue-#5 follow-ups): --rename-entity is the one frontend
+    consumer of the wave's verbs, and its author lookup now resolves the
+    display comma form of a piped-stored row (1.26 and earlier answered
+    no-match). Raw-first resolution is untouched, so addressing a row by
+    its stored piped spelling keeps working; that is deliberate, the
+    other name-taking verbs rely on it."""
+
+    def _seed_piped_artifact(self):
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "UPDATE authors SET name = 'A| Author', sort = 'A, Author' WHERE id = 1"
+        )
+        con.commit()
+        con.close()
+
+    def test_display_comma_name_renames_the_piped_row(self):
+        self._seed_piped_artifact()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--rename-entity",
+                    "authors",
+                    "A, Author",
+                    "B, Author",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0, out.getvalue() + err.getvalue())
+        con = sqlite3.connect(self.db_path)
+        try:
+            # One row, renamed; its hand-tuned sort survives; both books
+            # still ride it.
+            self.assertEqual(
+                con.execute("SELECT id, name, sort FROM authors").fetchall(),
+                [(1, "B, Author", "A, Author")],
+            )
+            self.assertEqual(
+                con.execute(
+                    "SELECT book, author FROM books_authors_link ORDER BY book"
+                ).fetchall(),
+                [(1, 1), (2, 1)],
+            )
+        finally:
+            con.close()
+
+    def test_stored_piped_spelling_still_addresses_the_row(self):
+        self._seed_piped_artifact()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--rename-entity",
+                    "authors",
+                    "A| Author",
+                    "B, Author",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 0, out.getvalue() + err.getvalue())
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                [r[0] for r in con.execute("SELECT name FROM authors")],
+                ["B, Author"],
+            )
+            self.assertEqual(
+                con.execute("SELECT COUNT(*) FROM books_authors_link").fetchone()[0],
+                2,
+            )
+        finally:
+            con.close()
+
+
 if __name__ == "__main__":
     unittest.main()

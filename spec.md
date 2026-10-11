@@ -1,8 +1,8 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.63.1  
+**Version:** 3.63.2  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry` (>= 1.26.3), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.27.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -22,8 +22,9 @@ The CLI/TUI frontend is decoupled from the database and search logic:
 
 **`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package.
 
-The floor is `cquarry >= 1.26.3`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
+The floor is `cquarry >= 1.27.0`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
 
+- **1.27.0**: the author display-form parity wave (the three issue-#5 follow-ups): `rename_entity` resolves author names through the display comma form of a piped-stored row (raw first, so stored-spelling addressing keeps working) -- `--rename-entity authors` is this frontend's one consumer of the wave; `set_authors`/`add_book` display-normalize pipe-bearing inputs; piped-stored authors lay out under display-form directories on their next write. The 1.26.3-era caveat that `set_author_sort_name` resolves stored spellings only is retired here.
 - **1.26.3**: the piped-author resolution (`set_authors`/`add_book` resolve incoming names through both spellings, raw first then the piped form the create path stores), so comma-bearing bylines reuse a piped artifact row instead of dying on `UNIQUE(authors.name)`; no frontend code consumed it beyond the floor (issue #12; `TestSetAuthorsPipedRowParity` pins the seam).
 - **1.24.0**: `CalibreDB.get_dirtied_formats()`, the FTS sidecar's extraction queue read (retires modes/fts.py's raw sidecar read, the frontend tier's one recorded raw-SQL exception, and feeds `run fts-index`); the typed `set_preference` writer plus `saved_search_add`/`saved_search_delete`/`saved_search_rename` behind `--saved-search-*`; the FTS queue verbs and `maintain()` ride the floor without frontend consumers yet.
 - **1.22.0**: `CalibreDB.precedent_tags()`, the phase-3 prompt's tag-by-precedent read (promoted from run.py).

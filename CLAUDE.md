@@ -5,6 +5,25 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.2 onward, the cquarry 1.27.0 floor)
+
+- **The floor is 1.27.0, and the 3.63.1 byline-repair caveat is
+  retired.** The 3.63.1 note below says a reused piped row's sort
+  repair takes the piped form, never the display comma name; that was
+  true of 1.26.3 exactly and is WRONG on 1.27.0 (the display-form
+  parity wave): `set_author_sort_name`, `rename_entity` (old-name
+  lookup and merge detection), `set_link_map(kind="authors")`, and
+  `remove_entity_everywhere` all resolve the display comma form now.
+  The frontend's one consumer of the wave is `--rename-entity
+  authors`, and `TestRenameEntityDisplayFormParity` (version-gated)
+  pins both addressing directions at the verb: the display comma form
+  reaches a piped-stored row, and the raw stored spelling still wins
+  first, deliberately. Lane details with no frontend seam:
+  `set_authors`/`add_book` display-normalize pipe-bearing inputs, and
+  piped-stored authors' on-disk layout takes the display form on each
+  book's next write (stored paths match until then, so the tree audit
+  and reconcile are unaffected).
+
 ## Programmer-facing contract notes (3.63.1 onward, the cquarry 1.26.3 floor)
 
 - **The floor is 1.26.3 for the piped-author resolution.** Every author

@@ -1,5 +1,41 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.2 (2026-10-11)
+
+### The cquarry 1.27.0 floor (the author display-form parity wave)
+
+A dependency-floor adoption; no frontend behavior changes, two seam
+tests. cquarry 1.27.0 (also 2026-10-11) shipped the three issue-#5
+follow-ups as one wave, completing the author display-form parity
+story upstream started with 1.26.3: every author lookup keys by the
+display form, the way Calibre's own AuthorsTable behaves.
+
+- **Floor: `cquarry>=1.27.0`.** pyproject, the spec Dependencies line,
+  and spec section 2.1's prose floor sentence and per-bump list all
+  move together.
+- **The one frontend consumer is `--rename-entity authors`.** Its
+  author lookup (cquarry's `rename_entity`: old-name resolution AND
+  merge detection) now resolves the display comma form of a
+  piped-stored row; 1.26 and earlier answered no-match. Raw-first
+  resolution is untouched, so addressing a row by its stored piped
+  spelling keeps working, deliberately. `TestRenameEntityDisplayFormParity`
+  (version-gated) pins both directions at the verb.
+- **The 1.26.3-era byline-repair caveat is retired.** "Repairing a
+  reused piped row's sort takes the piped form, never the display
+  comma name" described 1.26.3 exactly and is wrong on 1.27.0:
+  `set_author_sort_name` resolves the display form too (along with
+  `rename_entity`'s merge detection, `set_link_map(kind="authors")`,
+  and `remove_entity_everywhere`). The display-form docs in the 3.63.1
+  contract note and the phase-1 skill ledger are superseded by this
+  release.
+- **Also in the wave, no frontend seam:** `set_authors`/`add_book`
+  display-normalize pipe-bearing inputs before resolution (a
+  pipe-bearing creator string now behaves exactly like its comma
+  form), and piped-stored authors' directories and format stems take
+  the display form on each book's next write (pre-1.27 underscore
+  layouts linger until then; the read side matches stored paths, so
+  the tree audit and reconcile are unaffected).
+
 # 3.63.1 (2026-10-11)
 
 ### The cquarry 1.26.3 floor (issue #12)
