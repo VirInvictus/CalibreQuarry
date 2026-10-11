@@ -22,8 +22,9 @@ The CLI/TUI frontend is decoupled from the database and search logic:
 
 **`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package.
 
-The floor is `cquarry >= 1.24.0`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, and 1.21). A test pins the floor against `pyproject.toml`.
+The floor is `cquarry >= 1.26.3`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
 
+- **1.26.3**: the piped-author resolution (`set_authors`/`add_book` resolve incoming names through both spellings, raw first then the piped form the create path stores), so comma-bearing bylines reuse a piped artifact row instead of dying on `UNIQUE(authors.name)`; no frontend code consumed it beyond the floor (issue #12; `TestSetAuthorsPipedRowParity` pins the seam).
 - **1.24.0**: `CalibreDB.get_dirtied_formats()`, the FTS sidecar's extraction queue read (retires modes/fts.py's raw sidecar read, the frontend tier's one recorded raw-SQL exception, and feeds `run fts-index`); the typed `set_preference` writer plus `saved_search_add`/`saved_search_delete`/`saved_search_rename` behind `--saved-search-*`; the FTS queue verbs and `maintain()` ride the floor without frontend consumers yet.
 - **1.22.0**: `CalibreDB.precedent_tags()`, the phase-3 prompt's tag-by-precedent read (promoted from run.py).
 - **1.21.0**: the metadata-quality predicates `--audit` renders (`find_invalid_uuids`, `find_sentinel_pubdates`, `find_bad_language_codes`), plus the write-path fixes the 3.41 run-verb batch rides on.
