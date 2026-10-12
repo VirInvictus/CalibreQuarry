@@ -1,5 +1,76 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.3 (2026-10-11)
+
+### The identifier-set convergence pass (the #11 reopen: the writer side)
+
+The 3.63.0 read side was right and ships unchanged, but the reopen
+(2026-10-11 evening wave, 114 books, 5 books affected) proved the writer
+never converges: `calibredb embed_metadata` does NOT regenerate the OPF
+wholesale. Verified live on calibre 9.15/9.16 and against calibre's own
+`opf2.py`, the embed writer preserves the package's unique-identifier
+`dc:identifier` element verbatim (its text is only reused when the
+element's own scheme names a database type) and never removes
+scheme-less identifier elements, so a deleted type in either shape
+survived every re-embed, the read-back kept flagging identifiers, and
+repeated `--apply` passes oscillated instead of converging. The evening
+wave needed a hand surgical OPF edit on all five books; this release
+makes the tool do it.
+
+- **New post-embed pass: `normalize_epub_identifiers`** (in
+  `cquarry_cli/epubdates.py`, the dc:date pass's module, sharing the
+  same locate-OPF/scope-to-metadata/whole-archive-rewrite machinery
+  now extracted into `_rewrite_opf`). After every EPUB embed,
+  reconcile `--apply` and `run flush` rewrite the OPF's identifier set
+  to exactly the database's, judged by the same rule the read-back
+  diff applies: elements matching a database entry stay (first match
+  wins, later duplicates go), the file-only extras (`uri`, `ean`,
+  single-sourced as `FILE_ONLY_IDENTIFIERS` in epubdates) and the
+  writer's own `calibre`/`uuid` schemes stay, everything else goes,
+  missing database entries are inserted after the last identifier, and
+  a stale package unique-identifier element is rewritten IN PLACE
+  (id attribute and position kept; scheme and text become the book
+  uuid under the writer's own `calibre` scheme, which the read seam
+  never surfaces) so the package reference never dangles.
+- **Scheme-less elements never satisfy an entry.** Calibre's reader
+  runs scheme-less `urn:isbn:` values through `check_isbn`
+  (dash-stripped, check-digit validated) while the diff compares raw
+  stored values, so a kept scheme-less satisfier could read back a
+  different value than it stores and never converge; they are removed
+  (the embed writer itself never removes them, which is half the
+  reopen) and the entry is inserted fresh in scheme'd form, which
+  round-trips raw. A dashed curated isbn is carried by a dashed
+  element for the same reason.
+- **Same rails as the dc:date pass.** A file the surgery cannot safely
+  rewrite (no metadata block, no uuid for a package rewrite, no
+  namespace binding where the surgery must name a new element, no
+  anchor for an insertion) is a named failure that fails the run on
+  both streams; already-canonical files are byte-identical no-ops (no
+  zip rewrite); the read-back re-diff stays the arbiter. `run flush`
+  reports `epub_identifiers_normalized` in JSON and a text clause.
+  `db_record` now selects `books.uuid` to feed the package rewrite.
+- **Code-reviewer catches fixed pre-commit:** a database row whose
+  TYPE is `calibre`/`uuid` (a legal identifiers-table shape colliding
+  with the writer's own scheme) would have grown the file by one
+  duplicate on every pass; it satisfies like any other entry now. The
+  span regex runs self-closing-first so a self-closing element cannot
+  swallow the next paired one.
+- **Tests:** 26 new (surgery fixtures for every live shape, zip-level
+  order/no-rewrite pins, re-export identity pins, flush seam + JSON +
+  failure rails, a diff-interplay pin, and a live class reading the
+  pass output back through the real ebook-meta, CI-skipped). Suite
+  996 green; live-drilled end to end on a scratch calibredb library in
+  a `CALIBRE_CONFIG_DIRECTORY` sandbox: the reopened shape converges
+  on the first `--apply`, the second reads in-sync, and a full
+  add-embed-clear-apply cycle converges both directions.
+- **Known residue, recorded not fixed:** a database row whose type the
+  read seam cannot surface (`calibre`, `uuid`) reads as permanent
+  identifier drift, because no writer can put a value the reader never
+  reports; the run names it as a residual instead of passing silently.
+  AZW3/MOBI identifiers are unchanged: their embed writers are not the
+  OPF, and any non-convergence there surfaces through the same
+  residual mechanism.
+
 # 3.63.2 (2026-10-11)
 
 ### The cquarry 1.27.0 floor (the author display-form parity wave)

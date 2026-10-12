@@ -5,6 +5,39 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.3 onward, the identifier-set convergence)
+
+- **The embed writer does NOT regenerate the OPF's identifier set, and
+  the post-embed pass is what converges deletions.** The 3.63.0 note
+  below says "embed_metadata regenerates the OPF wholesale"; that was
+  wrong and is superseded (issue #11's reopen, verified live on
+  calibre 9.15/9.16 against `opf2.py`'s `set_identifiers`): the writer
+  preserves the package's unique-identifier `dc:identifier` element
+  verbatim (reusing its text only when the element's own scheme names
+  a DB type) and never removes scheme-less elements, so a deleted type
+  in either shape survived every re-embed and `--apply` oscillated.
+  `normalize_epub_identifiers` (in `epubdates.py`, the dc:date pass's
+  module; the zip rewrite is now the shared `_rewrite_opf`) runs after
+  every EPUB embed in reconcile `--apply` AND `run flush`, and forces
+  the file's identifier set to the DB's by the same rule `diff_fields`
+  applies: matches kept (first wins), `FILE_ONLY_IDENTIFIERS` and the
+  writer's `calibre`/`uuid` schemes kept (a DB row typed `calibre`/
+  `uuid` is satisfied like any other entry, never re-inserted),
+  everything else removed, unsatisfied DB entries inserted after the
+  last identifier, and a stale package slot rewritten in place to
+  `calibre:<books.uuid>` (id attribute and position kept; the
+  reference never dangles). Scheme-less elements NEVER satisfy an
+  entry: the reader check_isbn-normalizes scheme-less `urn:isbn:`
+  values, so they are removed and the entry inserted scheme'd (raw
+  round-trip). Refusals are scoped to what the surgery must name
+  (insertions need both bindings; removals/rewrites proceed without),
+  already-canonical files are byte-identical no-ops, and the read-back
+  re-diff stays the arbiter. `db_record` selects `books.uuid`; flush
+  JSON carries `epub_identifiers_normalized`. A DB row typed outside
+  the reader's surface (`calibre`, `uuid`) reads as permanent drift:
+  no writer can emit a value the reader never reports; the residual
+  names it.
+
 ## Programmer-facing contract notes (3.63.2 onward, the cquarry 1.27.0 floor)
 
 - **The floor is 1.27.0, and the 3.63.1 byline-repair caveat is
