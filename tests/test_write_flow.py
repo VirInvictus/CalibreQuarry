@@ -769,5 +769,72 @@ class TestRenameEntityDisplayFormParity(_TempDBCase):
             con.close()
 
 
+@unittest.skipUnless(
+    _cquarry_at_least(1, 28, 0),
+    "needs cquarry >= 1.28.0 (the entity case-change write)",
+)
+class TestSetPublisherCaseChangeParity(_TempDBCase):
+    """The cquarry 1.28.0 adoption (the entity case-change wave, cquarry
+    issue #6): a name matching an existing entity row only by CASE is a
+    real write now -- the shared row re-cases to the requested spelling
+    (upstream change_case), every linked book is touched + queued for OPF
+    resync, and the setter returns True. On 1.27 and earlier the same
+    write resolved NOCASE and reported already-so, changing nothing, which
+    is what left the canonical-form linter's findings unfixable through
+    the verb (all three live occurrences came through these write verbs).
+    --rename-entity stays the tool for PRE-EXISTING case-duplicate rows;
+    cquarry no longer creates them and deliberately does not heal them."""
+
+    def _set_publisher(self, book, value):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--set-publisher", str(book), value, "--db", self.db_path])
+        return rc, out.getvalue()
+
+    def test_case_variant_write_recases_the_shared_row(self):
+        rc, out = self._set_publisher(1, "Orbit")
+        self.assertEqual(rc, 0, out)
+        rc, out = self._set_publisher(1, "ORBIT")
+        self.assertEqual(rc, 0, out)
+        con = sqlite3.connect(self.db_path)
+        try:
+            # The shared row re-cased IN PLACE: exactly one row, the
+            # requested spelling. On 1.27 this kept the old spelling and
+            # read as already-so.
+            self.assertEqual(
+                con.execute("SELECT name FROM publishers").fetchall(),
+                [("ORBIT",)],
+            )
+        finally:
+            con.close()
+
+    def test_recase_propagates_to_every_book_sharing_the_row(self):
+        self._set_publisher(1, "Daw Books")
+        self._set_publisher(2, "Daw Books")
+        rc, _ = self._set_publisher(2, "DAW Books")
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        try:
+            # Both books share the one row; the re-case is theirs too (the
+            # spelling propagating is why a re-case dirties more books
+            # than the calling one).
+            self.assertEqual(
+                [
+                    r[0]
+                    for r in con.execute(
+                        "SELECT p.name FROM books_publishers_link l "
+                        "JOIN publishers p ON p.id=l.publisher "
+                        "WHERE l.book IN (1, 2) ORDER BY l.book"
+                    )
+                ],
+                ["DAW Books", "DAW Books"],
+            )
+            self.assertEqual(
+                con.execute("SELECT COUNT(*) FROM publishers").fetchone()[0], 1
+            )
+        finally:
+            con.close()
+
+
 if __name__ == "__main__":
     unittest.main()

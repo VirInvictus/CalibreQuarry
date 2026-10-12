@@ -5,6 +5,25 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.4 onward, the cquarry 1.28.0 floor)
+
+- **The floor is 1.28.0, and case-variant entity writes consolidate.**
+  A name matching an existing entity row only by CASE is a real write
+  now (upstream `change_case`, the `allow_case_change=True` default):
+  the shared row re-cases, every linked book is touched + queued for
+  OPF resync, and the setter returns changed=True. Consequences: batch
+  summaries count a re-case as "applied" where 1.27 read "already-so",
+  and a re-case dirties MORE books than the calling one (the spelling
+  propagating). Covered: `set_publisher`, `set_series`, `set_authors`,
+  `add_tag`, and the text-family custom-column writes; authors keep
+  hand-tuned `authors.sort` and apply upstream's strcmp rule to each
+  linked book's `author_sort`. `add_tag` stops INSERTing duplicate
+  case-variant rows; `remove_tag` gained a NOCASE fallback.
+  `--rename-entity` remains the tool ONLY for PRE-EXISTING
+  case-duplicate rows: cquarry no longer creates them and deliberately
+  does not heal them. `TestSetPublisherCaseChangeParity`
+  (version-gated) pins the seam at the verb.
+
 ## Programmer-facing contract notes (3.63.3 onward, the identifier-set convergence)
 
 - **The embed writer does NOT regenerate the OPF's identifier set, and

@@ -1,5 +1,43 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.4 (2026-10-12)
+
+### The cquarry 1.28.0 floor (the entity case-change wave)
+
+A dependency-floor adoption in the 3.63.1/3.63.2 pattern; no frontend
+code changes, one version-gated seam test. cquarry 1.28.0 (2026-10-11,
+cquarry#6) fixed the silent case-variant no-op that motivated this
+repo's canonical-form linter in the first place: `set_publisher(id,
+"DAW Books")` on a `Daw Books` row used to resolve NOCASE and report
+already-so, changing nothing. All three live occurrences (ABRAMS/Abrams
+2026-10-04, Daw/DAW and ROC/Roc 2026-10-11 at 40 books) came through
+this CLI's write verbs, and on the 1.27.0 floor they still ran the old
+semantics. The bump is how the fix reaches the workflow.
+
+- **Floor: `cquarry>=1.28.0`.** pyproject, the spec Dependencies line,
+  and spec 2.1's prose floor sentence + per-bump list all move
+  together (every carrier version-sync-pinned since 3.63.2).
+- **A case-variant write consolidates now.** A name matching an
+  existing entity row only by case re-cases the shared row (upstream
+  `change_case`), touches and queues every linked book for OPF resync,
+  and the setter returns True, so the linter's canonical-form finding
+  clears through the write itself. Reporting shifts, correctly: batch
+  summaries count a re-case as "applied" where it previously read
+  "already-so", and a re-case dirties MORE books than the calling one
+  (that is the spelling propagating). `add_tag` stops INSERTing
+  duplicate case-variant rows; `remove_tag` gained a NOCASE fallback.
+  `--rename-entity` remains the tool only for PRE-EXISTING
+  case-duplicate rows: cquarry no longer creates them and deliberately
+  does not heal them.
+- **`TestSetPublisherCaseChangeParity`** (version-gated, skipped under
+  cquarry < 1.28.0) pins the seam through the CLI verb: a case-variant
+  `--set-publisher` re-cases the shared row in place (exactly one row,
+  no case-duplicate created), the re-case propagates to every book
+  sharing the row, and a repeat write stays stable. Full suite 998
+  green against the 1.28.0 user-site install. CI installs cquarry from
+  main, so main was already green under the new semantics; the bump is
+  a behavior guarantee, not breakage repair.
+
 # 3.63.3 (2026-10-11)
 
 ### The identifier-set convergence pass (the #11 reopen: the writer side)
