@@ -443,13 +443,12 @@ class TestCalibredbSeams(unittest.TestCase):
         self.tmpdir = Path(tempfile.mkdtemp(prefix="cquarry_int3_"))
         self.addCleanup(_rm, self.tmpdir)
         self.db_path = _build(self.tmpdir)
-        # The fixture EPUBs are fake bytes; flush's dc:date pass is the
-        # caller's concern here, not this seam test's.
-        norm_p = mock.patch(
-            "cquarry_cli.integrate.normalize_epub_dates", return_value=True
-        )
-        self.addCleanup(norm_p.stop)
-        norm_p.start()
+        # The fixture EPUBs are fake bytes; flush's dc:date and identifier
+        # passes are the caller's concern here, not this seam test's.
+        for name in ("normalize_epub_dates", "normalize_epub_identifiers"):
+            p = mock.patch(f"cquarry_cli.integrate.{name}", return_value=True)
+            self.addCleanup(p.stop)
+            p.start()
 
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()
@@ -770,14 +769,17 @@ class TestFlushIdTargets(unittest.TestCase):
         self.db_path = _build(self.tmpdir)
         self.backups = Path(tempfile.mkdtemp(prefix="cquarry_flush_bak_"))
         self.addCleanup(_rm, self.backups)
-        # The apply path ends with the dc:date normalization on real EPUBs;
-        # the fixture's are fake bytes, so every test here gets the seam
-        # mocked green (the normalization tests below assert against it).
-        norm_p = mock.patch(
+        # The apply path ends with the dc:date and identifier
+        # normalizations on real EPUBs; the fixture's are fake bytes, so
+        # every test here gets both seams mocked green (the normalization
+        # tests below assert against them).
+        self.norm = mock.patch(
             "cquarry_cli.integrate.normalize_epub_dates", return_value=True
-        )
-        self.norm = norm_p.start()
-        self.addCleanup(norm_p.stop)
+        ).start()
+        self.idents = mock.patch(
+            "cquarry_cli.integrate.normalize_epub_identifiers", return_value=True
+        ).start()
+        self.addCleanup(mock.patch.stopall)
 
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()
@@ -1041,6 +1043,94 @@ class TestFlushIdTargets(unittest.TestCase):
         self.assertEqual(code, 0, out)
         payload = json.loads(out)
         self.assertEqual(payload["results"]["epub_dates_normalized"], 1)
+
+    def test_apply_normalizes_epub_identifiers(self):
+        # Issue #11's reopen: the identifier pass rides the same flush seam
+        # with the book's curated identifier dict and its uuid (the uuid
+        # feeds the stale unique-identifier rewrite in the shared pass).
+        self._dirty(1, 3)  # both EPUB books; book 2 stays untouched
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch(
+                "subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        names = sorted(c.args[0].name for c in self.idents.call_args_list)
+        self.assertEqual(names, ["Book1.epub", "Book3.epub"])
+        for c in self.idents.call_args_list:
+            self.assertIsInstance(c.args[1], dict)
+            self.assertTrue(c.args[2])
+        self.assertIn("identifiers normalized in 2 EPUB file(s)", out)
+
+    def test_apply_json_carries_epub_identifiers_normalized(self):
+        self._dirty(1)
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch(
+                "subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--format",
+                "json",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0, out)
+        payload = json.loads(out)
+        self.assertEqual(payload["results"]["epub_identifiers_normalized"], 1)
+
+    def test_apply_identifier_normalization_failure_fails_flush(self):
+        self._dirty(1)
+        with (
+            mock.patch("cquarry_cli.integrate._calibre_running", return_value=False),
+            mock.patch(
+                "cquarry_cli.integrate.shutil.which", return_value="/usr/bin/calibredb"
+            ),
+            mock.patch(
+                "subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ),
+            mock.patch(
+                "cquarry_cli.integrate.normalize_epub_identifiers",
+                return_value=False,
+            ),
+        ):
+            code, out, err = self.run_cli(
+                "run",
+                "flush",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 1, out)
+        self.assertIn("identifier normalization failed", err)
+        self.assertIn("Book1.epub", err)
 
 
 class TestBackfillHardening(unittest.TestCase):

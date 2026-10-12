@@ -411,7 +411,7 @@ class TestVerifyWiring(unittest.TestCase):
         (book_dir / f"The Hobbit.{fmt.lower()}").write_bytes(b"book")
         return root
 
-    def _run_main(self, tmp, read_backs, normalize_result=True):
+    def _run_main(self, tmp, read_backs, normalize_result=True, idents_result=True):
         root = self._library(tmp)
         argv = [
             "reconcile_file_metadata.py",
@@ -428,12 +428,15 @@ class TestVerifyWiring(unittest.TestCase):
             mock.patch.object(
                 rfm, "normalize_epub_dates", return_value=normalize_result
             ) as norm,
+            mock.patch.object(
+                rfm, "normalize_epub_identifiers", return_value=idents_result
+            ) as idents,
             mock.patch.object(rfm, "calibre_running", return_value=False),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
             rc = rfm.main()
-        return rc, out.getvalue(), embed.call_count, norm, err.getvalue()
+        return rc, out.getvalue(), embed.call_count, norm, idents, err.getvalue()
 
     def test_in_sync_read_back_is_done(self):
         # First read (the drift scan) sees the old date; the post-embed
@@ -441,19 +444,33 @@ class TestVerifyWiring(unittest.TestCase):
         drifted = file_meta(published="2010-10-25")
         fixed = file_meta()
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds, norm, err = self._run_main(tmp, [drifted, fixed])
+            rc, out, embeds, norm, idents, err = self._run_main(tmp, [drifted, fixed])
         self.assertEqual(rc, 0, out + err)
         self.assertIn("DONE", out)
         self.assertIn("verified by read-back", out)
         self.assertEqual(embeds, 1)
         norm.assert_called_once()
+        idents.assert_called_once()
+
+    def test_identifier_pass_targets_the_db_identifier_set(self):
+        # The identifier pass rides the same post-embed seam with the
+        # book's curated identifier dict and its uuid (the uuid feeds the
+        # stale unique-identifier rewrite; see TestEpubIdentifierNormalization).
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, idents, err = self._run_main(tmp, [drifted, file_meta()])
+        self.assertEqual(rc, 0, out + err)
+        args = idents.call_args.args
+        self.assertEqual(args[0].name, "The Hobbit.epub")
+        self.assertEqual(args[1], {"isbn": "9780000000001"})
+        self.assertEqual(args[2], "u1")
 
     def test_still_drifted_read_back_is_a_residual_and_fails(self):
         # The #9177 shape: embed_metadata exits 0, the EPUB keeps its own
         # dc:date. The read-back catches it; the run fails with a RESIDUAL.
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds, norm, err = self._run_main(
+            rc, out, embeds, norm, idents, err = self._run_main(
                 tmp, [drifted, file_meta(published="2010-10-25")]
             )
         self.assertEqual(rc, 1, out + err)
@@ -468,7 +485,9 @@ class TestVerifyWiring(unittest.TestCase):
         # why it is not date-only).
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds, norm, err = self._run_main(tmp, [drifted, file_meta()])
+            rc, out, embeds, norm, idents, err = self._run_main(
+                tmp, [drifted, file_meta()]
+            )
         self.assertEqual(rc, 0, out + err)
         args = norm.call_args.args
         self.assertEqual(args[0].name, "The Hobbit.epub")
@@ -479,7 +498,7 @@ class TestVerifyWiring(unittest.TestCase):
         # silent pass-through to the read-back.
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds, norm, err = self._run_main(
+            rc, out, embeds, norm, idents, err = self._run_main(
                 tmp, [drifted, file_meta()], normalize_result=False
             )
         self.assertEqual(rc, 1, out + err)
@@ -493,13 +512,28 @@ class TestVerifyWiring(unittest.TestCase):
         # the count and the book id in the summary's reach.
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds, norm, err = self._run_main(
+            rc, out, embeds, norm, idents, err = self._run_main(
                 tmp, [drifted, file_meta()], normalize_result=False
             )
         self.assertEqual(rc, 1, out + err)
         self.assertIn("FAILURES (1)", out)
         self.assertIn("#1 [EPUB] The Hobbit.epub: dc:date normalization failed", out)
         self.assertIn("COMPLETED WITH ERRORS: 1 failed operation(s)", out)
+
+    def test_failed_identifier_normalization_fails_the_run(self):
+        # Issue #11's reopen: the identifier pass is on the same contract as
+        # the dc:date pass — an OPF it cannot rewrite is a named failure on
+        # both streams, never a silent pass-through to the read-back.
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, _, err = self._run_main(
+                tmp, [drifted, file_meta()], idents_result=False
+            )
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("identifier normalization failed", err)
+        self.assertIn("The Hobbit.epub", err)
+        self.assertIn("FAILURES (1)", out)
+        self.assertIn("#1 [EPUB] The Hobbit.epub: identifier normalization failed", out)
 
     def test_pdf_failure_reaches_a_stdout_failures_block(self):
         # Issue #6 again, through the exiftool seam: a failed write must
@@ -592,6 +626,10 @@ class TestEpubDateNormalization(unittest.TestCase):
         self.assertIs(rfm.norm_date, epd.norm_date)
         self.assertIs(rfm.canonical_date_target, epd.canonical_date_target)
         self.assertIs(rfm.normalize_epub_dates, epd.normalize_epub_dates)
+        self.assertIs(rfm.normalize_epub_identifiers, epd.normalize_epub_identifiers)
+        # The two-directional diff and the identifier pass must exempt the
+        # same file-side types, or one of them lies.
+        self.assertIs(rfm.FILE_ONLY_IDENTIFIERS, epd.FILE_ONLY_IDENTIFIERS)
 
     LIVE_OPF = (
         "<?xml version='1.0' encoding='utf-8'?>\n"
@@ -759,6 +797,407 @@ class TestEpubDateNormalization(unittest.TestCase):
             self.assertFalse(epd.normalize_epub_dates(path, "2023-09-28"))
 
 
+class TestEpubIdentifierNormalization(unittest.TestCase):
+    """The post-embed identifier pass (issue #11's reopen). The 3.63.0 read
+    side was right — a file-side identifier type the DB lacks IS drift — but
+    the writer does not converge: calibre's embed writer preserves the
+    package's unique-identifier dc:identifier element VERBATIM (only its
+    text is reused, and only when the element's own scheme names a database
+    type) and never removes scheme-less elements, so a deleted type in
+    either shape survives every re-embed and the read-back oscillates. The
+    pass (cquarry_cli.epubdates, shared with run flush) rewrites the OPF's
+    identifier set to the database's by the same rule the diff applies.
+    Fixtures model the live drill shapes verified on calibre 9.16."""
+
+    UUID = "11111111-2222-3333-4444-555555555555"
+    DB_IDS = {"isbn": "9780000000002"}
+
+    # The exact post-embed shape the drill produced: the DB deleted asin,
+    # the embed kept the stale package element, kept the scheme-less
+    # urn:isbn element, and appended calibre + ISBN elements.
+    REOPEN_OPF = (
+        "<?xml version='1.0'  encoding='UTF-8'?>\n"
+        '<package xmlns="http://www.idpf.org/2007/opf" version="2.0" '
+        'unique-identifier="BookId">\n'
+        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:opf="http://www.idpf.org/2007/opf">\n'
+        "    <dc:title>The Reopened Book</dc:title>\n"
+        '    <dc:creator opf:role="aut" opf:file-as="Author, Probe">Probe Author'
+        "</dc:creator>\n"
+        '    <dc:identifier id="BookId" opf:scheme="asin">B00STALEID1'
+        "</dc:identifier>\n"
+        "    <dc:identifier>urn:isbn:9780000000002</dc:identifier>\n"
+        "    <dc:date>2023-09-28T00:00:00Z</dc:date>\n"
+        "    <dc:language>en</dc:language>\n"
+        '    <dc:identifier opf:scheme="calibre">56bd79d5-4c4f-4c11-a6fe-563289987a98'
+        "</dc:identifier>\n"
+        '    <dc:identifier opf:scheme="ISBN">9780000000002</dc:identifier>\n'
+        '    <meta name="calibre:title_sort" content="The Reopened Book"/>\n'
+        "  </metadata>\n"
+        "  <manifest>\n"
+        '    <item id="cover-image" href="cover.jpg" media-type="image/jpeg"/>\n'
+        "  </manifest>\n"
+        "</package>\n"
+    )
+
+    # A producer-shaped file: dashed isbn in the package slot, a publisher
+    # ean the DB does not track, a dead mobi-asin, and database types the
+    # file lacks entirely.
+    PRODUCER_OPF = (
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" '
+        'unique-identifier="BookId">\n'
+        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:opf="http://www.idpf.org/2007/opf">\n'
+        "    <dc:title>Producer Book</dc:title>\n"
+        '    <dc:identifier id="BookId" opf:scheme="ISBN">978-0-000-000000-2'
+        "</dc:identifier>\n"
+        '    <dc:identifier opf:scheme="ean">4057664648839</dc:identifier>\n'
+        '    <dc:identifier opf:scheme="mobi-asin">DEADBEEF</dc:identifier>\n'
+        "  </metadata>\n"
+        "</package>\n"
+    )
+    PRODUCER_DB = {
+        "isbn": "9780000000002",
+        "goodreads": "999",
+        "uri": "urn:uuid:aaa",
+        "lcc": "bf637.s4 g63 2007",
+    }
+
+    CONTAINER_XML = (
+        '<?xml version="1.0"?>\n'
+        '<container version="1.0" '
+        'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+        "  <rootfiles>\n"
+        '    <rootfile full-path="OEBPS/content.opf" '
+        'media-type="application/oebps-package+xml"/>\n'
+        "  </rootfiles>\n"
+        "</container>\n"
+    )
+
+    def idents_in(self, opf_text):
+        return re.findall(
+            r"<dc:identifier\b[^>]*>.*?</dc:identifier\s*>|<dc:identifier\b[^>]*/>",
+            opf_text,
+            re.DOTALL,
+        )
+
+    def read_like_calibre(self, opf_text):
+        """The Identifiers line ebook-meta would surface, derived the way
+        calibre's OPF reader does: scheme'd types (calibre/uuid never
+        surface), an isbn element's urn:isbn: prefix stripped, and a
+        scheme-less element visible only in the urn:isbn: form."""
+        out = []
+        for span in self.idents_in(opf_text):
+            opening = span[: span.index(">") + 1]
+            m = re.search(r"([\w.-]*:)?scheme\s*=\s*\"([^\"]*)\"", opening)
+            body = re.search(r">(.*)</dc:identifier\s*>", span, re.DOTALL)
+            text = body.group(1) if body else ""
+            if m:
+                typ = m.group(2).lower()
+                if typ in ("calibre", "uuid"):
+                    continue
+                val = text
+                if typ == "isbn" and val.lower().startswith("urn:isbn:"):
+                    val = val[len("urn:isbn:") :]
+            elif text.lower().startswith("urn:isbn:"):
+                typ, val = "isbn", text[len("urn:isbn:") :]
+            else:
+                continue
+            out.append(f"{typ}:{val}")
+        return ", ".join(out)
+
+    def test_reopen_shape_converges(self):
+        out = epd.canonical_dc_identifiers(self.REOPEN_OPF, self.DB_IDS, self.UUID)
+        self.assertIsNotNone(out)
+        spans = self.idents_in(out)
+        # The stale package element rewritten IN PLACE: id attribute and
+        # position stay, scheme/text become the book uuid under the
+        # writer's own invisible scheme, so unique-identifier still resolves.
+        self.assertIn(
+            '<dc:identifier id="BookId" opf:scheme="calibre">'
+            f"{self.UUID}</dc:identifier>",
+            spans[0],
+        )
+        self.assertNotIn("asin", out)
+        # The scheme-less urn:isbn element goes: calibre's reader validates
+        # scheme-less isbn values through check_isbn, so such an element can
+        # read back a different value than it stores; the entry is carried
+        # by the writer's scheme'd ISBN element instead, which round-trips
+        # raw. The writer's own calibre element stays.
+        self.assertEqual(len(spans), 3)
+        self.assertIn('opf:scheme="calibre">56bd79d5', spans[1])
+        self.assertEqual(
+            spans[2], '<dc:identifier opf:scheme="ISBN">9780000000002</dc:identifier>'
+        )
+
+    def test_schemeless_urn_isbn_with_valid_check_digit_still_converges(self):
+        # The scheme-less satisfier removal must not strand the isbn when
+        # the writer's scheme'd element is absent (a producer file that was
+        # never embedded): the entry is inserted fresh in scheme'd form.
+        opf = self.REOPEN_OPF.replace(
+            '    <dc:identifier opf:scheme="calibre">56bd79d5-4c4f-4c11-a6fe-563289987a98</dc:identifier>\n',
+            "",
+        ).replace(
+            '    <dc:identifier opf:scheme="ISBN">9780000000002</dc:identifier>\n',
+            "",
+        )
+        out = epd.canonical_dc_identifiers(opf, self.DB_IDS, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertEqual(self.read_like_calibre(out), "isbn:9780000000002")
+        self.assertIn(
+            '<dc:identifier opf:scheme="isbn">9780000000002</dc:identifier>', out
+        )
+
+    def test_diff_judges_the_pass_output_in_sync(self):
+        out = epd.canonical_dc_identifiers(self.REOPEN_OPF, self.DB_IDS, self.UUID)
+        fm = file_meta(identifiers=self.read_like_calibre(out))
+        self.assertNotIn(
+            "identifiers",
+            rfm.diff_fields(db_record(identifiers=self.DB_IDS), fm, "EPUB"),
+        )
+        # And the pre-pass shape is exactly the drift that never converged:
+        fm = file_meta(identifiers=self.read_like_calibre(self.REOPEN_OPF))
+        self.assertIn(
+            "identifiers",
+            rfm.diff_fields(db_record(identifiers=self.DB_IDS), fm, "EPUB"),
+        )
+
+    def test_second_pass_is_idempotent(self):
+        once = epd.canonical_dc_identifiers(self.REOPEN_OPF, self.DB_IDS, self.UUID)
+        self.assertEqual(
+            epd.canonical_dc_identifiers(once, self.DB_IDS, self.UUID), once
+        )
+
+    def test_producer_shape_is_sorted_and_completed(self):
+        out = epd.canonical_dc_identifiers(self.PRODUCER_OPF, self.PRODUCER_DB, "uu-1")
+        self.assertIsNotNone(out)
+        # The dashed producer isbn in the package slot does not equal the
+        # DB value: the slot is rewritten to the invisible uuid form, the
+        # publisher ean (file-only) stays, the dead mobi-asin goes, and the
+        # missing DB entries are inserted after the last identifier.
+        self.assertIn(
+            '<dc:identifier id="BookId" opf:scheme="calibre">uu-1</dc:identifier>',
+            out,
+        )
+        self.assertNotIn("mobi-asin", out)
+        self.assertIn(
+            '<dc:identifier opf:scheme="ean">4057664648839</dc:identifier>', out
+        )
+        self.assertIn(
+            '    <dc:identifier opf:scheme="isbn">9780000000002</dc:identifier>\n'
+            '    <dc:identifier opf:scheme="goodreads">999</dc:identifier>\n'
+            '    <dc:identifier opf:scheme="uri">urn:uuid:aaa</dc:identifier>\n'
+            '    <dc:identifier opf:scheme="lcc">bf637.s4 g63 2007</dc:identifier>\n'
+            "  </metadata>",
+            out,
+        )
+        fm = file_meta(identifiers=self.read_like_calibre(out))
+        self.assertNotIn(
+            "identifiers",
+            rfm.diff_fields(db_record(identifiers=self.PRODUCER_DB), fm, "EPUB"),
+        )
+
+    def test_matching_package_element_stays_untouched(self):
+        # The 3.63.0-era shape: the package element already names a DB entry
+        # with the right value (the embed reused its text), so the pass must
+        # not churn its spelling; only genuine junk is removed.
+        opf = self.REOPEN_OPF.replace(
+            '<dc:identifier id="BookId" opf:scheme="asin">B00STALEID1'
+            "</dc:identifier>\n",
+            '<dc:identifier id="BookId" opf:scheme="ISBN">9780000000002'
+            "</dc:identifier>\n",
+        )
+        out = epd.canonical_dc_identifiers(opf, self.DB_IDS, self.UUID)
+        self.assertIn(
+            '<dc:identifier id="BookId" opf:scheme="ISBN">9780000000002'
+            "</dc:identifier>",
+            out,
+        )
+        # The scheme-less urn:isbn duplicate of a satisfied entry goes.
+        self.assertEqual(self.read_like_calibre(out), "isbn:9780000000002")
+
+    def test_wrong_valued_file_type_is_replaced(self):
+        # A tracked type with a stale value (book re-imported under a new
+        # uuid) is drift in BOTH directions and must converge to the DB's.
+        opf = self.REOPEN_OPF.replace(
+            '<dc:identifier opf:scheme="ISBN">9780000000002</dc:identifier>\n',
+            '<dc:identifier opf:scheme="uri">urn:uuid:OLD</dc:identifier>\n',
+        )
+        db = {"isbn": "9780000000002", "uri": "urn:uuid:new"}
+        out = epd.canonical_dc_identifiers(opf, db, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertNotIn("urn:uuid:OLD", out)
+        self.assertIn(
+            '<dc:identifier opf:scheme="uri">urn:uuid:new</dc:identifier>', out
+        )
+
+    def test_empty_database_clears_every_visible_identifier(self):
+        out = epd.canonical_dc_identifiers(self.REOPEN_OPF, {}, self.UUID)
+        self.assertIsNotNone(out)
+        # Only the rewritten package slot, the file-only extras, and the
+        # writer's own scheme survive a book with no identifiers at all.
+        self.assertEqual(self.read_like_calibre(out), "")
+        self.assertIn(f'opf:scheme="calibre">{self.UUID}<', out)
+        self.assertIn("56bd79d5-4c4f-4c11-a6fe-563289987a98", out)
+
+    def test_file_only_extras_stay_when_the_db_lacks_them(self):
+        opf = self.REOPEN_OPF.replace(
+            "    <dc:date>2023-09-28T00:00:00Z</dc:date>\n",
+            "    <dc:date>2023-09-28T00:00:00Z</dc:date>\n"
+            '    <dc:identifier opf:scheme="ean">4057664648839</dc:identifier>\n'
+            '    <dc:identifier opf:scheme="uri">urn:uuid:fileonly</dc:identifier>\n',
+        )
+        out = epd.canonical_dc_identifiers(opf, self.DB_IDS, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertIn("4057664648839", out)
+        self.assertIn("urn:uuid:fileonly", out)
+
+    def test_already_canonical_file_is_byte_identical(self):
+        once = epd.canonical_dc_identifiers(self.REOPEN_OPF, self.DB_IDS, self.UUID)
+        self.assertEqual(
+            epd.canonical_dc_identifiers(once, self.DB_IDS, self.UUID), once
+        )
+
+    def test_no_metadata_block_is_refused(self):
+        self.assertIsNone(
+            epd.canonical_dc_identifiers("<html><body/></html>", self.DB_IDS, self.UUID)
+        )
+
+    def test_insertion_without_dc_binding_is_refused(self):
+        opf = self.PRODUCER_OPF.replace(
+            ' xmlns:dc="http://purl.org/dc/elements/1.1/"', ""
+        )
+        self.assertIsNone(epd.canonical_dc_identifiers(opf, self.PRODUCER_DB, "uu-1"))
+
+    def test_insertion_without_opf_prefix_is_refused(self):
+        # The fresh elements need a bound prefix for the scheme attribute.
+        opf = self.PRODUCER_OPF.replace(' xmlns:opf="http://www.idpf.org/2007/opf"', "")
+        self.assertIsNone(epd.canonical_dc_identifiers(opf, self.PRODUCER_DB, "uu-1"))
+
+    def test_removal_only_needs_no_bindings(self):
+        # A file that only needs removals must not be refused for lacking
+        # the bindings: the surgery names no new elements there. (No opf
+        # prefix bound, a junk scheme'd type to drop, and both DB entries
+        # already in the file: the package slot plus the writer's element.)
+        opf = self.REOPEN_OPF.replace(
+            '    <dc:identifier opf:scheme="ISBN">9780000000002</dc:identifier>\n',
+            '    <dc:identifier opf:scheme="ISBN">9780000000002</dc:identifier>\n'
+            '    <dc:identifier opf:scheme="junkid">J123</dc:identifier>\n',
+        ).replace(' xmlns:opf="http://www.idpf.org/2007/opf"', "")
+        db = {"asin": "B00STALEID1", "isbn": "9780000000002"}
+        out = epd.canonical_dc_identifiers(opf, db, self.UUID)
+        self.assertIsNotNone(out)
+        # The junk type and the scheme-less urn:isbn element go (nothing
+        # scheme-less satisfies an entry), and the reader-visible set is
+        # exactly the database's.
+        self.assertEqual(
+            self.read_like_calibre(out), "asin:B00STALEID1, isbn:9780000000002"
+        )
+        self.assertNotIn("junkid", out)
+
+    def test_db_row_typed_calibre_is_satisfied_not_grown(self):
+        # The code-reviewer bug class: a database identifier row whose TYPE
+        # is calibre or uuid (a legal identifiers-table shape) collides with
+        # the writer's own scheme. The pass must let a matching element
+        # satisfy it and never insert a fresh duplicate of an invisible type
+        # on every pass.
+        db = {
+            "isbn": "9780000000002",
+            "calibre": "56bd79d5-4c4f-4c11-a6fe-563289987a98",
+        }
+        once = epd.canonical_dc_identifiers(self.REOPEN_OPF, db, self.UUID)
+        self.assertIsNotNone(once)
+        # The writer's own calibre element carries the same uuid the DB row
+        # stores, so it satisfies the row: no fresh lowercase-scheme'd
+        # element inserted, byte-stable.
+        self.assertEqual(once.count('opf:scheme="calibre"'), 2)  # pkg + writer
+        self.assertEqual(epd.canonical_dc_identifiers(once, db, self.UUID), once)
+        # A mismatched calibre row converges in ONE insertion and stays
+        # byte-identical after: bounded, never growing.
+        db2 = {"isbn": "9780000000002", "calibre": "other-value"}
+        first = epd.canonical_dc_identifiers(self.REOPEN_OPF, db2, self.UUID)
+        self.assertEqual(first.count('opf:scheme="calibre">other-value<'), 1)
+        self.assertEqual(epd.canonical_dc_identifiers(first, db2, self.UUID), first)
+
+    def test_dashed_database_isbn_converges(self):
+        # The diff compares raw stored values, and a scheme'd element
+        # round-trips its value untouched, so a dashed curated isbn is
+        # carried by a dashed element: the scheme-less urn:isbn spelling
+        # (which the reader dash-strips through check_isbn) must not be
+        # kept as its satisfier.
+        db = {"isbn": "978-0-000-000000-2"}
+        opf = self.REOPEN_OPF.replace(
+            '<dc:identifier id="BookId" opf:scheme="asin">B00STALEID1</dc:identifier>\n',
+            '<dc:identifier id="BookId" opf:scheme="isbn">'
+            "978-0-000-000000-2</dc:identifier>\n",
+        )
+        out = epd.canonical_dc_identifiers(opf, db, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertNotIn("urn:isbn:", out)
+        self.assertEqual(self.read_like_calibre(out), "isbn:978-0-000-000000-2")
+        fm = file_meta(identifiers=self.read_like_calibre(out))
+        self.assertNotIn(
+            "identifiers", rfm.diff_fields(db_record(identifiers=db), fm, "EPUB")
+        )
+
+    def test_package_rewrite_without_uuid_is_refused(self):
+        self.assertIsNone(
+            epd.canonical_dc_identifiers(self.REOPEN_OPF, self.DB_IDS, "")
+        )
+
+    def test_dangling_unique_identifier_proceeds_by_classification(self):
+        # A package attribute naming an id no element carries guards
+        # nothing; the pass still cleans the set instead of crashing.
+        opf = self.REOPEN_OPF.replace(
+            'unique-identifier="BookId"', 'unique-identifier="ghost"'
+        )
+        out = epd.canonical_dc_identifiers(opf, self.DB_IDS, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertNotIn("asin", out)
+
+    def _build_epub(self, root, opf_text):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER_XML)
+            z.writestr("OEBPS/content.opf", opf_text)
+        path = pathlib.Path(root) / "book.epub"
+        path.write_bytes(buf.getvalue())
+        return path
+
+    def test_zip_rewrite_preserves_other_entries_and_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.REOPEN_OPF)
+            before = zipfile.ZipFile(path)
+            other = {
+                n: before.read(n) for n in before.namelist() if n != "OEBPS/content.opf"
+            }
+            before.close()
+            self.assertTrue(
+                epd.normalize_epub_identifiers(path, self.DB_IDS, self.UUID)
+            )
+            after = zipfile.ZipFile(path)
+            self.assertEqual(after.namelist()[0], "mimetype")
+            self.assertEqual(after.namelist(), list(other) + ["OEBPS/content.opf"])
+            self.assertNotIn("asin", after.read("OEBPS/content.opf").decode())
+            for name, payload in other.items():
+                self.assertEqual(after.read(name), payload)
+            after.close()
+
+    def test_canonical_zip_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(
+                tmp,
+                epd.canonical_dc_identifiers(self.REOPEN_OPF, self.DB_IDS, self.UUID),
+            )
+            raw = path.read_bytes()
+            self.assertTrue(
+                epd.normalize_epub_identifiers(path, self.DB_IDS, self.UUID)
+            )
+            self.assertEqual(path.read_bytes(), raw)
+
+
 class TestCanonicalDateTarget(unittest.TestCase):
     """The caller-facing policy over canonical_dc_dates's generic target:
     the database pubdate's date at UTC midnight as a full ISO instant."""
@@ -858,6 +1297,44 @@ class TestEpub3DateRoundTripLive(unittest.TestCase):
             raw = path.read_bytes()
             self.assertTrue(epd.normalize_epub_dates(path, target))
             self.assertEqual(path.read_bytes(), raw)
+
+
+@unittest.skipUnless(shutil.which("ebook-meta"), "ebook-meta not on PATH")
+class TestEpubIdentifierReadBackLive(unittest.TestCase):
+    """Issue #11's reopen, judged by the real reader. The reopened class was
+    observed through ebook-meta: after an embed that cannot converge, the
+    deleted type still surfaced in the Identifiers line and the diff flagged
+    the book forever. The pass output must read back through the actual
+    ebook-meta as exactly the database set, and the read-back diff must
+    agree. CI (no calibre) skips this; the sandboxed fixtures above carry
+    the same shapes."""
+
+    def test_reopen_shape_reads_back_as_the_database_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = TestEpubIdentifierNormalization()._build_epub(
+                tmp, TestEpubIdentifierNormalization.REOPEN_OPF
+            )
+            self.assertTrue(
+                epd.normalize_epub_identifiers(
+                    path,
+                    TestEpubIdentifierNormalization.DB_IDS,
+                    TestEpubIdentifierNormalization.UUID,
+                )
+            )
+            fm = rfm.read_ebook_meta(path)
+            self.assertIsNotNone(fm)
+            self.assertEqual(
+                rfm.parse_identifiers(fm.get("identifiers")),
+                TestEpubIdentifierNormalization.DB_IDS,
+            )
+            self.assertNotIn(
+                "identifiers",
+                rfm.diff_fields(
+                    db_record(identifiers=TestEpubIdentifierNormalization.DB_IDS),
+                    fm,
+                    "EPUB",
+                ),
+            )
 
 
 if __name__ == "__main__":

@@ -35,7 +35,17 @@ With --apply (only the drifted books are touched):
     are untouched. The instant is full ISO, not date-only, because
     calibre's EPUB3 reader nudges a date-only value off month boundaries
     (day 1 becomes day 2), which read back one day off forever for every
-    day-1 pubdate (issue #4).
+    day-1 pubdate (issue #4). The embed is also followed by an identifier
+    normalization (issue #11's reopen): calibre's embed writer preserves the
+    package unique-identifier dc:identifier element VERBATIM and never
+    removes scheme-less elements, so a deleted identifier type in either
+    shape survives every re-embed and the read-back re-diff oscillates
+    instead of converging. The pass rewrites the OPF's identifier set to
+    exactly the database's (matching elements and file-only uri/ean extras
+    stay, everything else goes, missing database entries are inserted, and a
+    stale unique-identifier element is rewritten in place to the book uuid
+    under calibre's own invisible scheme so the package reference never
+    dangles).
   * PDF: `exiftool` writes title/author/publisher/date to the Info dict and
     XMP. calibredb is skipped for PDF because it silently leaves some PDFs
     unchanged; exiftool wrote every PDF tested. A few PDFs have a damaged xref
@@ -106,16 +116,20 @@ from vir_tui import core as ui
 
 try:
     from cquarry_cli.epubdates import (
+        FILE_ONLY_IDENTIFIERS,
         canonical_date_target,
         norm_date,
         normalize_epub_dates,
+        normalize_epub_identifiers,
     )
 except ImportError:  # a repo checkout run without the package importable
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
     from cquarry_cli.epubdates import (
+        FILE_ONLY_IDENTIFIERS,
         canonical_date_target,
         norm_date,
         normalize_epub_dates,
+        normalize_epub_identifiers,
     )
 
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
@@ -233,14 +247,9 @@ def parse_identifiers(value: str | None) -> dict[str, str]:
     return out
 
 
-# File-side identifier types that are not drift when the database lacks
-# them: every calibredb embed re-adds the book uuid (ebook-meta surfaces it
-# as a `uri` id), and some publisher files keep an `ean` the library does
-# not track. Anything else file-side that the DB lacks IS drift (issue #11):
-# DB-is-source-of-truth runs both directions, because embed_metadata
-# regenerates the OPF wholesale, so an --apply removes an identifier the DB
-# deleted and the file still carries.
-FILE_ONLY_IDENTIFIERS = frozenset({"uri", "ean"})
+# FILE_ONLY_IDENTIFIERS (the file-side identifier types that are not drift
+# when the database lacks them) lives in cquarry_cli.epubdates, single-sourced
+# with the identifier normalization pass that removes everything else.
 
 
 # --- database side ---------------------------------------------------------
@@ -276,7 +285,8 @@ def connect_ro(db_path: Path) -> tuple[sqlite3.Connection, str | None]:
 def db_record(cur, book_id: int, library_root: Path) -> dict:
     """Curated metadata for one book, plus its on-disk format files."""
     b = cur.execute(
-        "SELECT title, pubdate, series_index, path FROM books WHERE id=?", (book_id,)
+        "SELECT title, pubdate, series_index, path, uuid FROM books WHERE id=?",
+        (book_id,),
     ).fetchone()
     authors = [
         r["name"]
@@ -330,6 +340,7 @@ def db_record(cur, book_id: int, library_root: Path) -> dict:
     return {
         "id": book_id,
         "title": b["title"],
+        "uuid": b["uuid"] or "",
         "authors": authors,
         "series": series_name,
         "series_index": series_idx,
@@ -494,12 +505,17 @@ def diff_fields(db: dict, fm: dict[str, str], fmt: str) -> list[str]:
         elif field == "identifiers":
             # Two-directional (issue #11): every curated identifier must be
             # embedded, and an identifier the file still carries after the DB
-            # dropped it is drift too -- embed_metadata regenerates the OPF
-            # wholesale, so --apply removes it. The file may legitimately
-            # carry FILE_ONLY_IDENTIFIERS the library does not track (the
-            # EPUB's own urn:uuid surfaces as a `uri` id; some files keep an
+            # dropped it is drift too. The file may legitimately carry
+            # FILE_ONLY_IDENTIFIERS the library does not track (the EPUB's
+            # own urn:uuid surfaces as a `uri` id; some files keep an
             # `ean`), so those stay exempt; strict equality would false-flag
-            # every freshly embedded book.
+            # every freshly embedded book. The writer side is NOT the embed
+            # alone: calibre's embed writer preserves the package
+            # unique-identifier element verbatim and never removes
+            # scheme-less elements, so deleted types in those shapes survive
+            # every re-embed (the issue's reopen) and the
+            # normalize_epub_identifiers pass after the embed is what makes
+            # this diff converge.
             file_ids = parse_identifiers(fm.get("identifiers"))
             missing = any(file_ids.get(k) != v for k, v in db["identifiers"].items())
             extra = any(
@@ -983,6 +999,26 @@ def main() -> int:
                     line = (
                         f"#{rec['id']} [EPUB] {fpath.name}: "
                         "dc:date normalization failed"
+                    )
+                    print(f"  {RED}{line}{RESET}", file=sys.stderr)
+                    failures.append(line)
+                    ok = False
+            # The identifier cleanup rides the same seam (issue #11's
+            # reopen): the embed writer preserves the package
+            # unique-identifier element verbatim and never removes
+            # scheme-less elements, so a deleted type in either shape
+            # survives every re-embed and the read-back re-diff oscillates
+            # instead of converging. The pass rewrites the OPF's identifier
+            # set to exactly the database's, by the same rule the diff
+            # applies; the re-diff below stays the arbiter.
+            print(f"  normalizing identifiers in {len(epubs)} EPUB file(s)...")
+            for rec, fpath in epubs:
+                if not normalize_epub_identifiers(
+                    fpath, rec["identifiers"], rec["uuid"]
+                ):
+                    line = (
+                        f"#{rec['id']} [EPUB] {fpath.name}: "
+                        "identifier normalization failed"
                     )
                     print(f"  {RED}{line}{RESET}", file=sys.stderr)
                     failures.append(line)

@@ -33,7 +33,11 @@ from pathlib import Path
 from cquarry.helpers import to_isbn13
 from cquarry.write import WritableCalibreDB
 from cquarry_cli.backups import make_backup
-from cquarry_cli.epubdates import canonical_date_target, normalize_epub_dates
+from cquarry_cli.epubdates import (
+    canonical_date_target,
+    normalize_epub_dates,
+    normalize_epub_identifiers,
+)
 
 _PGREP_TIMEOUT = 10
 
@@ -548,10 +552,15 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
     # The dc:date cleanup rides every EPUB embed (the 3.56.0 pass, issue
     # #3): calibredb's EPUB2 writer rewrites only the earliest dc:date and
     # leaves the rest standing, so a flushed multi-dated EPUB2 kept the
-    # junk dates forever. The same normalization and canonical target
-    # (issue #4's full-ISO instant) scripts/reconcile_file_metadata.py
-    # runs, from the shared module.
+    # junk dates forever. The identifier cleanup rides the same seam
+    # (issue #11's reopen): the embed writer preserves the package
+    # unique-identifier element verbatim and never removes scheme-less
+    # elements, so a deleted identifier type in either shape survives every
+    # embed and the file never converges. The same normalization and
+    # canonical target scripts/reconcile_file_metadata.py runs, from the
+    # shared module.
     normalized = 0
+    idents_normalized = 0
     for bid in ids:
         entry = db.get_formats(bid).get("EPUB")
         if entry is None:
@@ -559,13 +568,20 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
         fpath = Path(entry["path"])
         if not fpath.exists():
             continue
-        if normalize_epub_dates(
-            fpath, canonical_date_target(db.get_book(bid)["pubdate"])
-        ):
+        book = db.get_book(bid)
+        if normalize_epub_dates(fpath, canonical_date_target(book["pubdate"])):
             normalized += 1
         else:
             print(
                 f"ERROR: dc:date normalization failed on {fpath}",
+                file=sys.stderr,
+            )
+            return 1
+        if normalize_epub_identifiers(fpath, book["identifiers"], book.get("uuid", "")):
+            idents_normalized += 1
+        else:
+            print(
+                f"ERROR: identifier normalization failed on {fpath}",
                 file=sys.stderr,
             )
             return 1
@@ -580,6 +596,7 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
                     "results": {
                         "flushed": done,
                         "epub_dates_normalized": normalized,
+                        "epub_identifiers_normalized": idents_normalized,
                         "queue_remaining": len(remaining),
                     }
                 },
@@ -590,6 +607,8 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
         line = f"Flushed {done} book(s): embedded metadata regenerated."
         if normalized:
             line += f" dc:date normalized in {normalized} EPUB file(s)."
+        if idents_normalized:
+            line += f" identifiers normalized in {idents_normalized} EPUB file(s)."
         print(line)
         if remaining:
             print(
