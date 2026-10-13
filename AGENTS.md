@@ -5,6 +5,21 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.6 onward, the unreadable classification)
+
+- **Unreadable phase-1 quarantines are `UNREADABLE`, not `DRM: ERROR`,
+  and `_drm_verdicts` carries the audit's parse failure.** ERROR rows
+  come back as `ERROR: {detail}` (`ERROR: bad zip: File is not a zip
+  file`); every other status stays the bare class. The quarantine gate
+  parses the class as the first token before the colon, so bare
+  `ERROR`/`DRM` values (the mocked-seam shape) gate unchanged. The
+  reason for an ERROR row is `UNREADABLE` + whatever followed the class
+  (the audit's detail rides verbatim into the quarantines list, the
+  `manual_repair` decision detail, and `entry["checks"]["drm"]`); DRM
+  rows keep `DRM: DRM`. Quarantine behavior is unchanged: same
+  is_problem set, same dry-vs-move rails. Issue #15's live class (a
+  0-byte download read as "DRM: ERROR") is what this retires.
+
 ## Programmer-facing contract notes (3.63.5 onward, the default-namespace EPUB3 fix)
 
 - **normalize_epub_identifiers no longer refuses the default-namespace

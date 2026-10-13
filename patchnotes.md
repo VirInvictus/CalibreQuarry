@@ -1,5 +1,44 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.6 (2026-10-13)
+
+### The unreadable classification fix (issue #15)
+
+Phase 1 flattened audit_drm's unreadable verdict into the quarantine
+and decision reason `DRM: ERROR`: the live teacher was a dead 0-byte
+EPUB download (The Truthful Art, the 2026-10-12 129-file run) whose
+manifest decision sent triage down the DRM path, looking for Adobe
+encryption in a file that is not a zip at all. audit_drm itself always
+distinguished (its output line reads `ERROR [unreadable] <file>` and
+its CSV carries the kind and the parse-failure detail); the runner's
+`_drm_verdicts` kept only the status column and dropped the rest, and
+the reason builder prefixed every problem row with `DRM:`.
+
+- **ERROR rows carry their parse failure.** `_drm_verdicts` now returns
+  `ERROR: {detail}` for unreadable rows (e.g. `ERROR: bad zip: File is
+  not a zip file`), straight from the CSV's detail column; every other
+  status (DRM, BENIGN, CLEAN, N/A, scan) stays the bare class, so the
+  instrument pins and every mocked-seam test keep their exact values.
+  The richer form also lands in `entry["checks"]["drm"]`, so the
+  manifest's per-file checks record names the cause.
+- **The quarantine gate reads the class, not the string.** The gate
+  parses the first token before the colon, so a suffixed ERROR row
+  quarantines exactly as before and the bare vocabulary is untouched.
+  Quarantine behavior is unchanged: same is_problem set (DRM, ERROR),
+  same dry-vs-move rails, same `manual_repair` decision kind.
+- **The reason is its own class.** Unreadable rows read
+  `UNREADABLE: bad zip: File is not a zip file` in the manifest's
+  quarantines list and the manual_repair decision detail; a dead
+  download and a real encryption block (`DRM: DRM`) are now
+  distinguishable at decision-review time without opening the file.
+- **Coverage:** a real-script instrument pin (a 0-byte epub produces an
+  `ERROR:`-prefixed verdicts entry carrying `bad zip`), a verb test
+  pinning the full `UNREADABLE: ...` reason in both the quarantines
+  list and the decision detail, and detail assertions on the existing
+  DRM and bare-ERROR tests. The phase-1-import skill's dead-download
+  sweep paragraph (added on Brandon's side during the live run) now
+  names the new reason shape.
+
 # 3.63.5 (2026-10-13)
 
 ### The default-namespace EPUB3 fix (issue #16)
