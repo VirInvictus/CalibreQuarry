@@ -323,7 +323,12 @@ def _screen_duplicates(
 
 
 def _drm_verdicts(downloads_dir: str) -> dict[str, str]:
-    """audit_drm.py over the directory, as path -> verdict class."""
+    """audit_drm.py over the directory, as path -> verdict class. ERROR
+    rows carry the audit's own parse failure after the class
+    (`ERROR: bad zip: File is not a zip file`) so the quarantine reason
+    can name the cause; issue #15's live class was a 0-byte download
+    whose dead-file truth was dropped here and the file surfaced as the
+    misleading `DRM: ERROR`. Every other status stays the bare class."""
     script = _scripts_dir() / "audit_drm.py"
     csv_path = Path(downloads_dir) / "_drm_audit.csv"
     proc = _run(
@@ -336,7 +341,10 @@ def _drm_verdicts(downloads_dir: str) -> dict[str, str]:
 
         with open(csv_path, newline="", encoding="utf-8") as f:
             for row in _csv.DictReader(f):
-                verdicts[row["path"]] = row.get("status") or row.get("kind") or "scan"
+                status = row.get("status") or row.get("kind") or "scan"
+                if status == "ERROR" and (row.get("detail") or "").strip():
+                    status = f"ERROR: {row['detail'].strip()}"
+                verdicts[row["path"]] = status
         csv_path.unlink()
     if proc.returncode not in (0, 1):
         raise RuntimeError(f"audit_drm failed: {proc.stderr.strip()}")
@@ -719,9 +727,21 @@ def run_phase1(
         # Quarantine audit_drm's own problem set only (its is_problem:
         # DRM, plus ERROR, a scan that could not verify). BENIGN (font
         # obfuscation, permission flags) and N/A (DJVU) are not locks and
-        # never move a file; the docs' dry promise is for them too.
-        if drm_status.upper() in ("DRM", "ERROR"):
-            reason = f"DRM: {drm_status}"
+        # never move a file; the docs' dry promise is for them too. The
+        # class is the first token: an ERROR row may carry its parse
+        # failure after a colon (see _drm_verdicts).
+        head, sep, tail = drm_status.partition(":")
+        problem = head.strip().upper()
+        if problem in ("DRM", "ERROR"):
+            if problem == "ERROR":
+                # Its own reason class, not "DRM: ERROR": a dead download
+                # is not an encryption problem, and the flattened shape
+                # sent triage looking for DRM in a file that is not a
+                # zip (issue #15, The Truthful Art). The audit's detail
+                # rides along verbatim.
+                reason = "UNREADABLE:" + tail if sep else "UNREADABLE"
+            else:
+                reason = f"DRM: {drm_status}"
             entry["verdict"] = "quarantined"
             if quarantine:
                 entry["repairs"].append(_quarantine(downloads_dir, path, reason))

@@ -292,6 +292,7 @@ class TestRunPhase1(RunCase):
         man = manifest.load(os.path.join(manifests, manifest_path))
         self.assertEqual(man["quarantines"][0]["moved_to"], None)
         self.assertEqual(man["decisions_needed"][0]["kind"], "manual_repair")
+        self.assertEqual(man["decisions_needed"][0]["detail"], "DRM: DRM")
         self.assertNotIn(path, man["approved_for_import"])
 
     def test_error_verdict_quarantines_like_drm(self):
@@ -311,6 +312,36 @@ class TestRunPhase1(RunCase):
         (manifest_path,) = os.listdir(manifests)
         man = manifest.load(os.path.join(manifests, manifest_path))
         self.assertNotEqual(man["quarantines"][0]["moved_to"], None)
+        # Its own reason class (issue #15): no "DRM:" prefix on a file
+        # whose problem is that it cannot be read at all.
+        self.assertEqual(man["decisions_needed"][0]["detail"], "UNREADABLE")
+
+    def test_unreadable_reason_carries_the_audit_detail(self):
+        # The live class (issue #15, The Truthful Art): a dead 0-byte
+        # download used to surface as "DRM: ERROR" and sent triage looking
+        # for encryption in a file that is not a zip. _drm_verdicts now
+        # carries the audit's parse failure after the class, the check
+        # keeps it, and the quarantine/decision reason reads UNREADABLE.
+        path = self._make_file("dead.epub")
+        verdict = "ERROR: bad zip: File is not a zip file"
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={path: verdict}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quarantine=True)
+        self.assertEqual(rc, 0)
+        self.assertFalse(os.path.exists(path))
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        reason = "UNREADABLE: bad zip: File is not a zip file"
+        self.assertEqual(man["quarantines"][0]["reason"], reason)
+        self.assertTrue(man["quarantines"][0]["moved_to"])
+        self.assertEqual(man["decisions_needed"][0]["detail"], reason)
+        (entry,) = man["files"]
+        self.assertEqual(entry["checks"]["drm"], verdict)
 
     def test_same_day_batches_never_overwrite_the_first_manifest(self):
         # THE FINAL AUDIT's HIGH: the fixed {date}-batch.json name let a

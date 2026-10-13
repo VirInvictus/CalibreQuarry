@@ -72,6 +72,20 @@ class TestRealInstruments(unittest.TestCase):
         verdicts = _drm_verdicts(self.downloads)
         self.assertEqual(verdicts[djvu], "N/A")
 
+    def test_dead_download_carries_its_parse_failure(self):
+        # Issue #15's live class through the real script: a 0-byte file
+        # is audit_drm's ERROR [unreadable] verdict, and the verdicts dict
+        # now carries that parse failure after the class ("ERROR: bad
+        # zip: ..."), so the quarantine reason can read UNREADABLE with
+        # the cause instead of the misleading "DRM: ERROR". The class
+        # stays the first token, which is all the quarantine gate reads.
+        dead = os.path.join(self.downloads, "dead.epub")
+        with open(dead, "wb"):
+            pass
+        verdicts = _drm_verdicts(self.downloads)
+        self.assertEqual(verdicts[dead].partition(":")[0], "ERROR")
+        self.assertIn("bad zip", verdicts[dead])
+
 
 class TestDispatchRunWiring(unittest.TestCase):
     """`dispatch_run` had zero test references when the sweep ran; the
