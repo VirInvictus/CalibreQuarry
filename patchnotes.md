@@ -1,5 +1,59 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.5 (2026-10-13)
+
+### The default-namespace EPUB3 fix (issue #16)
+
+`normalize_epub_identifiers` refused EPUB 3's default-namespace OPF
+form at both of its surgery preconditions, and the class was not
+rare: 13 of the 223 books on the 2026-10-13 morning-wave reconcile
+(12 held Bloomsbury/Baen-row rips and one Standard Ebooks file) stayed
+drifted (`still differs: identifiers`) across repeated `--apply`
+passes, each run reporting `identifier normalization failed`. The
+shape: `<package>` binds the OPF namespace as the DEFAULT
+(`xmlns="http://www.idpf.org/2007/opf"`, no `xmlns:opf` prefix
+anywhere) and carries `xmlns:dc` on `<package>` rather than inside
+`<metadata>`. That file is well-formed and calibre-readable; the pass
+was refusing a legal shape, and the recorded workaround (hand-adding
+redundant-but-legal namespace declarations to 13 books) is now the
+pass's own job.
+
+- **The OPF prefix is synthesized when the surgery must name it.**
+  When the pass needs the namespace (a scheme-less package slot being
+  rewritten, or any insertion) and no prefix is bound anywhere in the
+  document, the new `_declare_namespaces` writes the binding
+  (`xmlns:opf="http://www.idpf.org/2007/opf"`) as a declaration on the
+  `<metadata>` opening tag: inside the block the surgery already owns,
+  in scope for everything it emits, and found by `_opf_prefix_of` on
+  the next pass, so the output is byte-stable (a converged file's
+  second pass rewrites nothing). Removal-only passes still add
+  nothing: `needs_opf_prefix` fires only when the surgery actually
+  names an OPF-namespaced attribute, so the removal path keeps its
+  byte-exact no-churn contract.
+- **The dc binding check reads document scope.** The insertion
+  precondition looked for the literal `xmlns:dc` binding inside the
+  `<metadata>` block; a default-namespace package binds dc on
+  `<package>`, an ancestor, and by XML rules the prefix is in scope
+  inside the block. Both passes now accept the binding in the block or
+  anywhere before it (in an OPF, that is `<package>`). A dc binding
+  nowhere in scope still refuses: dc-namespaced content without the
+  binding is malformed XML no embed could have produced, so the
+  conservative refusal for genuinely unnamable shapes stays.
+- **The same scope hoist went into `canonical_dc_dates`**, the sibling
+  precondition in the date pass, so a default-namespace file that
+  needs a date INSERTED does not die on `dc:date normalization
+  failed` right after this fix teaches the identifier pass to proceed.
+- **Coverage:** the sandboxed fixtures gain the exact live shape
+  (default-ns package, dc on the root, scheme-less producer slot) in
+  four identifier tests and one date test;
+  `test_insertion_without_opf_prefix_synthesizes_the_binding` replaces
+  the old refusal pin; a no-churn assertion joins
+  `test_removal_only_needs_no_bindings`; and the live read-back class
+  (real `ebook-meta`, skipped on CI) gained the default-namespace
+  variant: the synthesized output reads back as exactly the database
+  set. The round-trip was verified live on calibre 9.16 before the
+  tests were written.
+
 # 3.63.4 (2026-10-12)
 
 ### The cquarry 1.28.0 floor (the entity case-change wave)

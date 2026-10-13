@@ -5,6 +5,28 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.5 onward, the default-namespace EPUB3 fix)
+
+- **normalize_epub_identifiers no longer refuses the default-namespace
+  EPUB3 OPF form, and its binding rules split in two.** The OPF
+  namespace prefix is SYNTHESIZED when the surgery must name it (a
+  scheme-less package slot to rewrite, or any insertion) and none is
+  bound anywhere in the document: `_declare_namespaces` writes
+  `xmlns:opf="http://www.idpf.org/2007/opf"` on the `<metadata>`
+  opening tag (inside the block the surgery already owns, in scope for
+  everything it emits, and found by `_opf_prefix_of` on the next pass,
+  so converged files stay byte-identical). The dc binding check is
+  document-scope: the literal binding may sit in the block OR anywhere
+  before it (an ancestor; in an OPF, the `<package>` tag); a dc
+  binding nowhere in scope still refuses (dc-namespaced content
+  without the binding is malformed XML no embed could have produced).
+  Removal-only passes synthesize nothing (`needs_opf_prefix` gates on
+  the surgery actually naming an OPF-namespaced attribute), so the
+  byte-exact no-churn contract holds there. The same scope hoist is in
+  `canonical_dc_dates`'s insertion precondition. The 3.63.3 note's
+  "insertions need both bindings" refusal is superseded for the OPF
+  prefix and widened for dc.
+
 ## Programmer-facing contract notes (3.63.4 onward, the cquarry 1.28.0 floor)
 
 - **The floor is 1.28.0, and case-variant entity writes consolidate.**
