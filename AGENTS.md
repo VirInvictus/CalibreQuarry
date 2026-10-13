@@ -5,6 +5,25 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.63.7 onward, the duplicate-screen keypair and imprint batch)
+
+- **The duplicate screen matches ASINs and strips imprint tags.**
+  `_embedded_fields` records carry `asins` (values of `asin`/
+  `mobi-asin`-typed identifiers; both spellings, other types out), and
+  `_library_hits` searches each via the exact-value keypair
+  `identifiers:=VALUE` (cquarry's search grammar; matches ANY identifier
+  type case-insensitively, so file-side `asin` meets library-side
+  `mobi-asin`). Within-batch, a case-folded ASIN intersection binds
+  `batch_duplicates` like a shared ISBN. `normalize_title` strips a
+  curated paren-scoped imprint-tag set before judging (the list lives in
+  `_IMPRINT_TAG` and grows as rips surface new tags); `_annotations` and
+  `_volume_signature` still read the UNstripped title, so volume logic
+  is untouched. The translator-form-author-vs-Anonymous gate is
+  deliberately unsolved: the keypair path (ISBN, ASIN) is what surfaces
+  those, and the phase-1 skill's hand-check covers the residue. Issue
+  #13's live Mabinogion shape is pinned end to end through the real
+  search engine.
+
 ## Programmer-facing contract notes (3.63.6 onward, the unreadable classification)
 
 - **Unreadable phase-1 quarantines are `UNREADABLE`, not `DRM: ERROR`,

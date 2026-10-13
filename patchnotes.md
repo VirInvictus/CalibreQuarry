@@ -1,5 +1,54 @@
 # CalibreQuarry Patch Notes
 
+# 3.63.7 (2026-10-13)
+
+### The duplicate-screen keypair and imprint batch (issue #13)
+
+The pre-import duplicate screen missed a same-edition duplicate on the
+2026-10-11 live run: `The Mabinogion (Sioned Davies (Translator))` was
+a byte-comparable copy of held book #10113, but the screen reported
+zero candidates. Three independent factors stacked: the rip carries no
+ISBN (only `mobi-asin: B005Q8EAEI`, the same value the held book
+carries, and the screen matched only ISBNs against the library); the
+rip's embedded title carries an imprint tag (`The Mabinogion (Oxford
+World's Classics)` vs the held `The Mabinogion`), which left the title
+judge with no opinion; and the rip's author is translator-form
+(`Davies, Sioned`) against the held `Anonymous`, so the author gate
+blocked the title path entirely. The screen now answers the first two;
+the third is deliberately left to the hand-check rules, which this
+release leaves honest by giving the screen the ASIN evidence.
+
+- **ASINs are edition keys now.** `_embedded_fields` collects
+  ASIN-type identifier values (`asin`, `mobi-asin`) alongside the
+  ISBN, and `_library_hits` searches each through the search engine's
+  exact-value keypair (`identifiers:=VALUE`), which matches ANY
+  identifier type case-insensitively: a file-side `asin` meets a
+  library-side `mobi-asin`. The uuid/calibre values the embed writer
+  re-adds cannot collide with an ASIN-shaped string. The JSON report
+  records carry the new `asins` key.
+- **The same bind applies within the batch.** Two rips sharing an ASIN
+  (across type spellings, case-folded) bind as `batch_duplicates`
+  exactly like a shared ISBN, because rips that strip ISBNs keep
+  ASINs.
+- **The title judge strips the known imprint tags.**
+  `normalize_title` removes a curated, paren-scoped set (Oxford
+  World's Classics, Penguin Classics, Modern Library, Everyman's
+  Library, Norton Critical Editions, Loeb Classical Library, Vintage
+  Classics, Wordsworth Classics, Barnes & Noble Classics, Bantam
+  Classics, Signet Classics, Dover Thrift Editions) before judging, so
+  the live pair classifies `duplicate` and two different imprints of
+  one work collide into the hand-check class instead of passing
+  silently. Unknown parentheticals (`Translated by ...`) and prose
+  mentions (`The Penguin Classics Book`) compare as title text, as
+  before; volume annotations still read the unstripped title.
+- **Coverage:** the fixture library gains the held Mabinogion with its
+  mobi-asin, and the tests pin the live shape end to end through the
+  real search engine (ASIN hit across type spellings; the same fields
+  without the ASIN still find nothing), the extraction (both ASIN type
+  spellings kept, other types out), the within-batch ASIN bind across
+  case/type variants, and the imprint verdicts (strip, collide,
+  unknown-tag and prose safety).
+
 # 3.63.6 (2026-10-13)
 
 ### The unreadable classification fix (issue #15)
