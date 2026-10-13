@@ -30,17 +30,18 @@ release leaves honest by giving the screen the ASIN evidence.
   (across type spellings, case-folded) bind as `batch_duplicates`
   exactly like a shared ISBN, because rips that strip ISBNs keep
   ASINs.
-- **The title judge strips the known imprint tags.**
-  `normalize_title` removes a curated, paren-scoped set (Oxford
-  World's Classics, Penguin Classics, Modern Library, Everyman's
-  Library, Norton Critical Editions, Loeb Classical Library, Vintage
-  Classics, Wordsworth Classics, Barnes & Noble Classics, Bantam
-  Classics, Signet Classics, Dover Thrift Editions) before judging, so
-  the live pair classifies `duplicate` and two different imprints of
-  one work collide into the hand-check class instead of passing
-  silently. Unknown parentheticals (`Translated by ...`) and prose
-  mentions (`The Penguin Classics Book`) compare as title text, as
-  before; volume annotations still read the unstripped title.
+- **The title judge strips the known imprint tags.** The judge's
+  normalization (`normalize_title`, plus the full-title and subtitle
+  comparisons) removes a curated, paren-scoped set (Oxford World's
+  Classics, Penguin Classics, Modern Library, Everyman's Library,
+  Norton Critical Editions, Loeb Classical Library, Vintage Classics,
+  Wordsworth Classics, Barnes & Noble Classics, Bantam Classics,
+  Signet Classics, Dover Thrift Editions) before judging, at any colon
+  position, so the live pair classifies `duplicate` and two different
+  imprints of one work collide into the hand-check class instead of
+  passing silently. Unknown parentheticals (`Translated by ...`) and
+  prose mentions (`The Penguin Classics Book`) compare as title text,
+  as before; volume annotations still read the unstripped title.
 - **Coverage:** the fixture library gains the held Mabinogion with its
   mobi-asin, and the tests pin the live shape end to end through the
   real search engine (ASIN hit across type spellings; the same fields
