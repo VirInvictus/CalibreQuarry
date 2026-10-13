@@ -40,6 +40,13 @@ The 2026-09-21 waves added three verdict classes to that equality:
   silently because the author brackets sat inside the compared stems in
   different orders; one side with real metadata never takes this path.
 
+The 3.63.7 imprint batch and issue #17's edition batch both widen what
+the judge treats as annotation noise rather than work identity: the
+curated imprint tags ("(Oxford World's Classics)") and the ordinal
+edition tags (", 3rd Edition", ": 2nd Edition", "4th ed.") strip from
+every compared string, while the volume annotations the series rules
+read stay on the RAW title.
+
 Report-only: nothing is deleted or moved here. Removing a library duplicate
 needs Brandon's explicit OK in phase 3; loose-file removal is his too.
 
@@ -166,6 +173,19 @@ _IMPRINT_TAG = re.compile(
     r")\s*[\)\]]\s*",
     re.IGNORECASE,
 )
+# The edition tags rips and publishers bake into titles (issue #17: the
+# stamp correctly strips them from new arrivals, so a held ", 3rd
+# Edition" title defeated the judge on an otherwise same-edition pair).
+# Ordinal + edition word only, and only where an annotation can end
+# (segment end, colon, comma, semicolon, a closing bracket), so prose
+# like "the 2nd edition of ..." and the "Code: Version 2.0" shape stay
+# title text. Like the imprint set, this grows as new rips surface new
+# shapes.
+_EDITION_TAG = re.compile(
+    r"\s*,?\s*\b\d+(?:st|nd|rd|th)\s+(?:edition|ed)\b\.?"
+    r"(?=\s*[:;,\)\]]|\s*$)",
+    re.IGNORECASE,
+)
 _VOLUME_SIG = re.compile(r"\b(vol|volume|part|pt|book|bd)\.?\s*(\d+)\b", re.IGNORECASE)
 #: Declared volume annotations extend the arabic-only signature to the roman
 #: forms ("Capital: Volume I" declares volume 1 without carrying a signature).
@@ -251,18 +271,35 @@ def _strip_imprint(text: str) -> str:
     return _IMPRINT_TAG.sub(" ", text or "")
 
 
+def _strip_edition(text: str) -> str:
+    """The edition annotations removed, wherever the judge compares."""
+    return _EDITION_TAG.sub(" ", text or "")
+
+
+def _strip_noise(text: str) -> str:
+    """Imprint tags then edition tags: storefront noise at any colon
+    position, never work identity (issues #13 and #17). Imprint first so
+    an edition tag the tag's removal exposes to a bracket or end of
+    string still strips."""
+    return _strip_edition(_strip_imprint(text))
+
+
 def normalize_title(title: str) -> str:
     """Fold, drop the subtitle (anything before a colon), edition tokens,
-    known imprint tags, article.
+    known imprint tags, edition annotations, article.
 
     "Capital: Volume I" and "Capital: A Critique of Political Economy" both
     normalize to "capital"; "The Left Hand of Darkness" loses its article;
     "The Mabinogion (Oxford World's Classics)" loses the store-front tag
     and normalizes to "mabinogion" (issue #13: classics rips carry these,
-    and the tag defeated the title judge on an otherwise exact duplicate).
-    A tag outside the known set compares as title text, as before.
+    and the tag defeated the title judge on an otherwise exact duplicate);
+    "The Rust Programming Language, 3rd Edition" loses the edition
+    annotation and normalizes next to the bare title (issue #17: the stamp
+    strips the tag from new arrivals, so a held edition-tagged title
+    defeated the judge on a same-edition pair). A tag outside the known
+    sets compares as title text, as before.
     """
-    text = _fold(_strip_imprint(title))
+    text = _fold(_strip_noise(title))
     text = text.split(":", 1)[0]
     text = _EDITION_TOKEN.sub(" ", text)
     return _scrub_tail(text)
@@ -271,12 +308,12 @@ def normalize_title(title: str) -> str:
 def _full_title(title: str) -> str:
     """The whole title, folded and scrubbed, subtitles and volume tokens
     kept — the string the containment check compares."""
-    return _scrub_tail(_fold(_strip_imprint(title)))
+    return _scrub_tail(_fold(_strip_noise(title)))
 
 
 def _subtitle(title: str) -> str:
     """The post-colon segment, folded and scrubbed ("" when no colon)."""
-    text = _fold(_strip_imprint(title))
+    text = _fold(_strip_noise(title))
     if ":" not in text:
         return ""
     return _scrub_tail(text.split(":", 1)[1])

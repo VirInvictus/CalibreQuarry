@@ -892,7 +892,7 @@ class TestRunPhase1(RunCase):
             }
         }
 
-        def fake_screen(files, db, out_notes=None):
+        def fake_screen(files, db, out_notes=None, refusals=None):
             if out_notes is not None:
                 out_notes.update(notes)
             return set()
@@ -915,6 +915,286 @@ class TestRunPhase1(RunCase):
             [{"with": "#3", "title": "Mothership: Wages of Sin"}],
         )
         self.assertNotIn("volume_siblings", entry["checks"])
+
+    def test_duplicate_detail_names_the_in_batch_sibling(self):
+        # Issue #18's live shape: two files of one edition shared only a
+        # mobi-asin, the screen's raw output was exactly right
+        # (batch_duplicates set, library_hits empty), and the decision
+        # detail still read "matches an existing library book" -- triage
+        # queried the library by title and ASIN for a book that was never
+        # there. The detail now quotes the split the report carried.
+        epub = self._make_file("Rust Author - Rust Title.epub")
+        mate = self._make_file("Rust Author - Rust Title (copy).epub", payload=b"COPY")
+
+        def fake_screen(files, db, notes=None, refusals=None):
+            if refusals is not None:
+                refusals[epub] = {"batch": [mate]}
+            return {epub}
+
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", side_effect=fake_screen),
+            mock.patch(
+                "cquarry_cli.run._drm_verdicts",
+                return_value={epub: "CLEAN", mate: "CLEAN"},
+            ),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        (decision,) = [d for d in man["decisions_needed"] if d["kind"] == "duplicate"]
+        self.assertEqual(
+            decision["detail"],
+            f"matches another file in this batch: {os.path.basename(mate)}",
+        )
+
+    def test_duplicate_detail_names_the_library_hit_and_the_sibling(self):
+        # When both refusal classes fire the detail says which: the held
+        # book by id and title, the batch sibling by filename.
+        epub = self._make_file("Rust Author - Rust Title.epub")
+
+        def fake_screen(files, db, notes=None, refusals=None):
+            if refusals is not None:
+                refusals[epub] = {
+                    "library": [{"id": 3123, "title": "Rust Title, 3rd Edition"}],
+                    "batch": ["/tmp/the-other-copy.epub"],
+                }
+            return {epub}
+
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", side_effect=fake_screen),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={epub: "CLEAN"}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        (decision,) = [d for d in man["decisions_needed"] if d["kind"] == "duplicate"]
+        self.assertEqual(
+            decision["detail"],
+            "matches an existing library book: #3123 Rust Title, 3rd Edition; "
+            "matches another file in this batch: the-other-copy.epub",
+        )
+
+    def test_preempted_lossy_strips_leave_a_record(self):
+        # Issue #19's live shape: the vetting pass flagged a lossy repair
+        # set (Black Man's Burden, pagination x22) into the first
+        # manifest, the step-3 repair sweep then ran `--apply --all`
+        # (which includes the lossy strips), and the completed mint's
+        # fresh battery read the file clean -- so the lossy_consent
+        # decision silently vanished from the signed manifest. The mint
+        # now records the preemption on the file's repairs, naming the
+        # earlier manifest and the pending strips.
+        flagged = self._make_file("Black Mans Burden.epub")
+        pending_shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": flagged,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "page_map_stripped, stripped_pagination x22",
+                        "fixes": {"stripped_pagination": 22},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
+                }
+            ],
+        }
+        clean_shape = {
+            "apply_lossy": False,
+            "books": [{"path": flagged, "repair": None}],
+        }
+
+        def vet(shape):
+            with (
+                mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+                mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+                mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+                mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+            ):
+                return run_phase1(self.downloads, self.db_path, quiet=True)
+
+        self.assertEqual(vet(pending_shape), 0)
+        self.assertEqual(vet(clean_shape), 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        names = os.listdir(manifests)
+        # Lexical order lies here ("-batch-2.json" < "-batch.json"); the
+        # unsuffixed name is the first run.
+        first = next(n for n in names if n.endswith("-batch.json"))
+        second = next(n for n in names if n != first)
+        man = manifest.load(os.path.join(manifests, first))
+        entry = manifest.file_by_path(man, flagged)
+        self.assertTrue(entry["lossy"]["flagged"])
+        self.assertEqual(entry["repairs"], [])
+        fresh = manifest.load(os.path.join(manifests, second))
+        fresh_entry = manifest.file_by_path(fresh, flagged)
+        self.assertFalse(fresh_entry["lossy"]["flagged"])
+        (note,) = fresh_entry["repairs"]
+        self.assertIn(f"recorded pending in {first}", note)
+        self.assertIn("page_map_stripped, stripped_pagination x22", note)
+        self.assertIn("applied outside the consent gate", note)
+        self.assertEqual(
+            [d for d in fresh["decisions_needed"] if d["kind"] == "lossy_consent"],
+            [],
+        )
+
+    def test_duplicate_detail_falls_back_neutral_without_the_breakdown(self):
+        # A refusal whose class breakdown never arrived (a mocked seam, a
+        # future shape change) reads a neutral string: neither refusal
+        # class may be claimed without the evidence.
+        from cquarry_cli.run import _duplicate_detail
+
+        self.assertEqual(
+            _duplicate_detail(None),
+            "duplicate detected by the screen (class breakdown unavailable)",
+        )
+        self.assertEqual(
+            _duplicate_detail({}),
+            "duplicate detected by the screen (class breakdown unavailable)",
+        )
+
+    def test_preempted_note_yields_to_a_consent_path_record(self):
+        # A same-day manifest recording the strips as APPLIED means the
+        # consent path ran (an --apply-lossy mint, or phase 2 consuming an
+        # in-manifest resolution): its own record is the history, and the
+        # preemption note would claim a false WHY.
+        flagged = self._make_file("Security in Computing.epub")
+        pending_shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": flagged,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
+                }
+            ],
+        }
+        clean_shape = {
+            "apply_lossy": False,
+            "books": [{"path": flagged, "repair": None}],
+        }
+
+        def vet(shape):
+            with (
+                mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+                mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+                mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+                mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+            ):
+                return run_phase1(self.downloads, self.db_path, quiet=True)
+
+        self.assertEqual(vet(pending_shape), 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        names = os.listdir(manifests)
+        first = next(n for n in names if n.endswith("-batch.json"))
+        # The consent drive's own save: the record flips to applied.
+        consented = manifest.load(os.path.join(manifests, first))
+        for record in manifest.file_by_path(consented, flagged)["lossy"]["repairs"]:
+            record["applied"] = True
+        manifest.save(consented, os.path.join(manifests, first))
+        self.assertEqual(vet(clean_shape), 0)
+        names = os.listdir(manifests)
+        second = next(n for n in names if n != first)
+        fresh = manifest.load(os.path.join(manifests, second))
+        self.assertEqual(manifest.file_by_path(fresh, flagged)["repairs"], [])
+
+    def test_preempted_note_needs_a_clean_fresh_read(self):
+        # A fresh mint that STILL reads the file lossy-flagged keeps the
+        # consent flow: the pending state stands, the decision fires
+        # again, and no preemption note contradicts it.
+        flagged = self._make_file("Security in Computing.epub")
+        pending_shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": flagged,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
+                }
+            ],
+        }
+
+        def vet(shape):
+            with (
+                mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+                mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+                mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+                mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+            ):
+                return run_phase1(self.downloads, self.db_path, quiet=True)
+
+        self.assertEqual(vet(pending_shape), 0)
+        self.assertEqual(vet(pending_shape), 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        names = os.listdir(manifests)
+        first = next(n for n in names if n.endswith("-batch.json"))
+        second = next(n for n in names if n != first)
+        fresh = manifest.load(os.path.join(manifests, second))
+        entry = manifest.file_by_path(fresh, flagged)
+        self.assertTrue(entry["lossy"]["flagged"])
+        self.assertEqual(entry["repairs"], [])
+        self.assertEqual(
+            len([d for d in fresh["decisions_needed"] if d["kind"] == "lossy_consent"]),
+            1,
+        )
+
+    def test_preempted_note_needs_a_fresh_battery(self):
+        # Without a bindery battery there is no evidence the strips were
+        # applied (the file may read clean because the instrument was
+        # simply unavailable): the mint claims nothing.
+        flagged = self._make_file("Security in Computing.epub")
+        pending_shape = {
+            "apply_lossy": False,
+            "books": [
+                {
+                    "path": flagged,
+                    "repair": {
+                        "status": "accept",
+                        "summary": "stripped_watermarks:1",
+                        "fixes": {"stripped_watermarks": 1},
+                        "ncx_uid_synced": False,
+                        "watermark_refusals": 0,
+                    },
+                }
+            ],
+        }
+
+        def vet(shape):
+            with (
+                mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+                mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+                mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+                mock.patch("cquarry_cli.run._bindery_phase1", return_value=shape),
+            ):
+                return run_phase1(self.downloads, self.db_path, quiet=True)
+
+        self.assertEqual(vet(pending_shape), 0)
+        self.assertEqual(vet({}), 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        names = os.listdir(manifests)
+        first = next(n for n in names if n.endswith("-batch.json"))
+        second = next(n for n in names if n != first)
+        fresh = manifest.load(os.path.join(manifests, second))
+        entry = manifest.file_by_path(fresh, flagged)
+        self.assertFalse(entry["lossy"]["flagged"])
+        self.assertEqual(entry["repairs"], [])
 
 
 class TestPhase1Seams(RunCase):
@@ -1027,7 +1307,15 @@ class TestPhase1Seams(RunCase):
         )
         con.commit()
         con.close()
-        self.assertEqual(_screen_duplicates([epub], self.db_path), {epub})
+        refusals: dict = {}
+        self.assertEqual(
+            _screen_duplicates([epub], self.db_path, refusals=refusals), {epub}
+        )
+        # The refusal evidence rides out of the same real run (issue #18):
+        # a library hit, described by the descriptor the detail quotes.
+        (lib,) = refusals[epub]["library"]
+        self.assertEqual(lib["id"], book)
+        self.assertIsNone(refusals[epub].get("batch"))
 
     def test_screen_duplicates_notes_carry_advisories_not_refusals(self):
         # The advisory half of the report: related containment candidates
@@ -1060,6 +1348,44 @@ class TestPhase1Seams(RunCase):
             },
         )
 
+    def test_screen_duplicates_carries_the_refusal_split(self):
+        # Issue #18: the report always carried the two refusal classes;
+        # the seam hands them to the runner so the duplicate decision's
+        # detail can tell a library hit from the in-batch sibling.
+        hit = self._make_file("Hit Author - Hit Title.epub")
+        clean = self._make_file("Clean Author - Clean Title.epub")
+        report = [
+            {
+                "file": hit,
+                "title": "Hit Title",
+                "authors": ["Hit Author"],
+                "isbn": "",
+                "library_hits": [{"id": 3123, "title": "Hit Title, 3rd Edition"}],
+                "batch_duplicates": ["/tmp/batch_mate.epub"],
+            },
+            {
+                "file": clean,
+                "title": "Clean Title",
+                "authors": ["Clean Author"],
+                "isbn": "",
+                "library_hits": [],
+            },
+        ]
+        proc = mock.Mock(returncode=1, stdout=json.dumps(report), stderr="")
+        refusals: dict = {}
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            dups = _screen_duplicates([hit, clean], self.db_path, refusals=refusals)
+        self.assertEqual(dups, {hit})
+        self.assertEqual(
+            refusals,
+            {
+                hit: {
+                    "library": [{"id": 3123, "title": "Hit Title, 3rd Edition"}],
+                    "batch": ["/tmp/batch_mate.epub"],
+                }
+            },
+        )
+
     def test_phase1_hands_the_screen_only_screenable_files(self):
         # The pre-filter is screen_duplicate's own extension set: a djvu
         # inventory never reaches it (its exit-2 "no ebook files" was the
@@ -1068,7 +1394,7 @@ class TestPhase1Seams(RunCase):
         djvu = self._make_file("broken_scan.djvu", payload=b"DJVUDATA")
         seen = {}
 
-        def fake_screen(files, db, notes=None):
+        def fake_screen(files, db, notes=None, refusals=None):
             seen["files"] = files
             return set()
 

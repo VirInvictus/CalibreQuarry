@@ -258,8 +258,40 @@ def _provenance_from_filename(path: str) -> str | None:
     return None
 
 
+def _duplicate_detail(refusals: dict[str, dict[str, list]] | None) -> str:
+    """The duplicate decision's detail, split by the screen's two refusal
+    classes (issue #18). The JSON report always carried the split; the
+    single hard-coded string ("matches an existing library book") sent
+    triage hunting through the library for a hit that was actually the
+    other file in the same batch. Library hits name the held book; batch
+    hits name the sibling file; when both fire the detail says both."""
+    if not refusals:
+        # A mocked seam (or a future shape change) that records a refusal
+        # without the breakdown: neutral, never a guess about which class.
+        return "duplicate detected by the screen (class breakdown unavailable)"
+    bits = []
+    hits = refusals.get("library") or []
+    if hits:
+        named = "; ".join(
+            f"#{h.get('id')} {h.get('title') or ''}".strip() for h in hits
+        )
+        bits.append(f"matches an existing library book: {named}")
+    batch = refusals.get("batch") or []
+    if batch:
+        named = ", ".join(os.path.basename(str(p)) for p in batch)
+        bits.append(f"matches another file in this batch: {named}")
+    return (
+        "; ".join(bits)
+        if bits
+        else ("duplicate detected by the screen (class breakdown unavailable)")
+    )
+
+
 def _screen_duplicates(
-    files: list[str], db_path: str, notes: dict[str, dict[str, list]] | None = None
+    files: list[str],
+    db_path: str,
+    notes: dict[str, dict[str, list]] | None = None,
+    refusals: dict[str, dict[str, list]] | None = None,
 ) -> set[str]:
     """screen_duplicate.py --format json over the inventoried files: the
     paths with a library or within-batch duplicate hit.
@@ -270,7 +302,10 @@ def _screen_duplicates(
     When `notes` is given it receives the screen's advisory pairs per path
     (related containment candidates and multi-volume set siblings): these
     are never refusals, but the manifest records them so the review pass
-    sees what the screen saw."""
+    sees what the screen saw. When `refusals` is given it receives the
+    screen's refusal evidence per path (the library_hits descriptors and
+    the batch_duplicates paths), the split the duplicate decision's detail
+    quotes (issue #18)."""
     if not files:
         return set()
     script = _scripts_dir() / "screen_duplicate.py"
@@ -313,6 +348,19 @@ def _screen_duplicates(
                 )
             if entry:
                 notes[record["file"]] = entry
+    if refusals is not None:
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("file"), str):
+                continue
+            refusal: dict[str, list] = {}
+            hits = record.get("library_hits")
+            if isinstance(hits, list) and hits:
+                refusal["library"] = [h for h in hits if isinstance(h, dict)]
+            batch = record.get("batch_duplicates")
+            if isinstance(batch, list) and batch:
+                refusal["batch"] = batch
+            if refusal:
+                refusals[record["file"]] = refusal
     return {
         record["file"]
         for record in records
@@ -577,6 +625,97 @@ def _mirror_bindery_decisions(
             )
 
 
+def _note_preempted_lossy(
+    man: dict[str, Any], library_dir: str, bindery_shape: dict[str, Any]
+) -> int:
+    """The consent gate is order-dependent when a same-day repair sweep
+    ran with `--all` (issue #19): the sweep applies the lossy strips
+    along with the structural set, so a file an earlier vetting manifest
+    recorded as lossy-pending can read clean in this mint and the
+    lossy_consent decision never fires -- the consent architecture never
+    got its decision. This mirror keeps the durable record honest: for
+    every file the earlier SAME-DAY manifests flagged with unapplied
+    lossy repairs that THIS mint reads as not lossy-flagged (a fresh
+    battery ran; without one there is no evidence either way), the file's
+    `repairs` note names the earlier manifest, the pending strips, and
+    why the consent was preempted. A same-day manifest recording the
+    path's lossy repairs as ALREADY APPLIED suppresses the note: the
+    consent path ran there (an --apply-lossy mint, or phase 2 consuming
+    an in-manifest resolution) and its own record is the history, so a
+    clean read now is expected and claiming the sweep did it would be a
+    false WHY. Informational by design: the strips already happened, so
+    a blocking decision would gate the import on a consent that is
+    moot. Returns the number of notes written."""
+    if not bindery_shape:
+        return 0
+    today = _now_stamp()
+    mdir = manifest.manifests_dir(library_dir)
+    try:
+        names = sorted(os.listdir(mdir))
+    except OSError:
+        return 0
+    pending: dict[str, tuple[str, str]] = {}
+    consented: set[str] = set()
+    for name in names:
+        if not name.startswith(f"{today}-batch") or not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(mdir, name), encoding="utf-8") as f:
+                earlier = json.load(f)
+        except OSError, json.JSONDecodeError, UnicodeDecodeError:
+            continue
+        if not isinstance(earlier, dict):
+            continue
+        for entry in earlier.get("files") or []:
+            if not isinstance(entry, dict) or not entry.get("path"):
+                continue
+            lossy = entry.get("lossy")
+            if not isinstance(lossy, dict) or not lossy.get("flagged"):
+                continue
+            abspath = os.path.abspath(str(entry["path"]))
+            if any(
+                isinstance(record, dict)
+                and record.get("lossy")
+                and record.get("applied")
+                for record in lossy.get("repairs") or []
+            ):
+                consented.add(abspath)
+                continue
+            bits = "; ".join(
+                str(record.get("summary") or "")
+                for record in lossy.get("repairs") or []
+                if isinstance(record, dict)
+                and record.get("lossy")
+                and not record.get("applied")
+            )
+            if bits:
+                pending[abspath] = (name, bits)
+    if not pending:
+        return 0
+    fresh = {os.path.abspath(f["path"]): f for f in man["files"]}
+    noted = 0
+    for path in sorted(pending):
+        # The consent path already covered this file today: its own
+        # manifest is the record, and the preemption claim would be a lie.
+        if path in consented:
+            continue
+        entry = fresh.get(path)
+        # Not in this batch, or this mint still reads it lossy-flagged
+        # (the pending state stands; the fresh decision covers it).
+        if entry is None or entry["lossy"]["flagged"]:
+            continue
+        name, bits = pending[path]
+        entry["repairs"].append(
+            f"lossy repairs recorded pending in {name} ({bits}) read clean "
+            "in this mint: a repair sweep's --all applies the lossy strips "
+            "with the structural set, so they were applied outside the "
+            "consent gate and this mint's lossy_consent decision did not "
+            "fire"
+        )
+        noted += 1
+    return noted
+
+
 def _quarantine(downloads_dir: str, path: str, reason: str) -> str:
     """Move one problem file into _quarantine/, never onto an existing
     file: a basename collision gets a numbered sibling, so two same-named
@@ -669,12 +808,15 @@ def run_phase1(
     battery = _pdf_battery(files)
     # The advisories (related containment candidates, multi-volume set
     # siblings) ride out of the same subprocess call; the refused set keeps
-    # its own contract.
+    # its own contract, and the refusal evidence (library hit vs in-batch
+    # sibling) feeds the duplicate decision's detail (issue #18).
     screen_notes: dict[str, dict[str, list]] = {}
+    screen_refusals: dict[str, dict[str, list]] = {}
     dup_paths = _screen_duplicates(
         [f for f in files if os.path.splitext(f)[1].lower() in _SCREEN_EXTS],
         db_path,
         screen_notes,
+        screen_refusals,
     )
 
     man = manifest.new_manifest(downloads_dir)
@@ -763,7 +905,10 @@ def run_phase1(
             entry["verdict"] = "duplicate_refused"
             manifest.add_file(man, entry)
             manifest.add_decision(
-                man, "duplicate", file=path, detail="matches an existing library book"
+                man,
+                "duplicate",
+                file=path,
+                detail=_duplicate_detail(screen_refusals.get(path)),
             )
             continue
         entry["verdict"] = "needs_decision"
@@ -782,6 +927,12 @@ def run_phase1(
             entry["verdict"] = "approved_for_import"
     _mirror_lossy(man, bindery_shape)
     _mirror_bindery_decisions(man, bindery_shape, apply_lossy=apply_lossy)
+    # The order-dependence note (issue #19): a same-day repair sweep's
+    # --all applies the lossy strips ahead of the consent gate; when the
+    # earlier manifest recorded them pending and this mint reads the file
+    # clean, the record says so instead of the decision silently
+    # vanishing.
+    preempted = _note_preempted_lossy(man, library_dir, bindery_shape)
     manifest.approve(
         man,
         [f["path"] for f in man["files"] if f["verdict"] == "approved_for_import"],
@@ -815,6 +966,12 @@ def run_phase1(
             print(
                 f"  screen advisories: {related_count} related candidate(s), "
                 f"{volume_count} multi-volume file(s) (see checks; judged, not refused)"
+            )
+        if preempted:
+            print(
+                f"  preempted consent: {preempted} file(s) whose pending "
+                "lossy strips a repair sweep applied before this mint "
+                "(see repairs; the lossy_consent decision did not fire)"
             )
         print(f"  decisions_needed: {len(man['decisions_needed'])}")
         print(f"Manifest: {manifest_path}")

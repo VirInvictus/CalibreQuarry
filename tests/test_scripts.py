@@ -978,6 +978,58 @@ class TestScreenDuplicateClassify(unittest.TestCase):
         # post-colon subtitle.
         self._check("Wages of Sin", "Mothership: Wages of Sin", "related")
 
+    def test_edition_tags_are_annotations_not_identity(self):
+        # Issue #17's live misses (the 2026-10-13 evening wave): the stamp
+        # strips the edition tag from new arrivals, so a held title still
+        # carrying ", Nth Edition" defeated the judge on a same-edition
+        # pair (Rust 3rd, Linux Command Line 3rd). The strip covers the
+        # comma, colon, and "ed." forms, and differing real editions still
+        # surface (the Ghidra shape was flagged before only because its
+        # two titles matched exactly).
+        self._check(
+            "The Rust Programming Language",
+            "The Rust Programming Language, 3rd Edition",
+            "duplicate",
+        )
+        self._check(
+            "The Linux Command Line: A Complete Introduction",
+            "The Linux Command Line, 2nd Edition: A Complete Introduction",
+            "duplicate",
+        )
+        self._check(
+            "The Ghidra Book: The Definitive Guide",
+            "The Ghidra Book, 2nd Edition: The Definitive Guide",
+            "duplicate",
+        )
+        self._check("Pattern Recognition, 4th ed.", "Pattern Recognition", "duplicate")
+        # An edition tag as the whole subtitle, and inside a bracket.
+        self._check("Foo: 3rd Edition", "Foo", "duplicate")
+        self._check("Foo (2nd Edition)", "Foo", "duplicate")
+        # Stacked with an imprint tag (both strips compose).
+        self._check(
+            "The Mabinogion (Oxford World's Classics), 3rd Edition",
+            "The Mabinogion",
+            "duplicate",
+        )
+        # A genuinely different work sharing the base title does not
+        # newly collide: "Version 2.0" is no edition tag, and the bare
+        # base vs real-subtitle shape stays a related candidate.
+        self._check("Code", "Code: Version 2.0", "related")
+        # Mid-title prose is not an annotation and never strips.
+        self._check("The 2nd edition of the Handbook", "The Handbook", None)
+        # The volume rules keep reading the RAW title: an edition tag on
+        # one side cannot flip a declared-volume disagreement.
+        self._check(
+            "Moral Letters to Lucilius. Volume 1, 2nd Edition",
+            "Moral Letters to Lucilius. Volume 2",
+            "volume_sibling",
+        )
+        self._check(
+            "The Wandering Inn",
+            "The Wandering Inn: Book 8",
+            None,
+        )
+
     def test_arabic_asymmetric_volume_stays_silent(self):
         # The 3.25.0 gate unchanged: one side declaring an arabic volume the
         # other does not mention is a gap-fill (the Wandering Inn smoke
