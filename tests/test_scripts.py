@@ -938,6 +938,42 @@ class TestScreenDuplicateClassify(unittest.TestCase):
         # The Arcana Unleashed shape (roadmap 2026-09-19 box): bare base vs
         # base + companion subtitle.
         self._check("Arcana Unleashed", "Arcana Unleashed: Deadfall", "related")
+
+    def test_imprint_tags_are_store_fronts_not_identity(self):
+        # Issue #13's live miss: the rip's embedded title carried the
+        # imprint tag and the title judge had no opinion on an otherwise
+        # exact duplicate. The known set strips; two different imprints of
+        # one work collide into the hand-check class, which is the point.
+        self._check(
+            "The Mabinogion (Oxford World's Classics)", "The Mabinogion", "duplicate"
+        )
+        self._check(
+            "The Iliad (Penguin Classics)",
+            "The Iliad (Oxford World's Classics)",
+            "duplicate",
+        )
+        self._check(
+            "Wuthering Heights [Wordsworth Classics]", "Wuthering Heights", "duplicate"
+        )
+        # An unknown parenthetical compares as title text, as before.
+        self._check(
+            "The Mabinogion (Translated by Sioned Davies)", "The Mabinogion", None
+        )
+        # A known imprint named in prose is not a bracketed tag.
+        self._check("The Penguin Classics Book", "The Penguin Classics", None)
+        # The tag is noise at any colon position: the strip covers the
+        # subtitle helpers too, so a colon-bearing classic judges on its
+        # real subtitle alone.
+        self._check(
+            "The Mabinogion: A New Translation (Oxford World's Classics)",
+            "The Mabinogion: A New Translation",
+            "duplicate",
+        )
+        self._check(
+            "The Iliad (Penguin Classics): Translated by Fagles",
+            "The Iliad: Translated by Fagles",
+            "duplicate",
+        )
         # The masked-duplicate shape: the file title IS the library copy's
         # post-colon subtitle.
         self._check("Wages of Sin", "Mothership: Wages of Sin", "related")
@@ -1060,6 +1096,18 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         c.execute(
             "INSERT INTO identifiers (book, type, val) VALUES (1, 'isbn', '9780140445688')"
         )
+        # The issue-#13 shape: the held Mabinogion carries the mobi-asin
+        # that z-lib rips keep when they strip the ISBN.
+        c.execute(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (5, 'The Mabinogion', 'Mabinogion, The', 'Anonymous', 'p5', 1)"
+        )
+        c.execute("INSERT INTO authors VALUES (5, 'Anonymous')")
+        c.execute("INSERT INTO books_authors_link (book, author) VALUES (5, 5)")
+        c.execute(
+            "INSERT INTO identifiers (book, type, val) VALUES"
+            " (5, 'mobi-asin', 'B005Q8EAEI')"
+        )
         # Tables _BOOK_SELECT joins; empty here, present so get_all_books works.
         c.execute("CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT)")
         c.execute(
@@ -1096,6 +1144,70 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         self.assertEqual([h["id"] for h in hits], [1])
         self.assertEqual(hits[0]["formats"], ["EPUB"])
         self.assertEqual(hits[0]["size"], 2048)
+
+    def test_asin_hit_across_type_spellings(self):
+        # Issue #13's live miss, end to end through the real search engine:
+        # the rip carries no isbn, only mobi-asin B005Q8EAEI, and the held
+        # book carries the SAME value. The exact-value keypair matches any
+        # identifier type, so a file-side `asin` meets a library-side
+        # `mobi-asin`. The title/author gates alone still find nothing:
+        # the translator-form author matches no library author.
+        fields = {
+            "file": "/dl/mabi.epub",
+            "title": "The Mabinogion (Oxford World's Classics)",
+            "authors": ["Davies, Sioned"],
+            "isbn": "",
+            "asins": ["B005Q8EAEI"],
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([h["id"] for h in hits], [5])
+        self.assertEqual(related, [])
+        no_asin = dict(fields, asins=[])
+        self.assertEqual(screen_duplicate._library_hits(self.db, no_asin), ([], []))
+
+    def test_embedded_fields_collect_asins(self):
+        # The Identifiers-line parse keeps ASIN-type values (both common
+        # type spellings) alongside the isbn; other types stay out.
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            return_value={
+                "title": "The Mabinogion (Oxford World's Classics)",
+                "author(s)": "Davies, Sioned",
+                "identifiers": "mobi-asin:B005Q8EAEI, uri:urn:uuid:x, asin:B000OTHER09",
+            },
+        ):
+            rec = screen_duplicate._embedded_fields(Path("/dl/mabi.epub"))
+        self.assertEqual(rec["isbn"], "")
+        self.assertEqual(rec["asins"], ["B005Q8EAEI", "B000OTHER09"])
+
+    def test_same_asin_binds_batch_duplicates(self):
+        # The within-batch half of issue #13: two rips of one edition, no
+        # ISBN either side, translator-form author vs the original. The
+        # shared ASIN binds them like a shared ISBN, across type spellings.
+        files = [Path("/dl/m1.epub"), Path("/dl/m2.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "The Mabinogion (Oxford World's Classics)",
+                    "author(s)": "Davies, Sioned",
+                    "identifiers": "mobi-asin:B005Q8EAEI",
+                },
+                {
+                    "title": "The Mabinogion",
+                    "author(s)": "Anonymous",
+                    "identifiers": "asin:b005q8eaei",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/m2.epub"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/m1.epub"])
+        # Both also hit the fixture book on the same ASIN.
+        self.assertEqual([h["id"] for h in out[0]["library_hits"]], [5])
+        self.assertEqual([h["id"] for h in out[1]["library_hits"]], [5])
 
     def test_different_volume_is_not_a_hit(self):
         # Book 7 of a series is not a duplicate of a Book 8 download, even

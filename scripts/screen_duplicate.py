@@ -3,8 +3,10 @@
 
 Phase 1 § 3's duplicate screen as a tool. Reads each candidate file's embedded
 title/authors/ISBN with `ebook-meta` (Calibre's reader, read-only invocation)
-and matches against the library by exact ISBN first, then by normalized title
-+ first author via cquarry's search engine. The filename appears only as a
+and matches against the library by exact ISBN first, then by ASIN value
+(the same class of edition key, matched across identifier types), then by
+normalized title + first author via cquarry's search engine. The filename
+appears only as a
 display hint: AA/z-library filenames lie ("...Volume 1..." held Volume 3;
 titles arrive word-scrambled), so the embedded metadata decides.
 
@@ -55,6 +57,13 @@ from pathlib import Path
 
 EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3"}
 
+# Identifier types whose value is an edition ASIN. z-lib rips routinely
+# strip the ISBN and keep the ASIN (issue #13's live miss), so the ASIN
+# is matched against library identifier VALUES exactly, any type: a
+# file-side `asin` meets a library-side `mobi-asin`, and the uuid/calibre
+# values the writer re-adds can never collide with an ASIN-shaped string.
+_ASIN_TYPES = frozenset({"asin", "mobi-asin"})
+
 RESET = "\033[0m"
 YELLOW = "\033[1;33m"
 RED = "\033[1;31m"
@@ -89,7 +98,8 @@ def _ebook_meta(path: Path) -> dict[str, str]:
 
 
 def _embedded_fields(path: Path) -> dict[str, object]:
-    """The embedded title / authors / isbn of one candidate file.
+    """The embedded title / authors / isbn / ASIN values of one candidate
+    file (the ASIN types in _ASIN_TYPES, issue #13's edition keys).
 
     Filename fallback direction note (roadmap :902): for a file with no
     embedded metadata, ebook-meta reports the filename as "Title - Author",
@@ -109,12 +119,22 @@ def _embedded_fields(path: Path) -> dict[str, object]:
         if a.strip()
     ]
     isbn = ""
+    asins: list[str] = []
     for pair in re.split(r"[,;]", meta.get("identifiers") or ""):
         kind, _, val = pair.strip().partition(":")
-        if kind.strip().lower() == "isbn" and val.strip():
-            isbn = val.strip()
-            break
-    return {"file": str(path), "title": title, "authors": authors, "isbn": isbn}
+        val = val.strip()
+        kind = kind.strip().lower()
+        if kind == "isbn" and val:
+            isbn = val
+        elif kind in _ASIN_TYPES and val:
+            asins.append(val)
+    return {
+        "file": str(path),
+        "title": title,
+        "authors": authors,
+        "isbn": isbn,
+        "asins": asins,
+    }
 
 
 def _fold(text: str) -> str:
@@ -124,6 +144,28 @@ def _fold(text: str) -> str:
 
 
 _EDITION_TOKEN = re.compile(r"\b(vol|volume|part|pt|book|bd)\.?\s*\d+\b", re.IGNORECASE)
+# The store-front tags classics rips carry in the title (issue #13).
+# Paren-scoped on purpose: an imprint named in prose is not a tag. The
+# set grows as new rips surface new tags. Every title comparison in the
+# judge (base, full, subtitle, core) strips them: a tag is store-front
+# noise at any colon position, never work identity.
+_IMPRINT_TAG = re.compile(
+    r"\s*[\(\[]\s*(?:"
+    r"oxford world(?:['’]s)? classics"
+    r"|penguin classics"
+    r"|modern library"
+    r"|everyman(?:['’]s)? library"
+    r"|norton critical editions"
+    r"|loeb classical library"
+    r"|vintage classics"
+    r"|wordsworth classics"
+    r"|barnes (?:&|and) noble classics"
+    r"|bantam classics"
+    r"|signet classics"
+    r"|dover thrift editions"
+    r")\s*[\)\]]\s*",
+    re.IGNORECASE,
+)
 _VOLUME_SIG = re.compile(r"\b(vol|volume|part|pt|book|bd)\.?\s*(\d+)\b", re.IGNORECASE)
 #: Declared volume annotations extend the arabic-only signature to the roman
 #: forms ("Capital: Volume I" declares volume 1 without carrying a signature).
@@ -204,13 +246,23 @@ def _scrub_tail(text: str) -> str:
     return text
 
 
+def _strip_imprint(text: str) -> str:
+    """The known imprint tags removed, wherever the judge compares."""
+    return _IMPRINT_TAG.sub(" ", text or "")
+
+
 def normalize_title(title: str) -> str:
-    """Fold, drop the subtitle (anything before a colon), edition tokens, article.
+    """Fold, drop the subtitle (anything before a colon), edition tokens,
+    known imprint tags, article.
 
     "Capital: Volume I" and "Capital: A Critique of Political Economy" both
-    normalize to "capital"; "The Left Hand of Darkness" loses its article.
+    normalize to "capital"; "The Left Hand of Darkness" loses its article;
+    "The Mabinogion (Oxford World's Classics)" loses the store-front tag
+    and normalizes to "mabinogion" (issue #13: classics rips carry these,
+    and the tag defeated the title judge on an otherwise exact duplicate).
+    A tag outside the known set compares as title text, as before.
     """
-    text = _fold(title or "")
+    text = _fold(_strip_imprint(title))
     text = text.split(":", 1)[0]
     text = _EDITION_TOKEN.sub(" ", text)
     return _scrub_tail(text)
@@ -219,12 +271,12 @@ def normalize_title(title: str) -> str:
 def _full_title(title: str) -> str:
     """The whole title, folded and scrubbed, subtitles and volume tokens
     kept — the string the containment check compares."""
-    return _scrub_tail(_fold(title or ""))
+    return _scrub_tail(_fold(_strip_imprint(title)))
 
 
 def _subtitle(title: str) -> str:
     """The post-colon segment, folded and scrubbed ("" when no colon)."""
-    text = _fold(title or "")
+    text = _fold(_strip_imprint(title))
     if ":" not in text:
         return ""
     return _scrub_tail(text.split(":", 1)[1])
@@ -360,12 +412,15 @@ def _library_hits(
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Existing library copies of one candidate file, as (duplicates,
     related). Exact ISBN first (the search engine's `isbn:X` is an exact
-    keypair lookup), then normalized title + first author: the tight `=`
-    search supplies candidates and classify_titles() judges the pair.
-    Related hits are the containment candidates a series/store prefix can
-    mask (the 2026-09-21 "Mothership: Wages of Sin" vs "Wages of Sin"
-    silent pass): reported for judgment, never as duplicates. Hydrated
-    list fields stay lists (never comma-split) per the cquarry contract.
+    keypair lookup), then ASIN values (the same class of edition key: an
+    exact `identifiers:=VALUE` lookup matches ANY identifier type, so a
+    file-side `asin` meets a library-side `mobi-asin`), then normalized
+    title + first author: the tight `=` search supplies candidates and
+    classify_titles() judges the pair. Related hits are the containment
+    candidates a series/store prefix can mask (the 2026-09-21 "Mothership:
+    Wages of Sin" vs "Wages of Sin" silent pass): reported for judgment,
+    never as duplicates. Hydrated list fields stay lists (never
+    comma-split) per the cquarry contract.
     """
     hits: list[dict[str, object]] = []
     related: list[dict[str, object]] = []
@@ -374,6 +429,12 @@ def _library_hits(
     isbn = fields.get("isbn") or ""
     if isbn:
         for b in db.search_books(f"isbn:{_search_escape(isbn)}"):
+            if b["id"] not in seen:
+                seen.add(b["id"])
+                hits.append(b)
+
+    for asin in fields.get("asins") or []:
+        for b in db.search_books(f"identifiers:={_search_escape(asin)}"):
             if b["id"] not in seen:
                 seen.add(b["id"])
                 hits.append(b)
@@ -461,7 +522,13 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
             else:
                 verdict = classify_titles(titles[key_a], titles[key_b])
             same_isbn = bool(rec.get("isbn")) and rec["isbn"] == other.get("isbn")
-            if same_isbn or (same_author and verdict == "duplicate"):
+            # The ASIN binds within the batch exactly like the ISBN: same
+            # edition key, and rips that strip ISBNs keep ASINs (issue #13).
+            same_asin = bool(
+                {a.casefold() for a in rec.get("asins") or []}
+                & {a.casefold() for a in other.get("asins") or []}
+            )
+            if same_isbn or same_asin or (same_author and verdict == "duplicate"):
                 rec.setdefault("batch_duplicates", []).append(other["file"])
                 other.setdefault("batch_duplicates", []).append(rec["file"])
             elif not same_author:
@@ -504,6 +571,8 @@ def _print_report(records: list[dict[str, object]], skipped: list[str]) -> None:
             print(f"           authors:  {' & '.join(rec['authors'])}")
         if rec.get("isbn"):
             print(f"           isbn:     {rec['isbn']}")
+        if rec.get("asins"):
+            print(f"           asins:    {', '.join(rec['asins'])}")
         for h in hits:
             candidates += 1
             fmts = ", ".join(h["formats"]) or "no formats"
