@@ -34,7 +34,12 @@ block, whole-archive rewrite through a temp file + os.replace):
   entries, and rewrite a stale package unique-identifier element IN PLACE
   (id attribute and position stay; scheme and text become the book uuid
   under the writer's own calibre scheme) so the package reference never
-  dangles."""
+  dangles. A default-namespace EPUB3 package — EPUB 3's alternate form,
+  the OPF namespace bound as the default on <package> and dc bound there
+  too, no OPF-prefix binding anywhere — is handled in place: when the
+  surgery must name the OPF namespace it synthesizes the binding as a
+  declaration on the <metadata> opening tag (issue #16's live class)
+  instead of refusing the pass."""
 
 import os
 import re
@@ -64,6 +69,12 @@ _DC_DATE_SPAN = re.compile(
 )
 _METADATA_BLOCK = re.compile(r"<metadata\b.*?</metadata\s*>", re.DOTALL | re.IGNORECASE)
 _DC_NS_BINDING = 'xmlns:dc="http://purl.org/dc/elements/1.1/"'
+# The OPF-namespace declaration the identifier surgery synthesizes on the
+# <metadata> opening tag when the document binds no prefix for it (a
+# default-namespace EPUB3 package, issue #16's live class) and must name
+# the namespace anyway: for the scheme attribute it adds to a rewritten
+# package slot or to a freshly inserted identifier.
+_OPF_NS_BINDING = 'xmlns:opf="http://www.idpf.org/2007/opf"'
 # OPF 2.0 DTD order: title, creator*, subject*, description?, publisher?,
 # contributor*, date*, ... identifier+. A freshly inserted date goes after the
 # last of the elements that precede date in that order.
@@ -133,9 +144,11 @@ def canonical_dc_dates(opf_text: str, target: str) -> str | None:
     case, matching how the diff compares; callers build the target with
     canonical_date_target). Returns byte-identical text when the
     file is already canonical, or None when the shape cannot be safely
-    rewritten: no metadata block, or dates the document carries without the
-    standard dc prefix binding (a file this function cannot name elements in
-    must not be half-edited; the read-back re-diff stays the arbiter).
+    rewritten: no metadata block, or dates to insert while the dc prefix is
+    bound nowhere in scope — neither in the metadata block nor on an
+    ancestor of it, a default-namespace EPUB3's <package> included (an
+    insertion the document cannot name must not be half-edited; the
+    read-back re-diff stays the arbiter).
     Surgery is confined to the metadata block — everything outside it,
     including EPUB3's dcterms:modified meta element, is untouched."""
     block_m = _METADATA_BLOCK.search(opf_text)
@@ -149,7 +162,10 @@ def canonical_dc_dates(opf_text: str, target: str) -> str | None:
     if len(spans) == 1 and target and spans[0].group(0) == canonical:
         return opf_text
     if not spans:
-        if _DC_NS_BINDING not in block:
+        if (
+            _DC_NS_BINDING not in block
+            and _DC_NS_BINDING not in opf_text[: block_m.start()]
+        ):
             return None
         anchor = None
         for tag in _DATE_PREDECESSORS:
@@ -201,6 +217,12 @@ def _norm_ident(value: str | None) -> str:
     return re.sub(r"\s+", " ", unescape(value or "")).strip().lower()
 
 
+def _opening_tag(span_text: str) -> str:
+    """The opening tag of one element span, through its first '>'. The same
+    prefix the scheme and id reads below run over."""
+    return span_text[: span_text.index(">") + 1]
+
+
 def _identifier_parts(span_text: str) -> tuple[str | None, str, str | None]:
     """(scheme, value, id) for one dc:identifier span, read the way calibre's
     OPF reader reads them: any attribute whose name ends with 'scheme' names
@@ -209,7 +231,7 @@ def _identifier_parts(span_text: str) -> tuple[str | None, str, str | None]:
     is spelling, not content. A scheme-less element comes back with scheme
     None and its raw text — the reader derives an isbn only from the
     urn:isbn: form there, which the caller checks itself."""
-    opening = span_text[: span_text.index(">") + 1]
+    opening = _opening_tag(span_text)
     scheme = None
     scheme_m = _SCHEME_ATTR.search(opening)
     if scheme_m:
@@ -232,8 +254,9 @@ def _rewrite_package_identifier(
     element name, its id attribute, and its position stay; the scheme value
     becomes `calibre` (the writer's own scheme, invisible to the read seam)
     and the text the book uuid. Returns None when the rewrite cannot be
-    named (no uuid, or a scheme attribute must be added but the document
-    binds no prefix for the OPF namespace)."""
+    named (no uuid, or a scheme attribute must be added and the caller
+    passed no prefix — with the synthesis above the caller, that refuses
+    only shapes this module never produces)."""
     if not uuid:
         return None
     opening_end = span_text.index(">")
@@ -257,6 +280,23 @@ def _rewrite_package_identifier(
     return opening + ">" + xml_escape(uuid) + span_text[closing_m.start() :]
 
 
+def _declare_namespaces(block: str, bindings: list[str]) -> str:
+    """Add namespace declarations to the <metadata> opening tag of a block:
+    in scope for everything the surgery writes inside it, on an element no
+    identifier span can be, and idempotent (the next pass finds the binding
+    and synthesizes nothing). The self-closing shape has nothing to rewrite
+    and never reaches here with bindings, but still comes out well-formed."""
+    m = re.match(r"<metadata\b[^>]*>", block, re.IGNORECASE)
+    if m is None:  # unreachable: the block came from _METADATA_BLOCK
+        return block
+    core = m.group(0)[:-1].rstrip()
+    tail = ">"
+    if core.endswith("/"):
+        core = core[:-1].rstrip()
+        tail = "/>"
+    return block[: m.start()] + f"{core} {' '.join(bindings)}{tail}" + block[m.end() :]
+
+
 def canonical_dc_identifiers(
     opf_text: str,
     identifiers: dict[str, str] | None,
@@ -275,8 +315,15 @@ def canonical_dc_identifiers(
 
     Returns byte-identical text when the file is already canonical, or None
     when the shape cannot be safely rewritten: no metadata block, no uuid
-    for a package rewrite, no binding for a prefix the surgery must name,
-    or no anchor for an insertion. The read-back re-diff stays the arbiter.
+    for a package rewrite, a dc binding nowhere in scope for an insertion
+    (neither in the metadata block nor on an ancestor of it — malformed XML
+    no embed could have produced), or no anchor for an insertion. A missing
+    OPF-namespace prefix never refuses: when the surgery must name one (a
+    scheme-less package slot to rewrite, any insertion), it synthesizes the
+    binding as a declaration on the <metadata> opening tag — in scope for
+    the whole surgery and discovered by the next pass, so a converged file
+    stays byte-identical (issue #16's default-namespace EPUB3 class). The
+    read-back re-diff stays the arbiter.
     Surgery is confined to the metadata block."""
     block_m = _METADATA_BLOCK.search(opf_text)
     if block_m is None:
@@ -341,6 +388,32 @@ def canonical_dc_identifiers(
     if not changed:
         return opf_text
 
+    # What the rebuilt block must be able to name: a bound OPF prefix for
+    # every scheme attribute the surgery adds (a scheme-less package slot
+    # being rewritten, any insertion) and the dc binding in scope for the
+    # elements it inserts. A default-namespace EPUB3 package (the EPUB 3
+    # alternate form: xmlns on <package>, dc bound there too, no OPF-prefix
+    # binding anywhere) is well-formed and calibre-readable, so the pass
+    # may not refuse it (issue #16's live class: 13 books); it synthesizes
+    # the missing OPF binding as a declaration on the <metadata> opening
+    # tag instead, in scope for the whole surgery. Removals that name no
+    # new element add no declaration: the byte-exact no-churn contract.
+    needs_opf_prefix = bool(missing) or any(
+        action == "rewrite" and _SCHEME_ATTR.search(_opening_tag(span.group(0))) is None
+        for span, action in actions
+    )
+    prefix = _opf_prefix_of(opf_text)
+    synthetic: list[str] = []
+    if needs_opf_prefix and prefix is None:
+        prefix = "opf"
+        synthetic.append(_OPF_NS_BINDING)
+    if (
+        missing
+        and _DC_NS_BINDING not in block
+        and _DC_NS_BINDING not in opf_text[: block_m.start()]
+    ):
+        return None
+
     out: list[str] = []
     pos = 0
     for span, action in actions:
@@ -349,9 +422,7 @@ def canonical_dc_identifiers(
             pos = span.end()
             continue
         if action == "rewrite":
-            new_span = _rewrite_package_identifier(
-                span.group(0), uuid, _opf_prefix_of(opf_text)
-            )
+            new_span = _rewrite_package_identifier(span.group(0), uuid, prefix)
             if new_span is None:
                 return None
             out.append(block[pos : span.start()])
@@ -368,16 +439,14 @@ def canonical_dc_identifiers(
         out.append(block[pos:start])
         pos = span.end()
     new_block = "".join(out) + block[pos:]
+    if synthetic:
+        new_block = _declare_namespaces(new_block, synthetic)
 
     if not missing:
         return opf_text[: block_m.start()] + new_block + opf_text[block_m.end() :]
-    # Insertions need elements the surgery can name: the dc binding for the
-    # tag and a bound OPF prefix for the scheme attribute. A file that
-    # cannot name them must not be half-edited; the re-diff stays the
-    # arbiter.
-    prefix = _opf_prefix_of(opf_text)
-    if prefix is None or _DC_NS_BINDING not in block:
-        return None
+    # The dc and OPF-prefix preconditions were checked above; what is left
+    # is the anchor: the last identifier, or the last DTD-predecessor when
+    # the block carries no identifiers at all.
     anchor = None
     for m in _DC_IDENTIFIER_SPAN.finditer(new_block):
         anchor = m

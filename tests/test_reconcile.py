@@ -726,6 +726,23 @@ class TestEpubDateNormalization(unittest.TestCase):
         opf = re.sub(r"    <dc:date[^>]*>[^<]*</dc:date>\n", "", opf)
         self.assertIsNone(epd.canonical_dc_dates(opf, "2023-09-28"))
 
+    def test_dc_binding_on_package_root_is_in_scope(self):
+        # Issue #16's sibling in the date pass: the same default-ns shape
+        # needing a date INSERTION (no dc:date in the file, a database
+        # pubdate waiting). The dc binding on <package> is in scope for the
+        # block; 3.63.x looked for the literal binding inside the metadata
+        # block only and refused.
+        opf = self.LIVE_OPF.replace(' xmlns:dc="http://purl.org/dc/elements/1.1/"', "")
+        opf = opf.replace(
+            '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" ',
+            '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" ',
+        )
+        opf = re.sub(r"    <dc:date[^>]*>[^<]*</dc:date>\n", "", opf)
+        out = epd.canonical_dc_dates(opf, "2023-09-28")
+        self.assertIsNotNone(out)
+        self.assertEqual(self.dates_in(out), ["<dc:date>2023-09-28</dc:date>"])
+
     def test_no_metadata_block_is_refused(self):
         self.assertIsNone(epd.canonical_dc_dates("<html><body/></html>", "2023-09-28"))
 
@@ -863,6 +880,32 @@ class TestEpubIdentifierNormalization(unittest.TestCase):
         "uri": "urn:uuid:aaa",
         "lcc": "bf637.s4 g63 2007",
     }
+
+    # Issue #16's live class: EPUB 3's default-namespace alternate form.
+    # The OPF namespace is the DEFAULT on <package> (no xmlns:opf prefix
+    # anywhere) and dc is bound on <package>, not inside <metadata>; the
+    # package slot is the producer's scheme-less url element. Both 3.63.3
+    # refusals fired on this shape: the slot rewrite could not name
+    # opf:scheme, and the insertion precondition looked for the dc binding
+    # inside the metadata block only.
+    DEFAULT_NS_OPF = (
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        '<package xmlns="http://www.idpf.org/2007/opf" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0" '
+        'unique-identifier="pub-id">\n'
+        "  <metadata>\n"
+        "    <dc:title>Default Namespace Book</dc:title>\n"
+        "    <dc:creator>Probe Author</dc:creator>\n"
+        "    <dc:language>en</dc:language>\n"
+        '    <dc:identifier id="pub-id">'
+        "https://standardebooks.org/ebooks/the-book</dc:identifier>\n"
+        "    <dc:date>2020-01-01T00:00:00Z</dc:date>\n"
+        "  </metadata>\n"
+        "  <manifest>\n"
+        '    <item id="cover-image" href="cover.jpg" media-type="image/jpeg"/>\n'
+        "  </manifest>\n"
+        "</package>\n"
+    )
 
     CONTAINER_XML = (
         '<?xml version="1.0"?>\n'
@@ -1070,10 +1113,91 @@ class TestEpubIdentifierNormalization(unittest.TestCase):
         )
         self.assertIsNone(epd.canonical_dc_identifiers(opf, self.PRODUCER_DB, "uu-1"))
 
-    def test_insertion_without_opf_prefix_is_refused(self):
-        # The fresh elements need a bound prefix for the scheme attribute.
+    def test_insertion_without_opf_prefix_synthesizes_the_binding(self):
+        # The 3.63.3 pass refused here (issue #16). The surgery needs the
+        # OPF prefix only to NAME the scheme attribute it adds, and a
+        # declaration on the <metadata> opening tag names it without
+        # touching anything outside the block.
         opf = self.PRODUCER_OPF.replace(' xmlns:opf="http://www.idpf.org/2007/opf"', "")
-        self.assertIsNone(epd.canonical_dc_identifiers(opf, self.PRODUCER_DB, "uu-1"))
+        out = epd.canonical_dc_identifiers(opf, self.PRODUCER_DB, "uu-1")
+        self.assertIsNotNone(out)
+        self.assertIn('xmlns:opf="http://www.idpf.org/2007/opf"', out)
+        self.assertIn(
+            '<dc:identifier opf:scheme="isbn">9780000000002</dc:identifier>', out
+        )
+        fm = file_meta(identifiers=self.read_like_calibre(out))
+        self.assertNotIn(
+            "identifiers",
+            rfm.diff_fields(db_record(identifiers=self.PRODUCER_DB), fm, "EPUB"),
+        )
+        # The synthesized binding is found by the next pass: byte-stable.
+        self.assertEqual(
+            epd.canonical_dc_identifiers(out, self.PRODUCER_DB, "uu-1"), out
+        )
+
+    def test_dc_binding_on_package_root_is_in_scope(self):
+        # A default-namespace package binds dc on <package>, an ancestor of
+        # the block, and by XML rules the prefix is in scope inside it. The
+        # 3.63.3 check looked for the literal binding in the block only and
+        # refused; the check now reads the whole document head too.
+        opf = self.PRODUCER_OPF.replace(
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:opf="http://www.idpf.org/2007/opf">',
+            '<metadata xmlns:opf="http://www.idpf.org/2007/opf">',
+        ).replace(
+            '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" ',
+            '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" ',
+        )
+        out = epd.canonical_dc_identifiers(opf, self.PRODUCER_DB, "uu-1")
+        self.assertIsNotNone(out)
+        self.assertIn(
+            '<dc:identifier opf:scheme="isbn">9780000000002</dc:identifier>', out
+        )
+        # The OPF prefix stays bound where the file put it: no synthesis
+        # was needed, so the metadata tag comes out exactly as it went in.
+        self.assertIn('<metadata xmlns:opf="http://www.idpf.org/2007/opf">', out)
+
+    def test_default_ns_epub3_converges(self):
+        # The live class end to end: the scheme-less producer slot is
+        # rewritten under a SYNTHESIZED opf binding declared on the
+        # <metadata> opening tag, and the missing entry inserts after it.
+        # Both halves of this shape refused in 3.63.3 and stayed drifted
+        # on 13 real books across repeated applies.
+        out = epd.canonical_dc_identifiers(self.DEFAULT_NS_OPF, self.DB_IDS, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertIn('<metadata xmlns:opf="http://www.idpf.org/2007/opf">', out)
+        spans = self.idents_in(out)
+        self.assertEqual(len(spans), 2)
+        self.assertIn(
+            '<dc:identifier id="pub-id" opf:scheme="calibre">'
+            f"{self.UUID}</dc:identifier>",
+            spans[0],
+        )
+        self.assertEqual(
+            spans[1], '<dc:identifier opf:scheme="isbn">9780000000002</dc:identifier>'
+        )
+        fm = file_meta(identifiers=self.read_like_calibre(out))
+        self.assertNotIn(
+            "identifiers",
+            rfm.diff_fields(db_record(identifiers=self.DB_IDS), fm, "EPUB"),
+        )
+        self.assertEqual(epd.canonical_dc_identifiers(out, self.DB_IDS, self.UUID), out)
+
+    def test_slot_rewrite_alone_synthesizes(self):
+        # The issue's sharper edge: a file whose only needed change is the
+        # slot rewrite (no insertions at all) still needs the OPF prefix
+        # for the scheme attribute it adds, and gets the synthesized
+        # binding; 3.63.3 refused the whole pass here.
+        out = epd.canonical_dc_identifiers(self.DEFAULT_NS_OPF, {}, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertIn('xmlns:opf="http://www.idpf.org/2007/opf"', out)
+        self.assertIn(
+            '<dc:identifier id="pub-id" opf:scheme="calibre">'
+            f"{self.UUID}</dc:identifier>",
+            out,
+        )
+        self.assertEqual(self.read_like_calibre(out), "")
 
     def test_removal_only_needs_no_bindings(self):
         # A file that only needs removals must not be refused for lacking
@@ -1095,6 +1219,9 @@ class TestEpubIdentifierNormalization(unittest.TestCase):
             self.read_like_calibre(out), "asin:B00STALEID1, isbn:9780000000002"
         )
         self.assertNotIn("junkid", out)
+        # Removals name no new element: no binding is synthesized, the
+        # metadata tag comes out without one.
+        self.assertNotIn("xmlns:opf", out)
 
     def test_db_row_typed_calibre_is_satisfied_not_grown(self):
         # The code-reviewer bug class: a database identifier row whose TYPE
@@ -1334,6 +1461,25 @@ class TestEpubIdentifierReadBackLive(unittest.TestCase):
                     fm,
                     "EPUB",
                 ),
+            )
+
+    def test_default_ns_shape_reads_back_as_the_database_set(self):
+        # Issue #16's class judged by the real reader: the synthesized
+        # binding on <metadata> and the rewritten package slot parse, and
+        # the file reads back as exactly the database set.
+        cls = TestEpubIdentifierNormalization
+        with tempfile.TemporaryDirectory() as tmp:
+            path = cls()._build_epub(tmp, cls.DEFAULT_NS_OPF)
+            self.assertTrue(epd.normalize_epub_identifiers(path, cls.DB_IDS, cls.UUID))
+            fm = rfm.read_ebook_meta(path)
+            self.assertIsNotNone(fm)
+            self.assertEqual(
+                rfm.parse_identifiers(fm.get("identifiers")),
+                cls.DB_IDS,
+            )
+            self.assertNotIn(
+                "identifiers",
+                rfm.diff_fields(db_record(identifiers=cls.DB_IDS), fm, "EPUB"),
             )
 
 
