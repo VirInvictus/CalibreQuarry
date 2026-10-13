@@ -1,5 +1,71 @@
 # CalibreQuarry Patch Notes
 
+# 3.64.0 (2026-10-13)
+
+### The evening-wave batch: edition-tag stripping, the refusal-split detail, and the preempted-consent record (issues #17, #18, #19)
+
+Three follow-ups from the 2026-10-13 evening wave (117 files), two of
+them aimed at the duplicate screen 3.63.7 shipped hours earlier.
+
+- **Edition tags no longer defeat the title judge (issue #17).** The
+  screen passed a second copy of The Rust Programming Language with
+  zero candidates: the stamp correctly strips the edition tag from new
+  arrivals, so the new title read "The Rust Programming Language"
+  while the held book is "The Rust Programming Language, 3rd Edition",
+  and the judge had no opinion (no shared ISBN or ASIN either). The
+  Linux Command Line 3rd passed the same way and was caught only by
+  hand. The judge now strips the ordinal edition forms (", Nth
+  Edition", ": Nth Edition", "Nth ed.") from BOTH titles wherever it
+  compares, the way the imprint batch strips storefront tags, with the
+  same safety rules: the strip fires only where an annotation can end
+  (segment end, colon, comma, semicolon, a closing bracket), so prose
+  like "the 2nd edition of..." and non-edition shapes ("Code" vs
+  "Code: Version 2.0") still compare as title text, and the volume
+  annotations the series rules read stay on the raw title. The judge
+  still does not decide edition-vs-duplicate: the Ghidra shape (a
+  genuinely new edition whose stripped title matches the held one
+  exactly) keeps surfacing, and the operator judges the copies.
+  Live-drilled end to end against a scratch calibre 9.16 library on
+  the issue's exact Rust shape: the held book lands in library_hits.
+- **The duplicate decision's detail tells its two refusal classes
+  apart (issue #18).** Two files of one edition sharing only a
+  mobi-asin arrived together; the screen's raw output was exactly
+  right (library_hits empty, batch_duplicates naming the sibling), but
+  the runner's decision detail read "matches an existing library
+  book" for both copies, and triage queried the library by title and
+  ASIN for a book that was never there. The screen seam now hands the
+  runner the refusal evidence the report always carried
+  (`_screen_duplicates` grew an optional `refusals` dict beside
+  `notes`; the refused-set contract is unchanged), and the detail
+  reads "matches an existing library book: #id title", "matches
+  another file in this batch: file", or both when both fire. A
+  refusal without the breakdown reads a neutral "class breakdown
+  unavailable" instead of guessing a class.
+- **A repair sweep that preempts the consent gate leaves a record
+  (issue #19).** The vetting pass flagged a lossy repair set (The
+  Black Man's Burden, pagination x22) into the batch manifest; the
+  step-3 repair sweep then ran `bindery library --sweep --only all
+  --apply --all`, whose `--all` includes the lossy strips; and the
+  completed mint's fresh battery read the file `lossy: false`, so the
+  lossy_consent decision silently vanished from the signed manifest.
+  Whether Brandon ever sees a lossy decision was order-dependent on
+  which skill-sanctioned step-3 variant the run used. The mint now
+  detects the shape: when an earlier SAME-DAY manifest recorded a file
+  lossy-pending and this mint's battery (bindery present and run)
+  reads it clean, the file's `repairs` note names the earlier
+  manifest, lists the strips it recorded, and says they were applied
+  outside the consent gate; the phase-1 summary prints a
+  preempted-consent count. Informational by design: the strips already
+  happened, so a blocking decision would gate the import on a moot
+  consent. No note fires when the fresh mint still reads the file
+  lossy-flagged (the pending state stands), when no fresh battery ran
+  (no evidence either way), or when a same-day manifest already records
+  the strips as applied: there the consent path ran (an --apply-lossy
+  mint, or phase 2 consuming an in-manifest resolution) and its own
+  record is the history, so claiming the sweep did it would be a false
+  WHY. The phase-1 skill's step-6 workaround paragraph now points at
+  the note.
+
 # 3.63.7 (2026-10-13)
 
 ### The duplicate-screen keypair and imprint batch (issue #13)

@@ -5,6 +5,49 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.64.0 onward, the evening-wave batch, issues #17/#18/#19)
+
+- **The title judge strips ordinal edition tags, and the refusal detail
+  tells the two refusal classes apart.** `_EDITION_TAG`
+  (screen_duplicate.py) removes `, Nth Edition` / `: Nth Edition` /
+  `Nth ed.` forms (ordinal digit + `edition`/`ed`, anchored to where an
+  annotation can end: segment end, colon, comma, semicolon, closing
+  bracket) at every comparison site via `_strip_noise` (imprint strip,
+  then edition strip, so a tag the imprint removal exposes still
+  fires); prose ("the 2nd edition of...") and non-edition shapes
+  (`Version 2.0`) never strip. `_annotations` and `_volume_signature`
+  still read the RAW title, so the series rules are untouched, and both
+  curated sets (`_IMPRINT_TAG`, `_EDITION_TAG`) grow as rips surface new
+  shapes. `_screen_duplicates` grew an optional `refusals` dict beside
+  `notes` (path -> `{"library": [hit descriptors], "batch": [paths]}`);
+  `_duplicate_detail` renders it as "matches an existing library book:
+  #id title", "matches another file in this batch: file", or both. A
+  refusal missing the breakdown (a mocked seam) reads the neutral
+  "class breakdown unavailable": the old hard-coded "matches an
+  existing library book" was the lie triage chased (issue #18). The
+  refused-set return contract is unchanged.
+- **The mint records a preempted lossy consent instead of letting the
+  decision vanish.** `_note_preempted_lossy` (run.py, after the bindery
+  mirrors in `run_phase1`) scans the earlier SAME-DAY manifests in the
+  library's manifests dir (the `{today}-batch*.json` names only): a file
+  recorded there with `lossy.flagged` and unapplied lossy repairs that
+  THIS mint reads not-lossy-flagged gets a `repairs` note naming the
+  earlier manifest, the pending strip summaries, and the cause (a
+  repair sweep's `--all` applies the lossy strips with the structural
+  set, so the consent gate was preempted; issue #19). Gates: a fresh
+  battery must have run (`bindery_shape` non-empty; without one there
+  is no evidence), the fresh read must actually be clean (a
+  still-flagged file keeps its standing decision), and no same-day
+  manifest may already record the path's lossy repairs as APPLIED
+  (there the consent path ran and its own record is the history; the
+  preemption claim would be a false WHY). Informational by
+  design (the strips already happened), so it is a note in `repairs`,
+  never a blocking decision; the phase-1 summary prints the preempted
+  count. Same-day means the `{today}-batch*` names against
+  `_now_stamp()` at scan time: a mint straddling midnight can miss a
+  note for a manifest recorded minutes earlier (an absent note, never a
+  wrong one).
+
 ## Programmer-facing contract notes (3.63.7 onward, the duplicate-screen keypair and imprint batch)
 
 - **The duplicate screen matches ASINs and strips imprint tags.**
