@@ -1653,6 +1653,100 @@ class TestApplyOpfPubdate(RunCase):
         self.assertTrue(stored.startswith("2010-05-25 00:00:00"), stored)
 
 
+class TestApplyOpfWritesNoReaderCuratedFields(RunCase):
+    """The fetched record's tags and average rating never reach the book
+    (issue #26). The 2026-10-04 and 2026-10-15 arrivals carried bare genre
+    tags and a machine-set rating; the actual injector was the manual
+    passes' own metadata fetch, but the contract is worth pinning: the
+    apply seam is field-limited (title/authors/publisher/pubdate/comments/
+    identifiers) and structurally ignores everything else a fetched OPF
+    carries, so a future seam change cannot start writing reader-curated
+    fields silently. Tags belong to phase 3's tagging pass; ratings are
+    Brandon-curated, never machine-set."""
+
+    _CONTAMINATED_OPF = (
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        "<package xmlns='http://www.idpf.org/2007/opf' version='2.0'>"
+        "<metadata xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+        "<dc:title>Fetched Title</dc:title>"
+        "<dc:creator>Ann Leckie</dc:creator>"
+        "<dc:subject>Science Fiction</dc:subject>"
+        "<dc:subject>Feminism</dc:subject>"
+        "<meta name='rating' content='4.0'/>"
+        "<dc:date>2005-01-01</dc:date>"
+        "</metadata></package>"
+    )
+
+    def _book_and_opf(self, curated=False):
+        con = sqlite3.connect(self.db_path)
+        from cquarry.write import register_udfs
+
+        register_udfs(con)
+        book_id = con.execute(
+            "INSERT INTO books (title) VALUES ('Imported Title')"
+        ).lastrowid
+        if curated:
+            # Curated state from before the fetch: one human tag, one rating.
+            con.executescript(
+                f"""
+                INSERT INTO tags (id, name) VALUES (1, 'Fic.SciFi');
+                INSERT INTO books_tags_link (book, tag) VALUES ({book_id}, 1);
+                INSERT INTO ratings (id, rating) VALUES (1, 6);
+                INSERT INTO books_ratings_link (book, rating) VALUES ({book_id}, 1);
+                """
+            )
+        con.commit()
+        con.close()
+        opf = os.path.join(self.temp_dir, "book.opf")
+        with open(opf, "w", encoding="utf-8") as f:
+            f.write(self._CONTAMINATED_OPF)
+        return book_id, opf
+
+    def _tags_and_rating(self, book_id):
+        con = sqlite3.connect(self.db_path)
+        tags = [
+            r[0]
+            for r in con.execute(
+                "SELECT t.name FROM books_tags_link bt JOIN tags t "
+                "ON t.id = bt.tag WHERE bt.book = ?",
+                (book_id,),
+            )
+        ]
+        ratings = [
+            r[0]
+            for r in con.execute(
+                "SELECT r.rating FROM books_ratings_link br JOIN ratings r "
+                "ON r.id = br.rating WHERE br.book = ?",
+                (book_id,),
+            )
+        ]
+        con.close()
+        return tags, ratings
+
+    def test_preexisting_curated_tags_and_rating_survive_the_apply(self):
+        book_id, opf = self._book_and_opf(curated=True)
+        self.assertTrue(_apply_opf(book_id, opf, self.db_path))
+        tags, ratings = self._tags_and_rating(book_id)
+        # The fetched subjects ('Science Fiction', 'Feminism') and the
+        # average rating never land; the curated rows stand untouched.
+        self.assertEqual(tags, ["Fic.SciFi"])
+        self.assertEqual(ratings, [6])
+        # The seam actually ran: the descriptive fields applied.
+        con = sqlite3.connect(self.db_path)
+        title = con.execute(
+            "SELECT title FROM books WHERE id = ?", (book_id,)
+        ).fetchone()[0]
+        con.close()
+        self.assertEqual(title, "Fetched Title")
+
+    def test_no_tags_or_rating_are_added_from_zero(self):
+        book_id, opf = self._book_and_opf()
+        self.assertTrue(_apply_opf(book_id, opf, self.db_path))
+        tags, ratings = self._tags_and_rating(book_id)
+        self.assertEqual(tags, [])
+        self.assertEqual(ratings, [])
+
+
 class TestRunPhase2(RunCase):
     def _manifest(self, *paths, signed=True):
         man = manifest.new_manifest(self.downloads)

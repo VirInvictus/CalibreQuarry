@@ -5,6 +5,48 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.67.0 onward, the triage batch, issues #25-#27)
+
+- **audit_isbns.py's machine formats own stdout exclusively.** Under
+  `--format json` and `--format tsv` the script's stdout carries ONLY
+  the payload: the vir_tui banner and the four setup-error prints ride
+  stderr (`contextlib.redirect_stdout` over `print_header`, whose
+  tqdm.write resolves sys.stdout at call time; a `prose` stream for the
+  error prints), so `json.load` on captured stdout and a `tsv` redirect
+  work without offset hacks. Text mode is byte-identical to before
+  (banner and prose on stdout). `--json FILE` writes the same payload
+  `--format json` prints (trailing newline included) beside ANY
+  format's human output, the check_pdf.py `--json FILE` shape, with no
+  path guard (matching that sibling deliberately); the exit contract is
+  untouched and `--json` never changes what stdout carries. Pinned by
+  `TestMachineOutput` driving `main()` over a fixture library whose
+  files print their own stored ISBNs.
+- **The fetched-record apply seams are field-limited by contract, and
+  a test now refuses to let that rot.** `_apply_opf` writes
+  title/authors/publisher/pubdate (date-only)/comments/identifiers and
+  structurally ignores everything else a fetched OPF carries;
+  `_apply_backfill` writes only its plan's requested fields; phase 2's
+  import batch clears tags and rating BEFORE any fetch exists to
+  re-add them. `TestApplyOpfWritesNoReaderCuratedFields` pins the
+  seam: `dc:subject` elements and rating meta in a contaminated OPF
+  never land on the book, pre-existing curated rows survive untouched,
+  and nothing is added from zero. Issue #26's injections came from the
+  manual import passes' own metadata download (calibre's source plugins
+  write tags and average rating by default), never from this repo.
+- **The phase-2 cc6 stamp is proven live; the wholesale-'Anna's
+  Archive' waves never ran the verb.** All 17 manifests of the
+  2026-10-10..14 waves carry zero `imported_id`s (the field phase 2
+  itself writes and saves), so the six-wave symptom was the manual
+  import path's own stamping, not this verb. The live drill (scratch
+  sandbox library, real ebook-meta/calibredb/bindery, cquarry 1.28.0):
+  phase-1 mint -> `run sign` -> `run phase2 --backup-dir` over three
+  fixture EPUBs (an `-- Anna's Archive` trailer, a `(z-library.sk)`
+  marker, a bare name) landed per-book provenance exactly
+  (Anna's Archive, Z-Lib, Z-Lib) with `#audience` stamped. When a
+  future wave reports wrong cc6 on imported books, check the manifest's
+  `import.imported_id` fields FIRST: absent means the verb was not in
+  the loop.
+
 ## Programmer-facing contract notes (3.66.0 onward, the wave-lessons batch, issues #21-#24)
 
 - **`scripts/extract_stamp_evidence.py` is the research pass's evidence

@@ -741,9 +741,11 @@ python3 audit_isbns.py                        # every book with an ISBN
 python3 audit_isbns.py --tag NonFic.Tech      # one branch of the taxonomy
 python3 audit_isbns.py --id 1969,3189         # specific books
 python3 audit_isbns.py --format tsv > out.tsv # machine-readable
+python3 audit_isbns.py --format json          # stdout json.loads, no offset
+python3 audit_isbns.py --json out.json        # human report + machine file
 ```
 
-Scoping uses the same anchored-hierarchical `--tag` rule as `fetch_library_codes.py` and cquarry's `tags:` search, and takes a comma-separated list, so a virtual library that spans several roots is covered without a separate flag.
+Scoping uses the same anchored-hierarchical `--tag` rule as `fetch_library_codes.py` and cquarry's `tags:` search, and takes a comma-separated list, so a virtual library that spans several roots is covered without a separate flag. Machine formats (`--format tsv`, `--format json`) keep stdout to the payload alone (the banner and setup prose ride stderr), and `--json FILE` writes the same payload `--format json` prints beside any format's human output.
 
 Exit codes: `0` no disagreement, `1` at least one `MISMATCH`/`VARIANT`/`AMBIGUOUS` finding or an unreadable file, `2` setup error.
 

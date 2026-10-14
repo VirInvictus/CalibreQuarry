@@ -1,5 +1,50 @@
 # CalibreQuarry Patch Notes
 
+# 3.67.0 (2026-10-14)
+
+### The triage batch: machine-format stdout hygiene for the ISBN audit, the fetch-apply seam pinned field-limited, and the provenance stamp proven live (issues #25, #26, #27)
+
+Three issues filed against the same question: does the acquisition pathway
+actually do what its contract notes claim? One was a real hygiene gap, one
+was a contract worth pinning, and one dissolved under evidence: the verb it
+blamed had never run.
+
+- **`audit_isbns.py` machine formats keep stdout to the payload (issue
+  #27).** `--format json` and `--format tsv` move the vir_tui banner and
+  the setup-error prose to stderr (text mode is unchanged, and the
+  progress bar was already on stderr), so `json.load` on captured output
+  and a `tsv` redirect work without offset hacks. A `--json FILE` flag
+  writes the same payload `--format json` prints, beside any format's
+  human output (the `check_pdf.py` shape), and the exit contract is
+  untouched. `TestMachineOutput` drives `main()` end to end over a
+  fixture library and pins every stream.
+- **The fetched-record apply seam is pinned field-limited (issue
+  #26).** The 2026-10-04 and 2026-10-15 arrivals that carried bare genre
+  tags and a machine-set rating were injected by the manual import
+  passes' own metadata fetch, not by this repo: `_apply_opf` writes six
+  descriptive fields and structurally ignores everything else a fetched
+  OPF carries, `_apply_backfill` writes only plan-requested fields, and
+  phase 2 actively clears tags and rating at import.
+  `TestApplyOpfWritesNoReaderCuratedFields` pins the seam so a future
+  fetch path cannot start writing reader-curated fields silently:
+  `dc:subject` elements and rating meta never land, curated rows
+  survive, and nothing is added from zero.
+- **The phase-2 provenance stamp is proven live, and the wholesale
+  'Anna's Archive' waves never ran the verb (issue #25).** Every
+  manifest from the six waves (2026-10-10 through 2026-10-14, all 17
+  files) carries zero `imported_id`s, the field `run phase2` itself
+  writes and saves, so the books arrived through the manual import path,
+  which stamped its own `#source` values. The verb's stamping was
+  drilled end to end on a scratch sandbox library with the real
+  binaries (calibre 9.x ebook-meta and calibredb, bindery, cquarry
+  1.28.0): a phase-1 mint over three fixture EPUBs (an
+  `-- Anna's Archive` trailer, a `(z-library.sk)` marker, a bare name)
+  signed and imported in one batch landed per-book provenance exactly
+  (`Anna's Archive`, `Z-Lib`, `Z-Lib`), with `#audience` stamped
+  alongside and the manifest recording the imported ids. No code
+  changed; the in-batch guard was already verifying the thing it
+  claims.
+
 # 3.66.0 (2026-10-14)
 
 ### The wave-lessons batch: the research extractor stops being hand-rolled, the PDF stamper heals bad xrefs and arbitrates blind read-backs, and bare-name provenance seeds Z-Lib (issues #21, #22, #23, #24)

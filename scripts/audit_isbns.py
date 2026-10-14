@@ -83,6 +83,15 @@ Run from the library directory:
     python3 audit_isbns.py --tag NonFic.Tech      # one branch of the taxonomy
     python3 audit_isbns.py --id 1969,3189         # specific books
     python3 audit_isbns.py --format tsv > out.tsv # machine-readable
+    python3 audit_isbns.py --format json          # stdout json.loads, no offset
+    python3 audit_isbns.py --json out.json        # human report + machine file
+
+Machine formats (--format tsv, --format json) keep stdout to the payload
+alone: the banner and setup prose ride stderr, so json.load on captured
+output works without offset hacks and a tsv redirect is a clean table.
+--json FILE writes the same payload --format json prints, beside any
+format's output (the check_pdf.py --json FILE shape). Text mode output is
+unchanged.
 
 Exit codes:
     0 = no disagreement found
@@ -93,6 +102,7 @@ Exit codes:
 """
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 
@@ -591,9 +601,20 @@ def main() -> int:
     ap.add_argument(
         "--format", choices=("text", "tsv", "json"), default="text", help="output form"
     )
+    ap.add_argument(
+        "--json",
+        metavar="FILE",
+        help="also write the machine report (the --format json payload) to FILE",
+    )
     ap.add_argument("--quiet", action="store_true", help="suppress per-book lines")
     args = ap.parse_args()
-    ui.print_header("audit_isbns.py - Execution")
+    # Machine formats keep stdout to the payload alone (issue #27): the
+    # banner rides stderr there, so json.load on captured output works
+    # without offset hacks; text mode keeps it on stdout as before.
+    machine = args.format in ("json", "tsv")
+    prose = sys.stderr if machine else sys.stdout
+    with contextlib.redirect_stdout(prose):
+        ui.print_header("audit_isbns.py - Execution")
     announce()
 
     ids = None
@@ -601,7 +622,9 @@ def main() -> int:
         try:
             ids = [int(x) for x in args.id.split(",") if x.strip()]
         except ValueError:
-            print(ui.error("setup error: --id takes comma-separated integers"))
+            print(
+                ui.error("setup error: --id takes comma-separated integers"), file=prose
+            )
             return 2
 
     prefixes = (
@@ -610,14 +633,14 @@ def main() -> int:
 
     db_path = find_db(args.db)
     if not os.path.exists(db_path):
-        print(ui.error(f"setup error: no metadata.db at {db_path}"))
+        print(ui.error(f"setup error: no metadata.db at {db_path}"), file=prose)
         return 2
     library_root = os.path.dirname(os.path.abspath(db_path))
 
     try:
         targets = load_targets(db_path, ids, prefixes)
     except sqlite3.Error as exc:
-        print(ui.error(f"setup error: {exc}"))
+        print(ui.error(f"setup error: {exc}"), file=prose)
         return 2
 
     if args.sample and args.sample < len(targets):
@@ -628,7 +651,7 @@ def main() -> int:
         targets = targets[: args.limit]
 
     if not targets:
-        print(ui.error("no books with an ISBN matched the selection"))
+        print(ui.error("no books with an ISBN matched the selection"), file=prose)
         return 2
 
     if args.format == "text" and not args.quiet:
@@ -670,6 +693,13 @@ def main() -> int:
         report_tsv(results)
     else:
         report_text(results, args.quiet)
+    if args.json:
+        # The same payload --format json prints, beside any format's human
+        # output (the check_pdf.py --json FILE shape; the exit contract is
+        # unchanged either way).
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+            f.write("\n")
 
     flagged = any(
         r["verdict"] in (*FINDINGS, "UNREADABLE") or r.get("year_mismatch")

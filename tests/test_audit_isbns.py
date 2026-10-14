@@ -12,12 +12,14 @@ refactor that quietly reclassifies them fails loudly.
 import contextlib
 import importlib.util
 import io
+import json
 import pathlib
 import shutil
 import sqlite3
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 _SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 
@@ -415,6 +417,114 @@ class TestSkippedVsUnreadable(unittest.TestCase):
             text, fmt = isbns.book_text(tmp)
             self.assertIsNone(text)
             self.assertEqual(fmt, "epub")
+
+
+class TestMachineOutput(unittest.TestCase):
+    """Machine formats keep stdout to the payload (issue #27): the banner
+    and setup prose ride stderr, so json.load on captured stdout and a tsv
+    redirect work without offset hacks, and --json FILE writes the same
+    payload --format json prints (the check_pdf.py shape). Text mode is
+    unchanged. Every test drives main() end to end over a fixture library
+    whose files each print their own stored ISBN (both CONFIRMED, exit 0).
+    """
+
+    def _library(self, tmp):
+        root = pathlib.Path(tmp)
+        db = root / "metadata.db"
+        con = sqlite3.connect(db)
+        con.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT,
+                path TEXT, pubdate TEXT);
+            CREATE TABLE identifiers (book INTEGER, type TEXT, val TEXT);
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_tags_link (book INTEGER, tag INTEGER);
+            INSERT INTO books VALUES (1, 'Tech Book', 'A/Tech Book (1)', '2019-01-01');
+            INSERT INTO books VALUES (2, 'Novel', 'B/Novel (2)', '2020-01-01');
+            INSERT INTO identifiers VALUES (1, 'isbn', '0201183994');
+            INSERT INTO identifiers VALUES (2, 'isbn', '9781542015622');
+            """
+        )
+        con.commit()
+        con.close()
+        for rel, isbn in (
+            ("A/Tech Book (1)", "978-0-201-18399-3"),
+            ("B/Novel (2)", "978-1-54201-562-2"),
+        ):
+            book_dir = root / rel
+            book_dir.mkdir(parents=True)
+            with zipfile.ZipFile(book_dir / "book.epub", "w") as z:
+                z.writestr(
+                    "copyright.xhtml",
+                    "<p>All rights reserved.</p><p>ISBN: " + isbn + "</p>",
+                )
+        return str(db)
+
+    def _run(self, argv, db):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.argv", ["audit_isbns.py", "--db", db] + argv):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = isbns.main()
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_json_stdout_is_bare_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = self._run(["--format", "json"], self._library(tmp))
+            self.assertEqual(rc, 0)
+            rows = json.loads(out)  # the offset hack is gone
+            self.assertEqual([r["id"] for r in rows], [1, 2])
+            self.assertEqual(rows[0]["verdict"], "CONFIRMED")
+            self.assertNotIn("audit_isbns.py", out, "the banner rides stdout")
+            self.assertIn("audit_isbns.py - Execution", err)
+
+    def test_json_file_writes_the_same_payload_beside_human_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._library(tmp)
+            report = pathlib.Path(tmp) / "report.json"
+            rc, out, _ = self._run(["--json", str(report)], db)
+            self.assertEqual(rc, 0)
+            self.assertIn("Summary", out)  # the human report still on stdout
+            rows = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual([r["id"] for r in rows], [1, 2])
+            self.assertEqual(rows[0]["verdict"], "CONFIRMED")
+
+    def test_json_flag_alongside_json_format(self):
+        # Both surfaces carry the same payload in one invocation.
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._library(tmp)
+            report = pathlib.Path(tmp) / "report.json"
+            rc, out, _ = self._run(["--format", "json", "--json", str(report)], db)
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                json.loads(out), json.loads(report.read_text(encoding="utf-8"))
+            )
+
+    def test_tsv_stdout_is_table_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = self._run(["--format", "tsv"], self._library(tmp))
+            self.assertEqual(rc, 0)
+            self.assertTrue(
+                out.startswith("id\tverdict\tstored\tprinted\tformat\ttitle\n"), out
+            )
+            self.assertNotIn("====", out, "the banner rides stdout")
+            self.assertIn("audit_isbns.py - Execution", err)
+
+    def test_text_mode_stdout_still_carries_the_banner(self):
+        # The human surface is unchanged by the machine-format fix.
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = self._run([], self._library(tmp))
+            self.assertEqual(rc, 0)
+            self.assertIn("audit_isbns.py - Execution", out)
+            self.assertIn("Summary", out)
+
+    def test_setup_error_keeps_machine_stdout_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, err = self._run(
+                ["--format", "json", "--id", "notanumber"], self._library(tmp)
+            )
+            self.assertEqual(rc, 2)
+            self.assertEqual(out, "")
+            self.assertIn("setup error", err)
 
 
 if __name__ == "__main__":
