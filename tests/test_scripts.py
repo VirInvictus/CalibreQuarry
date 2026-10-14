@@ -810,6 +810,7 @@ class TestFetchWriteIdentifiers(unittest.TestCase):
 screen_duplicate = _load("screen_duplicate")
 stamp_pdf = _load("stamp_pdf")
 stamp_epub = _load("stamp_epub")
+extract_stamp_evidence = _load("extract_stamp_evidence")
 
 
 def _make_epub(
@@ -2108,6 +2109,308 @@ class TestStampPdfGuards(unittest.TestCase):
             rc = stamp_pdf.main()
         self.assertEqual(rc, 2)
         self.assertIn("EPUB", buf.getvalue())
+
+    # --- the bad-xref write-failure class (2026-10-14, issue #21):
+    # exiftool rc != 0 naming a damaged xref gets the same one-shot
+    # qpdf rebuild + retry as the parse-crash class.
+
+    def _xref_refusal(self):
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stderr="Error: Invalid xref table\n",
+            stdout="",
+        )
+
+    def test_xref_write_failure_rebuilds_and_retries_once(self):
+        # The Language Implementation Patterns live shape: the write
+        # refuses over the damaged xref, the rebuild preserves the page
+        # count, the retry stamps and verifies.
+        backup = Path(self.tmp.name + "-backups")
+        counts = iter(["367", "367"])
+
+        def qpdf(args):
+            if "--show-npages" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=next(counts), stderr=""
+                )
+            return self._ok()
+
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf,
+                "_run_exiftool",
+                side_effect=[self._xref_refusal(), self._ok()],
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf", side_effect=qpdf) as q,
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Wonderland"},
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("Invalid xref table", out)
+        self.assertIn("attempting one qpdf rebuild", out)
+        self.assertIn("367 pages preserved", out)
+        self.assertIn("stamped and verified", out)
+        self.assertEqual(
+            len(self._write_calls(run)), 2, "the failed write plus one retry"
+        )
+        self.assertEqual(
+            self._qpdf_flags(q),
+            ["--show-npages", "--replace-input", "--show-npages"],
+        )
+
+    def test_xref_retry_still_failing_is_stamp_failed(self):
+        # Exactly one recovery, shared with the parse-crash class: the
+        # retried write dies too, so STAMP_FAILED with no second rebuild.
+        backup = Path(self.tmp.name + "-backups")
+        counts = iter(["3", "3"])
+
+        def qpdf(args):
+            if "--show-npages" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=next(counts), stderr=""
+                )
+            return self._ok()
+
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf,
+                "_run_exiftool",
+                side_effect=[self._xref_refusal(), self._xref_refusal()],
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf", side_effect=qpdf) as q,
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertEqual(len(self._write_calls(run)), 2, "one retry, not three")
+        self.assertEqual(
+            self._qpdf_flags(q),
+            ["--show-npages", "--replace-input", "--show-npages"],
+            "no second rebuild after a failed retry",
+        )
+
+    def test_is_xref_failure_shapes(self):
+        # The live refusal shape matches, and the qpdf phrasing counts
+        # when it rides stdout; the parse-crash class and plain tool
+        # errors are never xref failures.
+        self.assertTrue(stamp_pdf._is_xref_failure(self._xref_refusal()))
+        self.assertTrue(
+            stamp_pdf._is_xref_failure(
+                subprocess.CompletedProcess(
+                    args=[],
+                    returncode=1,
+                    stderr="",
+                    stdout="Error: xref not found at offset 9737496\n",
+                )
+            )
+        )
+        self.assertFalse(
+            stamp_pdf._is_xref_failure(self._crash()),
+            "the parse-crash class has its own recovery",
+        )
+        self.assertFalse(
+            stamp_pdf._is_xref_failure(self._crash(stderr="Error: Unknown file type\n"))
+        )
+
+    # --- the read-back arbitration (2026-10-14, issue #22): a verify
+    # mismatch is re-read through exiftool; only fields it also fails to
+    # hold are the stubborn-XMP class.
+
+    def _arbitration_readback(self, payload):
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(payload) if not isinstance(payload, str) else payload,
+            stderr="",
+        )
+
+    def test_arbiter_readback_parses_groups_and_lists(self):
+        # -j -a -G1 returns group-prefixed keys; every group's copy of a
+        # tag flattens into one list under the bare tag name; list values
+        # flatten element-wise; SourceFile is dropped.
+        payload = [
+            {
+                "SourceFile": "/tmp/x.pdf",
+                "PDF:Title": "Wonderland",
+                "XMP-dc:Title": "Wonderland",
+                "PDF:Author": "A One",
+                "XMP-dc:Creator": ["A One", "A Two"],
+                "XMP-dc:Publisher": "Deep Press",
+                "PDF:Keywords": "isbn:9780140445688",
+            }
+        ]
+        with mock.patch.object(
+            stamp_pdf, "_run_exiftool", return_value=self._arbitration_readback(payload)
+        ) as m:
+            readback = stamp_pdf._exiftool_arbitration_readback(Path("/tmp/x.pdf"))
+        self.assertEqual(
+            readback,
+            {
+                "title": ["Wonderland", "Wonderland"],
+                "author": ["A One"],
+                "creator": ["A One", "A Two"],
+                "publisher": ["Deep Press"],
+                "keywords": ["isbn:9780140445688"],
+            },
+        )
+        argv = m.call_args.args[0]
+        self.assertEqual(argv[:4], ["exiftool", "-j", "-a", "-G1"])
+        self.assertEqual(argv[-1], "/tmp/x.pdf")
+        self.assertTrue(all(a.startswith("-") for a in argv[4:-1]))
+
+    def test_arbiter_readback_failure_returns_empty(self):
+        # A dead or unparseable arbiter read returns {}: every disputed
+        # field stays failed (fail-closed).
+        dead = subprocess.CompletedProcess(
+            args=[], returncode=2, stdout="", stderr="Error: Invalid xref table\n"
+        )
+        with mock.patch.object(stamp_pdf, "_run_exiftool", return_value=dead):
+            self.assertEqual(
+                stamp_pdf._exiftool_arbitration_readback(Path("x.pdf")), {}
+            )
+        with mock.patch.object(
+            stamp_pdf,
+            "_run_exiftool",
+            return_value=self._arbitration_readback("<not json>"),
+        ):
+            self.assertEqual(
+                stamp_pdf._exiftool_arbitration_readback(Path("x.pdf")), {}
+            )
+
+    def test_arbitration_saves_a_blind_readback(self):
+        # The Martin Guerre / Sweet Science disposition: ebook-meta
+        # reports the isbn missing while exiftool holds Keywords
+        # isbn:... — the stamp landed; verified, with the blind reader
+        # on the record.
+        backup = Path(self.tmp.name + "-backups")
+        ok = self._ok()
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok),
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Wonderland", "identifiers": ""},
+            ),
+            mock.patch.object(
+                stamp_pdf,
+                "_exiftool_arbitration_readback",
+                return_value={
+                    "title": ["Wonderland"],
+                    "keywords": ["isbn:9780140445688"],
+                },
+            ) as arb,
+        ):
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(backup),
+                "--title",
+                "Wonderland",
+                "--isbn",
+                "9780140445688",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("read back blind on: isbn", out)
+        self.assertIn("exiftool holds the stamped values", out)
+        self.assertIn("stamped and verified", out)
+        arb.assert_called_once()
+
+    def test_arbitration_confirmed_failure_names_both_readers(self):
+        # The stubborn-XMP class proper: the arbitration read holds
+        # nothing either ({}), so the failure names the field with
+        # exiftool's agreement on the record.
+        backup = Path(self.tmp.name + "-backups")
+        ok = self._ok()
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok),
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Something Else"},
+            ),
+            mock.patch.object(
+                stamp_pdf, "_exiftool_arbitration_readback", return_value={}
+            ) as arb,
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("read-back and exiftool both disagree on: title", out)
+        arb.assert_called_once()
+
+    def test_arbitration_partial_confirms_only_the_real_failures(self):
+        # Mixed: the title arbitrates away, the isbn is confirmed; the
+        # failure names only the confirmed field.
+        backup = Path(self.tmp.name + "-backups")
+        ok = self._ok()
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(stamp_pdf, "_run_exiftool", return_value=ok),
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Wonderland", "identifiers": ""},
+            ),
+            mock.patch.object(
+                stamp_pdf,
+                "_exiftool_arbitration_readback",
+                return_value={"title": ["Wonderland"]},
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply",
+                "--backup-dir",
+                str(backup),
+                "--title",
+                "Wonderland",
+                "--isbn",
+                "9780140445688",
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("both disagree on: isbn", out)
+        self.assertNotIn("both disagree on: isbn, title", out)
+
+    def test_arbitrate_unit_selects_by_probed_tags(self):
+        # A field passes on any group's copy (the " & " join included);
+        # the expected value comes from the stamp arguments.
+        readback = {"title": ["Wonderland"], "creator": ["A One", "A Two"]}
+        with mock.patch.object(
+            stamp_pdf,
+            "_exiftool_arbitration_readback",
+            return_value=readback,
+        ):
+            self.assertEqual(
+                stamp_pdf._arbitrate_with_exiftool(
+                    Path("x.pdf"), ["title"], "Wonderland", [], "", ""
+                ),
+                [],
+            )
+            self.assertEqual(
+                stamp_pdf._arbitrate_with_exiftool(
+                    Path("x.pdf"), ["author"], "", ["A One", "A Two"], "", ""
+                ),
+                [],
+            )
+            self.assertEqual(
+                stamp_pdf._arbitrate_with_exiftool(
+                    Path("x.pdf"), ["isbn"], "", [], "", "9780140445688"
+                ),
+                ["isbn"],
+            )
 
 
 class TestStampEpubVerify(unittest.TestCase):
@@ -3599,6 +3902,342 @@ class TestSeamDecoding(unittest.TestCase):
                         f"{node.lineno}: a text-mode spawn without "
                         'errors="replace"',
                     )
+
+
+class TestExtractStampEvidence(unittest.TestCase):
+    """The wave evidence feeder (issue #24): one JSON row per file,
+    attribute-order-independent OPF parsing (the 2026-10-14 href-first
+    regression), the thin-front census as the extraction's quality gate."""
+
+    #: Deterministic ebook-meta display dump for every main() run; the
+    #: missing-binary and traceback guards get their own tests.
+    SEED_DUMP = (
+        "Title            : Stub\n"
+        "Author(s)        : Stub Author [Author, Stub]\n"
+        "Published        : 2001-01-01T00:00:00+00:00\n"
+        "Languages        : eng\n"
+        "Identifiers      : isbn:9780140445688\n"
+    )
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.wave = Path(self.tmp.name) / "wave"
+        self.wave.mkdir()
+        self.out_dir = Path(self.tmp.name) / "out"
+        self.out_dir.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make_epub(self, path, docs, href_first=True):
+        """docs: [(doc_id, xhtml_text)]. The manifest items put href first
+        (the 2026-10-14 wave's shape) unless href_first is False."""
+        if href_first:
+            items = "".join(
+                f'<item href="{did}.xhtml" id="{did}" '
+                'media-type="application/xhtml+xml"/>\n'
+                for did, _ in docs
+            )
+        else:
+            items = "".join(
+                f'<item id="{did}" href="{did}.xhtml" '
+                'media-type="application/xhtml+xml"/>\n'
+                for did, _ in docs
+            )
+        spine = "".join(f'<itemref idref="{did}"/>' for did, _ in docs)
+        opf = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<package xmlns="http://www.idpf.org/2007/opf" '
+            'xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0">'
+            "<metadata><dc:title>Stub</dc:title>"
+            "<dc:identifier>urn:isbn:9780140445688</dc:identifier></metadata>"
+            f"<manifest>{items}</manifest><spine>{spine}</spine></package>"
+        )
+        container = (
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>'
+        )
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", container)
+            z.writestr("OEBPS/content.opf", opf)
+            for did, text in docs:
+                z.writestr(
+                    f"OEBPS/{did}.xhtml", f"<html><body><p>{text}</p></body></html>"
+                )
+
+    def _run_main(self, *extra, inputs=None, ebook_meta=None):
+        """ebook_meta: an optional _run_ebook_meta stand-in (return value
+        or side_effect list); the default answers the SEED_DUMP display
+        read for every file."""
+        argv = [
+            "extract_stamp_evidence",
+            *(inputs if inputs is not None else [str(self.wave)]),
+            "--out",
+            str(self.out_dir / "evidence.json"),
+            *extra,
+        ]
+        buf = io.StringIO()
+        seed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=self.SEED_DUMP, stderr=""
+        )
+        if isinstance(ebook_meta, (list, BaseException)):
+            # a per-call list or an exception stand-in (the missing-binary
+            # degrade); anything else is the fixed return value
+            patch = {"side_effect": ebook_meta}
+        elif ebook_meta is not None:
+            patch = {"return_value": ebook_meta}
+        else:
+            patch = {"return_value": seed}
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(extract_stamp_evidence, "_run_ebook_meta", **patch),
+            contextlib.redirect_stdout(buf),
+            contextlib.redirect_stderr(buf),
+        ):
+            rc = extract_stamp_evidence.main()
+        return rc, buf.getvalue()
+
+    def _rows(self):
+        return json.loads((self.out_dir / "evidence.json").read_text())
+
+    def test_href_first_opf_still_extracts_front(self):
+        # The 2026-10-14 regression that retired the hand-rolled copies:
+        # 87 of 111 EPUBs put href before id, an id-first regex matched
+        # nothing, and front went silently empty for three quarters of
+        # the batch.
+        p = self.wave / "Author - Book (z-library.sk, 1lib.sk).epub"
+        self._make_epub(
+            p,
+            [
+                ("copyright", "First published 1987. ISBN 978-0-12-345678-9"),
+                ("chapter1", "Once upon a time in the stacks. " * 60),
+            ],
+        )
+        rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        self.assertIn("978-0-12-345678-9", row["front"])
+        self.assertEqual(row["isbn_snips"], ["978-0-12-345678-9"])
+        self.assertEqual(row["opf_ids"], ["urn:isbn:9780140445688"])
+        self.assertIsNone(row["error"])
+
+    def test_id_first_opf_extracts_too(self):
+        p = self.wave / "b.epub"
+        self._make_epub(p, [("c1", "Some front matter text. " * 60)], href_first=False)
+        rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        self.assertIn("Some front matter text", row["front"])
+
+    def test_only_the_first_four_spine_docs(self):
+        docs = [(f"d{i}", f"doc{i} marker ") for i in range(6)]
+        self._make_epub(self.wave / "b.epub", docs)
+        rc, out = self._run_main("--thin-chars", "1")
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        for i in range(4):
+            self.assertIn(f"doc{i} marker", row["front"])
+        self.assertNotIn("doc4 marker", row["front"])
+
+    def test_seed_is_the_display_dump_subset(self):
+        self._make_epub(self.wave / "b.epub", [("c1", "text " * 60)])
+        rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        self.assertEqual(
+            row["seed"],
+            {
+                "title": "Stub",
+                "author(s)": "Stub Author [Author, Stub]",
+                "published": "2001-01-01T00:00:00+00:00",
+                "languages": "eng",
+                "identifiers": "isbn:9780140445688",
+            },
+        )
+
+    def test_seed_seam_missing_binary_degrades_to_a_row_error(self):
+        self._make_epub(self.wave / "b.epub", [("c1", "text " * 60)])
+        missing = FileNotFoundError(2, "ebook-meta not found")
+        rc, out = self._run_main(ebook_meta=missing)
+        self.assertEqual(rc, 0, "a missing binary is a per-file error, not a crash")
+        (row,) = self._rows()
+        self.assertIsNone(row["seed"])
+        self.assertIn("ebook-meta", row["error"])
+
+    def test_seed_seam_traceback_refuses_the_read(self):
+        # Calibre exits 0 with ITS OWN filename guess plus a traceback on
+        # stderr; that guess must never become the seed (run.py's guard).
+        bad = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="Title : Filename Guess\n",
+            stderr="Traceback (most recent call last):\nValueError\n",
+        )
+        with mock.patch.object(
+            extract_stamp_evidence, "_run_ebook_meta", return_value=bad
+        ):
+            seed, err = extract_stamp_evidence._seed(Path("x.epub"))
+        self.assertIsNone(seed)
+        self.assertIn("unparseable", err)
+
+    def test_pdf_front_seam_command_shape(self):
+        proc = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="page text " * 50, stderr=""
+        )
+        with mock.patch.object(
+            extract_stamp_evidence.subprocess, "run", return_value=proc
+        ) as m:
+            front = extract_stamp_evidence._pdf_front(Path("/wave/x.pdf"))
+        self.assertEqual(
+            m.call_args.args[0],
+            ["pdftotext", "-f", "1", "-l", "4", "/wave/x.pdf", "-"],
+        )
+        self.assertTrue(front.startswith("page text"))
+
+    def test_pdf_front_failure_is_a_row_error_and_thin(self):
+        (self.wave / "broken.pdf").write_bytes(b"%PDF-1.4 broken")
+        proc = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="Syntax Error: no trailer\n"
+        )
+        with mock.patch.object(
+            extract_stamp_evidence, "_run_pdftotext", return_value=proc
+        ):
+            rc, out = self._run_main()
+        self.assertEqual(rc, 1, "a pdf with no front is a thin row")
+        (row,) = self._rows()
+        self.assertIn("pdftotext exited 1", row["error"])
+
+    def test_thin_front_census_fails_the_run(self):
+        self._make_epub(self.wave / "Empty Book.epub", [("cover", "")])
+        rc, out = self._run_main()
+        self.assertEqual(rc, 1)
+        self.assertIn("THIN FRONT (1 of 1)", out)
+        self.assertIn("Empty Book.epub", out)
+
+    def test_non_front_formats_are_not_census_judged(self):
+        (self.wave / "scan.djvu").write_bytes(b"DJVU")
+        rc, out = self._run_main()
+        self.assertEqual(rc, 0, "no extractor for djvu: not an extraction failure")
+        (row,) = self._rows()
+        self.assertEqual(row["fmt"], "djvu")
+        self.assertEqual(row["front"], "")
+
+    def test_bare_name_seeds_z_lib_and_markers_seed_their_site(self):
+        self._make_epub(self.wave / "Bare Name Book.epub", [("c1", "text " * 60)])
+        self._make_epub(
+            self.wave / "Wave Book -- Anna\u2019s Archive.epub", [("c1", "text " * 60)]
+        )
+        rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        by_file = {r["file"]: r["provenance"] for r in self._rows()}
+        # The standing 2026-10-12 ruling: bare names seed Z-Lib.
+        self.assertEqual(by_file["Bare Name Book.epub"], "Z-Lib")
+        self.assertEqual(
+            by_file["Wave Book -- Anna\u2019s Archive.epub"], "Anna's Archive"
+        )
+
+    def test_rows_are_a_bare_list_with_the_contract_shape(self):
+        self._make_epub(self.wave / "b.epub", [("c1", "text " * 60)])
+        rc, out = self._run_main()
+        rows = self._rows()
+        self.assertIsInstance(rows, list)
+        self.assertEqual(
+            set(rows[0]),
+            {
+                "file",
+                "path",
+                "fmt",
+                "seed",
+                "opf_ids",
+                "front",
+                "isbn_snips",
+                "provenance",
+                "error",
+            },
+        )
+
+    def test_out_inside_a_scanned_dir_is_refused(self):
+        self._make_epub(self.wave / "b.epub", [("c1", "text " * 60)])
+        rc, out = self._run_main("--out", str(self.wave / "evidence.json"))
+        self.assertEqual(rc, 2)
+        self.assertIn("OUTSIDE", out)
+
+    def test_out_on_a_scanned_file_is_refused(self):
+        target = self.wave / "b.epub"
+        self._make_epub(target, [("c1", "text " * 60)])
+        # The file named directly as the only input: the dir guard cannot
+        # fire (no directory scanned), the file guard must.
+        rc, out = self._run_main("--out", str(target), inputs=[str(target)])
+        self.assertEqual(rc, 2)
+        self.assertIn("scanned file", out)
+
+    def test_missing_input_and_empty_scan_are_refused(self):
+        rc, out = self._run_main(inputs=[str(self.wave / "nope")])
+        self.assertEqual(rc, 2)
+        empty = self.out_dir / "nothing-here"
+        empty.mkdir()
+        rc, out = self._run_main(inputs=[str(empty)])
+        self.assertEqual(rc, 2)
+        self.assertIn("no ebook files", out)
+
+    def test_directory_listing_is_top_level_only(self):
+        # A prior phase's _quarantine/ subtree must never sweep into the
+        # evidence; directories list their immediate files only.
+        (self.wave / "Bare Name Book.epub").write_bytes(b"EPUB")
+        quarantined = self.wave / "_quarantine"
+        quarantined.mkdir()
+        (quarantined / "locked.epub").write_bytes(b"EPUB")
+        rc, out = self._run_main()
+        self.assertEqual(rc, 1, "the fake EPUB has no front: a thin row")
+        self.assertEqual([r["file"] for r in self._rows()], ["Bare Name Book.epub"])
+
+    def test_evidence_extensions_match_run_dot_py(self):
+        # The scanned set is run.py's _EBOOK_EXTS by comment; the pin
+        # makes the comment load-bearing.
+        from cquarry_cli import run as cq_run
+
+        self.assertEqual(extract_stamp_evidence.EVIDENCE_EXTENSIONS, cq_run._EBOOK_EXTS)
+
+    def test_isbn_snips_read_the_isbn_13_label_shape(self):
+        # Copyright pages label the number "ISBN-13:"; the label gap must
+        # cross the edition digits, and a bare year stays a non-match.
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips("ISBN-13: 978-0-306-40615-7"),
+            ["978-0-306-40615-7"],
+        )
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips("ISBN 13: 9780306406157"),
+            ["9780306406157"],
+        )
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips(
+                "First published 2013 by Academic Press"
+            ),
+            [],
+        )
+
+    def test_stale_module_seeder_falls_back_to_the_vendored_copy(self):
+        # The issue-#20 skew shape: an installed cquarry_cli below the
+        # 3.66.0 floor still seeds None for bare names, so the module
+        # import must be floor-checked and the vendored fallback used.
+        vg_spec = importlib.util.spec_from_file_location(
+            "version_guard", _SCRIPTS / "version_guard.py"
+        )
+        vg = importlib.util.module_from_spec(vg_spec)
+        vg_spec.loader.exec_module(vg)
+        sys.modules["version_guard"] = vg
+        with mock.patch.object(vg, "imported_version", return_value="3.65.0"):
+            stale = _load("extract_stamp_evidence")
+        self.assertIn("_PROVENANCE_PATTERNS", stale.__dict__)
+        self.assertEqual(
+            stale._provenance_from_filename("Lord Brocktree.epub"), "Z-Lib"
+        )
+        with mock.patch.object(vg, "imported_version", return_value="3.66.0"):
+            fresh = _load("extract_stamp_evidence")
+        self.assertNotIn("_PROVENANCE_PATTERNS", fresh.__dict__)
 
 
 if __name__ == "__main__":

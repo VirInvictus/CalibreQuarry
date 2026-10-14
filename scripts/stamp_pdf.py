@@ -23,17 +23,25 @@ Field set is FIXED (the traps are already paid for):
 Multiple --author flags join with " & " (Calibre's separator; note the
 `cquarry --set-authors` CLI splits on `;` instead — both are documented).
 Verification reads back with `ebook-meta` (Calibre's own reader), never an
-exiftool round-trip. On write-reports-success-but-readback-disagrees (the
-stubborn-XMP class) the script prints STAMP_FAILED, exits nonzero, and stops:
-do not keep fighting; phase 3 fixes the field in SQL instead.
+exiftool round-trip — except on disagreement. Since 2026-10-14 (issue #22)
+a read-back mismatch is ARBITRATED before failure: the disputed fields are
+re-read through exiftool (the tags the stamp actually writes), and a field
+exiftool holds is a blind ebook-meta read (the 2026-10-10..14 class:
+Learning Blender, Love unto crypt, Martin Guerre, The Sweet Science — the
+stamp had landed, only the reader was blind), recorded as verified. Only
+a field exiftool ALSO fails to hold is the stubborn-XMP class: STAMP_FAILED,
+exit nonzero, do not keep fighting; phase 3 fixes the field in SQL instead.
 
-The other rc != 0 shape recovers mechanically. When exiftool cannot PARSE
-the file at all (a Perl-space error; 2026-09-26: "Can't find Root object"
-off a malformed catalog Names array, on a file `qpdf --check` passes), the
-script attempts exactly one recovery: a `qpdf --replace-input` rebuild whose
-page count must be preserved (a changed count restores the backup copy),
-then ONE stamp retry. A retry that still fails, and every stubborn-XMP
-read-back disagreement, still STAMP_FAILED immediately.
+Two rc != 0 write-failure shapes recover mechanically, each exactly once
+(shared recovery: a `qpdf --replace-input` rebuild whose page count must
+be preserved — a changed count restores the backup copy — then ONE stamp
+retry): exiftool cannot PARSE the file at all (a Perl-space error;
+2026-09-26: "Can't find Root object" off a malformed catalog Names array,
+on a file `qpdf --check` passes), and exiftool refuses the WRITE over a
+damaged xref (2026-10-14, issue #21: "Error: Invalid xref table" on a file
+qpdf documents as "xref not found ... attempting to reconstruct"). A retry
+that still fails, and every other rc != 0 shape, stays STAMP_FAILED
+immediately.
 
 A PDF Calibre has ever produced or touched also carries an XMP
 `calibre:author_sort`. Left in place it breaks the stamp twice: ebook-meta
@@ -54,6 +62,7 @@ Exit codes: 0 = dry-run or all stamps verified, 1 = STAMP_FAILED,
 """
 
 import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -141,6 +150,31 @@ def _is_parse_crash(proc: subprocess.CompletedProcess) -> bool:
     failure never recovers; neither does rc == 0 (that is the read-back's
     job, the stubborn-XMP class)."""
     return proc.returncode != 0 and bool(_crash_detail(proc))
+
+
+#: exiftool WRITE-refusal signatures naming a damaged xref (2026-10-14,
+#: issue #21: "Error: Invalid xref table" on a file qpdf --check calls
+#: "damaged, xref not found ... attempting to reconstruct"). The file is
+#: readable enough to diagnose but the writer refused it; qpdf can
+#: rebuild the tree, so the 3.54.0 one-shot recovery shape applies.
+_XREF_FAIL_RE = re.compile(
+    r"\bInvalid xref\b|\bxref(?:\s+table)?\s+not found\b", re.IGNORECASE
+)
+
+
+def _xref_detail(proc: subprocess.CompletedProcess) -> str:
+    """The first xref error line (trimmed), for the recovery notice."""
+    for stream in (proc.stderr, proc.stdout):
+        for line in (stream or "").splitlines():
+            if _XREF_FAIL_RE.search(line):
+                return line.strip()[:120]
+    return ""
+
+
+def _is_xref_failure(proc: subprocess.CompletedProcess) -> bool:
+    """exiftool rc != 0 with an error naming a bad xref: the write-refusal
+    class the parse-crash regex deliberately does not match."""
+    return proc.returncode != 0 and bool(_xref_detail(proc))
 
 
 def _pdf_page_count(path: Path) -> int | None:
@@ -323,6 +357,99 @@ def _verify(
     return failed
 
 
+#: The ebook-meta read-back arbitration (issue #22, the fourth recurrence
+#: 2026-10-14). Four live files (2026-10-10..14: Learning Blender, the
+#: Love unto crypt variant, The Return of Martin Guerre, The Sweet
+#: Science) carried every stamped value correctly under exiftool while
+#: Calibre's own reader reported the stamp missing: the blind-verifier
+#: class. On a verify mismatch the disagreeing fields are re-read through
+#: exiftool (the tags the stamp actually writes, any group's copy), and
+#: only a field exiftool ALSO fails to hold stays failed. EPUB
+#: verification never arbitrates: ebook-meta reads EPUBs reliably. Keys
+#: are the FLATTENED tag names (every group's copy lands in one list):
+#: the stamp writes docinfo Title + XMP-dc:Title, docinfo Author +
+#: XMP-dc:Creator, XMP-dc:Publisher, and docinfo Keywords.
+_ARBITER_PROBES: dict[str, tuple[str, ...]] = {
+    "title": ("title",),
+    "author": ("author", "creator"),
+    "publisher": ("publisher",),
+    "isbn": ("keywords",),
+}
+
+_ARBITER_TAGS = sorted({t for probes in _ARBITER_PROBES.values() for t in probes})
+
+
+def _exiftool_arbitration_readback(path: Path) -> dict[str, list[str]]:
+    """One exiftool JSON read of every arbiter tag, flattened to
+    lowercase tag name -> [values]. A read that dies (rc != 0, unparseable
+    output) returns {} so every disputed field stays failed (fail-closed:
+    a blind arbiter never certifies a stamp)."""
+    proc = _run_exiftool(
+        ["exiftool", "-j", "-a", "-G1", *(f"-{t}" for t in _ARBITER_TAGS), str(path)]
+    )
+    if proc.returncode != 0:
+        return {}
+    try:
+        records = json.loads(proc.stdout or "[]")
+    except ValueError:
+        return {}
+    if not isinstance(records, list):
+        return {}
+    out: dict[str, list[str]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        for key, value in record.items():
+            if key == "SourceFile":
+                continue
+            values = value if isinstance(value, list) else [value]
+            for v in values:
+                if isinstance(v, str):
+                    out.setdefault(key.split(":")[-1].lower(), []).append(v)
+    return out
+
+
+def _tag_holds(readback: dict[str, list[str]], tag: str, expected: str) -> bool:
+    values = readback.get(tag, [])
+    if any(v.strip() == expected for v in values):
+        return True
+    # A producer-side list re-reads element-wise; the " & " join is the
+    # stamp's own written shape.
+    return bool(values) and " & ".join(v.strip() for v in values) == expected
+
+
+def _arbitrate_with_exiftool(
+    path: Path,
+    failed_fields: list[str],
+    title: str,
+    authors: list[str],
+    publisher: str,
+    isbn: str,
+) -> list[str]:
+    """The disputed fields a direct exiftool read confirms missing. A field
+    passes when any group's copy of a tag the stamp wrote equals the
+    stamped value."""
+    if not failed_fields:
+        return []
+    readback = _exiftool_arbitration_readback(path)
+    if not readback:
+        return list(failed_fields)
+    expected = {
+        "title": title,
+        "author": " & ".join(authors),
+        "publisher": publisher,
+        "isbn": f"isbn:{isbn}",
+    }
+    return [
+        field
+        for field in failed_fields
+        if not any(
+            _tag_holds(readback, tag, expected[field])
+            for tag in _ARBITER_PROBES.get(field, ())
+        )
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Pre-stamp PDF metadata (dry-run by default). Mechanics only: "
@@ -419,12 +546,15 @@ def main() -> int:
         )
         exif_args.append(str(f))
         proc = _run_exiftool(exif_args)
-        if proc.returncode != 0 and _is_parse_crash(proc):
-            # The parse-crash class: exiftool cannot even read the file.
-            # One mechanical cure (2026-09-26 roadmap): a qpdf rebuild and
+        if proc.returncode != 0 and (_is_parse_crash(proc) or _is_xref_failure(proc)):
+            # The recoverable write-failure classes (one shot each):
+            # parse-crash, exiftool cannot even read the file (2026-09-26);
+            # bad-xref, the write refused over a damaged xref table
+            # (2026-10-14). Same mechanical cure: a qpdf rebuild and
             # exactly one retry; anything less clean stays a failure.
+            detail = _crash_detail(proc) or _xref_detail(proc)
             print(
-                f"  {DIM}exiftool cannot parse the file ({_crash_detail(proc)}); "
+                f"  {DIM}exiftool failed on the file ({detail}); "
                 f"attempting one qpdf rebuild{RESET}"
             )
             pages = _rebuild_in_place(f, backup)
@@ -466,13 +596,26 @@ def main() -> int:
             readback, args.title, args.author, args.publisher, args.isbn
         )
         if failed_fields:
-            # The stubborn-XMP class: exiftool claims success but Calibre's own
-            # reader disagrees. Do not keep fighting — phase 3 fixes the field
-            # in SQL instead.
-            print(
-                f"  {RED}STAMP_FAILED: read-back disagrees on: {', '.join(failed_fields)}{RESET}"
+            # The read-back disagreed; arbitrate before declaring failure
+            # (issue #22): a direct exiftool read re-checks the disputed
+            # fields, and only the ones it ALSO fails to hold are real
+            # (the stubborn-XMP class — phase 3 fixes those in SQL). A
+            # field exiftool holds was a blind ebook-meta read; the stamp
+            # landed.
+            confirmed = _arbitrate_with_exiftool(
+                f, failed_fields, args.title, args.author, args.publisher, args.isbn
             )
-            failed_any = True
+            if confirmed:
+                print(
+                    f"  {RED}STAMP_FAILED: read-back and exiftool both disagree on: {', '.join(confirmed)}{RESET}"
+                )
+                failed_any = True
+            else:
+                print(
+                    f"  {DIM}ebook-meta read back blind on: {', '.join(failed_fields)} "
+                    f"(exiftool holds the stamped values){RESET}"
+                )
+                print(f"  {GREEN}stamped and verified{RESET} (backup: {backup})")
         else:
             print(f"  {GREEN}stamped and verified{RESET} (backup: {backup})")
 

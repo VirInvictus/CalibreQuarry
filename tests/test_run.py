@@ -185,8 +185,11 @@ class TestProvenanceSeeds(unittest.TestCase):
             "Library Genesis",
         )
 
-    def test_a_bare_name_seeds_nothing(self):
-        self.assertIsNone(_provenance_from_filename("Lord Brocktree.epub"))
+    def test_a_bare_name_seeds_z_lib_per_the_standing_ruling(self):
+        # The 2026-10-12 standing ruling (issue #23): marker files seed
+        # their site, bare names seed Z-Lib; the ruling leaves no None
+        # case, so the wave's hand correction becomes a verify.
+        self.assertEqual(_provenance_from_filename("Lord Brocktree.epub"), "Z-Lib")
 
 
 class TestRunPhase1(RunCase):
@@ -248,7 +251,8 @@ class TestRunPhase1(RunCase):
         self.assertEqual(
             manifest.file_by_path(man, named)["provenance"], "Anna's Archive"
         )
-        self.assertIsNone(manifest.file_by_path(man, bare)["provenance"])
+        # The bare name rides the standing ruling's Z-Lib default, not None.
+        self.assertEqual(manifest.file_by_path(man, bare)["provenance"], "Z-Lib")
 
     def test_benign_and_na_verdicts_never_quarantine(self):
         # The sweep's finding: audit_drm's BENIGN (font obfuscation) and

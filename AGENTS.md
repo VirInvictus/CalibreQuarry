@@ -5,6 +5,76 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.66.0 onward, the wave-lessons batch, issues #21-#24)
+
+- **`scripts/extract_stamp_evidence.py` is the research pass's evidence
+  feeder, and its OPF parsing is attribute-order-independent by
+  construction.** One JSON row per file, bare list (the wave consumers'
+  shape): `file`/`path`/`fmt`, `seed` (the ebook-meta display dump
+  restricted to title/author(s)/publisher/published/languages/isbn/
+  identifiers -- raw display fields, NOT phase 1's filtered stamps: the
+  research pass wants the ISBN/identifiers lines the stamp seeding
+  refuses; a calibre-refused read is seed=None + error, the run.py
+  traceback guard), `opf_ids` (first 8 dc:identifier values),
+  `front` (first 4 spine docs joined " | ", or pdftotext pages 1-4;
+  other formats carry no front and are NOT census-judged), `isbn_snips`
+  (front-scanned shapes, <= 6; the label gap crosses the
+  "ISBN-13:"/"ISBN 13:" spellings), `provenance` (run.py's
+  `_provenance_from_filename`, imported at module load behind a
+  3.66.0 floor check -- a stale user-site module still seeds None,
+  so below the floor the vendored fallback runs; the fallback's
+  default MUST track the bare-name ruling), `error` (also set when
+  ebook-meta exits nonzero, the run.py guard).
+  The manifest/spine parse through ElementTree local names (`id` and
+  `href` are separate attributes of each `<item>`) -- the oct-14
+  hand-rolled copy's id-first regex emptied front for 87 of 111 EPUBs
+  and is the bug this script retires. The thin-front census (extracted
+  rows with front under `--thin-chars`, default 200) is the
+  extraction's quality gate: listed by name, exit 1. Directory inputs
+  list TOP-LEVEL files only (a recursive walk would sweep a prior
+  phase's `_quarantine/` in); `--out` is required and refused inside
+  any scanned directory or on any scanned file (reads only). Exit
+  codes: 0 clean extraction, 1 thin rows, 2 usage.
+- **stamp_pdf's one-shot qpdf recovery now covers two write-failure
+  classes.** The recovery block fires on `_is_parse_crash(proc) or
+  _is_xref_failure(proc)`: a Perl-space parse error (3.54.0, 2026-09-26)
+  or an output line matching `_XREF_FAIL_RE` ("Invalid xref", "xref
+  [table] not found", case-insensitive, stderr and stdout; issue #21,
+  the Language Implementation Patterns live shape). Shared shape:
+  exactly one `qpdf --replace-input` rebuild, page count verified
+  preserved (a changed count restores the backup and keeps the
+  failure), one retry, and the sort-erase detection re-reads after the
+  rebuild. Any other rc != 0 shape is an immediate STAMP_FAILED, and a
+  failed retry is never rebuilt again. This supersedes the 3.54.0
+  clause "any other nonzero exit (no Perl-space signature) never
+  recovers". check_pdf's exit-code-only reading is unchanged (the
+  issue named the battery gap cosmetic once the stamp-side heal
+  landed).
+- **A stamp_pdf verify mismatch is arbitrated by exiftool before it is
+  a failure.** `_verify`'s failed fields go through
+  `_arbitrate_with_exiftool`: one `exiftool -j -a -G1` read of
+  `_ARBITER_TAGS` (author, creator, keywords, publisher, title --
+  flattened by bare tag name, so any group's copy passes; list values
+  count element-wise and as their " & " join) against the stamped
+  values. Fields exiftool holds were a blind ebook-meta read (the
+  2026-10-10..14 class) and the stamp verifies with a DIM note naming
+  the blind fields; fields exiftool also fails to hold print
+  "read-back and exiftool both disagree on: ..." and fail. An empty
+  arbitration readback (exiftool died, unparseable JSON) confirms every
+  disputed field -- fail-closed, a blind arbiter never certifies a
+  stamp. The refused-set return contract of the mocked seam is
+  unchanged; the arbitration rides the same `_run_exiftool` seam and
+  its probes carry no `=`, so write-call counters in tests never see
+  them. EPUB verification (stamp_epub) arbitrates nothing, by the
+  issue's own evidence.
+- **`_provenance_from_filename` has no None case.** The standing
+  2026-10-12 ruling: marker files seed their site, bare names seed
+  `Z-Lib` (`_PROVENANCE_BARE_DEFAULT`; issue #23). Supersedes the
+  3.35.0 "absence of evidence is not a source" rule. Manifests minted
+  before 3.66.0 may still carry None (signed history, untouched);
+  extract_stamp_evidence's vendored fallback carries the same default
+  and must keep step.
+
 ## Programmer-facing contract notes (3.65.0 onward, the version-skew batch, issue #20)
 
 - **Every `scripts/` entry point announces its toolchain, and
@@ -12,8 +82,8 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   actually imported.** The shared helper is `scripts/version_guard.py`
   (stdlib-only, no main; db_util.py's sibling, not an entry point).
   `announce()` prints ONE stderr line, `toolchain: cquarry X, vir_tui Y,
-  cquarry_cli Z`, called right after `parse_args()` in all sixteen
-  scripts' main() (check_pdf and comments_census included: the line is
+  cquarry_cli Z`, called right after `parse_args()` in every script's
+  main() (check_pdf and comments_census included: the line is
   a uniform surface an agent can rely on). The version source prefers
   `sys.modules[...].__version__` (what the process actually imported; a
   checkout fallback's src/ copy reports itself) and falls back to

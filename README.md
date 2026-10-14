@@ -215,8 +215,9 @@ stamps (read through `ebook-meta`; the "Author - Title" filename parse is
 the fallback when a file carries nothing readable) and filename-derived
 provenance (the `#source` vocabulary value the filename's site markers
 indicate: the "-- Anna's Archive" trailer, z-library.sk/1lib.sk naming,
-libgen.li; no marker, no seed); both are mechanical guesses the review
-step corrects in the manifest before signing. The file-side
+libgen.li; since 3.66.0 a name carrying no marker seeds `Z-Lib`, per the
+standing ruling); both are mechanical guesses the review step
+verifies in the manifest before signing. The file-side
 consents phase 1 accepts are `--stamp` (drive
 stamp_pdf on PDFs whose filename parses), `--apply-lossy` (bindery's
 gated content repairs), and `--quarantine` (move true DRM hits into
@@ -971,6 +972,24 @@ hit rate by tag branch:
 ```
 
 Exit codes: `0` completed, `1` aborted after repeated network failure or a write error, `2` setup error (no `metadata.db`, Calibre running under `--apply`, or bad arguments).
+
+### `extract_stamp_evidence.py`: the stamp-research evidence feeder (read-only)
+
+One JSON row per file for the phase-1 research pass (the feeder the
+research briefs and slice files read): `file`/`path`/`fmt`, `seed` (the
+raw `ebook-meta` display fields, ISBN/identifiers included), `opf_ids`,
+`front` (first 4 EPUB spine documents or `pdftotext` pages 1-4),
+`isbn_snips` (copyright-page ISBN shapes), `provenance` (the same seeder
+phase 1 uses), and a per-file `error` that never stops the run. The OPF
+manifest parses with ElementTree, so `<item>` attribute order cannot
+matter (the 2026-10-14 href-first wave broke a hand-rolled regex copy 87
+EPUBs deep, which is why this is a tool and not a snippet). The
+thin-front census is the extraction's quality gate: rows whose front came
+back under `--thin-chars` (default 200) are listed by name and the run
+exits 1. Reads only: directory inputs list top-level files (a prior
+phase's `_quarantine/` never sweeps in) and `--out` (required) is refused
+inside any scanned directory. Exit codes: `0` clean extraction, `1`
+thin-front rows to inspect, `2` usage error.
 
 ### `spot_check.py`: randomized quality audit, with a judgement mode (read-only)
 

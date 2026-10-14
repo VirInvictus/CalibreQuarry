@@ -238,24 +238,31 @@ def _stamps_from_embedded(path: str) -> dict[str, Any] | None:
 #: the enum no longer carries the old 3.40-era "Z-Library" string), so the
 #: seeder tracks `Z-Lib` -- the value must exist in the library's #source
 #: enum BEFORE phase 2 stamps it (enum validation refuses unknown values,
-#: deliberately loudly). A name carrying no marker seeds None: absence of
-#: evidence is not a source.
+#: deliberately loudly). A name carrying no marker seeds `Z-Lib` too, per
+#: the standing 2026-10-12 ruling: the corpus arrives via Z-Lib whatever
+#: its naming, so the ruling leaves no None case -- marker files seed
+#: their site, bare names seed Z-Lib, and the review step verifies the
+#: seed instead of hand-writing it (the old None made every wave carry
+#: the same hand correction into the mint pass; issue #23).
 _PROVENANCE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"anna[’']s\s+archive", re.IGNORECASE), "Anna's Archive"),
     (re.compile(r"\b(?:z[\s_-]?lib(?:rary)?|1lib)\b", re.IGNORECASE), "Z-Lib"),
     (re.compile(r"\blibgen\b", re.IGNORECASE), "Library Genesis"),
 )
 
+_PROVENANCE_BARE_DEFAULT = "Z-Lib"
 
-def _provenance_from_filename(path: str) -> str | None:
-    """Filename-derived seed provenance (a #source value or None), surfaced
-    in the manifest for the review step to correct exactly like the stamps;
+
+def _provenance_from_filename(path: str) -> str:
+    """Filename-derived seed provenance (always a #source value; the
+    standing 2026-10-12 ruling leaves no None case), surfaced in the
+    manifest for the review step to verify exactly like the stamps;
     phase 2 stamps cc6 from the reviewed value."""
     stem = os.path.splitext(os.path.basename(path))[0]
     for pattern, source in _PROVENANCE_PATTERNS:
         if pattern.search(stem):
             return source
-    return None
+    return _PROVENANCE_BARE_DEFAULT
 
 
 def _duplicate_detail(refusals: dict[str, dict[str, list]] | None) -> str:

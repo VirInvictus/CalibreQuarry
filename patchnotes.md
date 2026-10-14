@@ -1,5 +1,87 @@
 # CalibreQuarry Patch Notes
 
+# 3.66.0 (2026-10-14)
+
+### The wave-lessons batch: the research extractor stops being hand-rolled, the PDF stamper heals bad xrefs and arbitrates blind read-backs, and bare-name provenance seeds Z-Lib (issues #21, #22, #23, #24)
+
+Every one of these started as the same sentence in the 2026-10-14 wave
+log: a tool refused or misread a file, a human diagnosed it in one pass,
+and the fix was "do that by hand next time too". The xref-damaged PDF
+that passed the vetting battery then refused exiftool's write; two more
+PDFs failed the stamp verify while exiftool held every stamped value
+correctly; a bare-name file needed the same one-line provenance
+correction every wave has made since 2026-10-12; and the fourth
+hand-rolled copy of the research evidence extractor briefly emptied the
+front matter for 87 of 111 EPUBs before a thin-front census caught it.
+Each disposition is now in the tool that owns it.
+
+- **`scripts/extract_stamp_evidence.py` is the wave evidence feeder
+  (issue #24).** One JSON row per file with the field set that
+  stabilized across the four waves: `file`/`path`/`fmt`, `seed` (the
+  ebook-meta display dump: title, author(s), publisher, published,
+  languages, isbn, identifiers -- deliberately the raw fields, the
+  research pass wants the ISBN line phase 1's stamp seeding refuses; a
+  read calibre refuses -- nonzero exit or its own guess plus a stderr
+  traceback -- is seed=None + error, the run.py guard),
+  `opf_ids` (the OPF's dc:identifier values), `front` (first 4 spine
+  documents, or `pdftotext` pages 1-4), `isbn_snips` (copyright-page
+  shapes; the label gap crosses the "ISBN-13:"/"ISBN 13:" spellings),
+  `provenance` (the same seeder phase 1 uses, imported from
+  `cquarry_cli.run` behind a 3.66.0 floor check -- the issue-#20 skew
+  shape: a stale module still seeds None, so below the floor the
+  vendored fallback runs -- with the same fallback covering a lone
+  deployed copy), and `error` (per-file, never fatal: one unreadable
+  file does not kill the run). The OPF manifest and spine parse with
+  ElementTree, `id` and `href` read as separate attributes of each
+  `<item>`: attribute order cannot matter by construction, which is
+  the regression that retired the hand-rolled copies. The thin-front
+  census is built in as the extraction's quality gate: extracted rows
+  whose front came back under `--thin-chars` (default 200) are listed
+  in a THIN FRONT block and the run exits 1, because evidence that
+  thin must be inspected, never trusted. Reads only: directory inputs
+  list top-level files (a prior phase's `_quarantine/` never sweeps
+  in), and `--out` is refused when it would land inside a scanned
+  directory or on a scanned file. The report is a bare list, the shape
+  the wave consumers already read.
+- **stamp_pdf heals the bad-xref write refusal (issue #21).** When
+  exiftool exits nonzero and its output names a damaged xref ("Invalid
+  xref table", "xref not found"), the file takes the 3.54.0 parse-crash
+  recovery shape: exactly one `qpdf --replace-input` rebuild with the
+  page count verified preserved (a changed count restores the backup
+  and keeps the failure), then one stamp retry. The recovery block is
+  shared; the diagnosis (`_crash_detail` or `_xref_detail`) is what the
+  notice prints. Every other rc != 0 shape stays an immediate
+  STAMP_FAILED, and a retried refusal is never rebuilt twice. The
+  battery gap the issue named as secondary is left as-is: check_pdf
+  reads qpdf's exit code alone by contract, and with the stamp-side
+  heal landing the gap is cosmetic.
+- **stamp_pdf arbitrates a blind ebook-meta read-back with exiftool
+  before declaring STAMP_FAILED (issue #22).** On a verify mismatch the
+  disputed fields are re-read through one `exiftool -j -a -G1` pass
+  over the tags the stamp actually writes (docinfo Title and
+  XMP-dc:Title, docinfo Author and XMP-dc:Creator, XMP-dc:Publisher,
+  docinfo Keywords; any group's copy passes, list tags count
+  element-wise and joined). A field exiftool holds was a blind
+  ebook-meta read -- the 2026-10-10..14 class (Learning Blender, Love
+  unto crypt, Martin Guerre, The Sweet Science), where the stamp had
+  landed and only the reader was blind -- and the stamp verifies, with
+  the arbitration on the record ("read back blind on: isbn"). A field
+  exiftool also fails to hold is the stubborn-XMP class proper and
+  still fails with the new message naming both readers. A dead or
+  unparseable arbitration read leaves every disputed field failed
+  (fail-closed: a blind arbiter never certifies a stamp). EPUB
+  verification never arbitrates; ebook-meta reads EPUBs reliably.
+- **phase 1 seeds provenance `Z-Lib` for markerless bare-name files
+  (issue #23, the standing 2026-10-12 ruling).** The ruling left no
+  None case -- marker files seed their site, bare names seed Z-Lib --
+  so `_provenance_from_filename` now returns the enum value instead of
+  None, and the wave's hand correction becomes a verify. The manifest
+  seal, phase 2's cc6 stamp, and the review step all take the seed
+  unchanged; pre-3.66 manifests carrying None remain signed history.
+  Supersedes the 3.35.0 rule ("absence of evidence is not a source"):
+  the rule served while the corpus's provenance was genuinely open;
+  four waves of hand corrections are the evidence it is not.
+
 # 3.65.0 (2026-10-14)
 
 ### The version-skew batch: the scripts self-identify their toolchain, reconcile floors its module, and the read-back arbiters a refused normalization (issue #20)
