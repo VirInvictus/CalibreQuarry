@@ -5,6 +5,65 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.65.0 onward, the version-skew batch, issue #20)
+
+- **Every `scripts/` entry point announces its toolchain, and
+  reconcile_file_metadata.py floor-checks the cquarry_cli module it
+  actually imported.** The shared helper is `scripts/version_guard.py`
+  (stdlib-only, no main; db_util.py's sibling, not an entry point).
+  `announce()` prints ONE stderr line, `toolchain: cquarry X, vir_tui Y,
+  cquarry_cli Z`, called right after `parse_args()` in all sixteen
+  scripts' main() (check_pdf and comments_census included: the line is
+  a uniform surface an agent can rely on). The version source prefers
+  `sys.modules[...].__version__` (what the process actually imported; a
+  checkout fallback's src/ copy reports itself) and falls back to
+  importlib.metadata over `WORKSPACE_PACKAGES` (module -> dist names:
+  cquarry->cquarry, vir_tui->vir-tui, cquarry_cli->calibrequarry);
+  `absent` for a package neither imported nor installed; it never
+  imports anything and never writes stdout, so machine-report contracts
+  (check_pdf's JSON) stay clean. Every script imports the helper
+  through a try/except ImportError whose fallback is a no-op
+  `announce` (a lone deployed copy with no siblings -- the documented
+  deploy-a-copy pattern -- runs exactly as 3.64.0 did, announcing
+  nothing); reconcile's fallback additionally stubs
+  `imported_version` (None) and `floor_refusal`, and that stub prints
+  "NOTE: version_guard.py is not beside this script; the cquarry_cli
+  floor check was skipped." once at the gate, so the strong half of
+  the fix degrades visibly, never silently.
+- **The floor is `(3, 63, 5)` and the honest version is the imported
+  module's own `__version__`.** reconcile captures
+  `_CQUARRY_CLI_VERSION = imported_version("cquarry_cli")` at its
+  epubdates import seam (the try/except decided WHICH copy runs; the
+  dist metadata can lag a checkout, so it is never the answer), and
+  main() refuses through `floor_refusal()` before the tool probes and
+  the library resolution: exit 2, naming the version found, the floor,
+  the why (the identifier pass's default-namespace synthesis moved in
+  3.63.5; an older module refuses files the current code handles
+  silently -- the issue-#20 skew symptom), and the fix command
+  (`pip install --user --upgrade calibrequarry`). An unparseable or
+  missing version refuses too (fail-closed, the pgrep-guard shape).
+  `version_tuple` compare is plain tuple ordering. New script-side
+  dependence on moved module internals means bumping that floor in the
+  same commit; the other fifteen scripts announce but floor nothing
+  (none of them imports cquarry_cli).
+- **reconcile's apply tail arbitrates a normalization refusal by the
+  read-back re-diff.** Both normalization loops now append
+  `(rec, fpath, line)` to a held `normalization_failed` list (no inline
+  stderr print, no immediate `ok = False`); after `verify_embedded`
+  returns, refusals on files in the residual set (keyed `(book id,
+  "EPUB")`; unreadable read-backs are residuals) print to stderr and
+  join `failures` with `ok = False` as before, and refusals on in-sync
+  files become `normalization_notes` lines with the literal suffix
+  " (already in sync)" -- printed as a `NOTES (N)` block after
+  FAILURES and before the summary, never counted as failures, never
+  blocking exit 0; the DONE line appends the demoted count when notes
+  exist. Block order is fixed: RESIDUAL, FAILURES, NOTES, then
+  DONE/COMPLETED WITH ERRORS (the summary's "(listed above)" and
+  "(noted above)" both point backwards). The issue-#6 durable-record
+  contract is unchanged for real failures; what changed, pinned by the
+  rewritten tests: a refused normalization over an in-sync read-back
+  used to fail the run, and is now a note at exit 0.
+
 ## Programmer-facing contract notes (3.64.0 onward, the evening-wave batch, issues #17/#18/#19)
 
 - **The title judge strips ordinal edition tags, and the refusal detail

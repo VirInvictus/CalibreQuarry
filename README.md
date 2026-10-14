@@ -675,7 +675,7 @@ example:
 
 ## Companion scripts
 
-The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are stdlib-only Python (plus tqdm for progress bars); some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly.
+The `scripts/` directory holds standalone maintenance tools. They are **not** part of the `cquarry` package and deliberately sit **outside its read-only contract**: they are run directly with `python3`, and several of them write. They are stdlib-only Python (plus tqdm for progress bars); some shell out to external command-line tools. Each is designed to run from inside a Calibre library directory (they locate `metadata.db` relative to themselves), so deploy a copy into your library root or pass paths explicitly. Every entry point announces its toolchain (one `toolchain:` line on stderr naming the cquarry / vir_tui / cquarry_cli versions the run sits on; the scripts import the pip-installed module, which can lag the `cquarry` binary a uv tool upgrade brings), and `reconcile_file_metadata.py` refuses an imported `cquarry_cli` older than the floor its identifier pass assumes; a lone deployed copy without `version_guard.py` beside it runs unchanged, just without the announcement (reconcile notes the skipped floor check on stderr).
 
 ### `compress_pdf.py`: shrink oversize PDFs (writes)
 

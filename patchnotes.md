@@ -1,5 +1,60 @@
 # CalibreQuarry Patch Notes
 
+# 3.65.0 (2026-10-14)
+
+### The version-skew batch: the scripts self-identify their toolchain, reconcile floors its module, and the read-back arbiters a refused normalization (issue #20)
+
+The evening phase-3 run chased a ghost: `uv tool upgrade calibrequarry`
+put the `cquarry` binary at 3.64.0 while the pip-installed `cquarry_cli`
+module stayed at 3.63.4 (the step-0 pip list named cquarry,
+bindery-cli, and vir-tui but not calibrequarry), and everything the
+companion scripts ran was one #16 fix behind the binary with nothing on
+the record. Reconcile's identifier normalization refused eight
+default-namespace EPUBs the current module handles silently, and the
+skew was findable only by comparing `pip show calibrequarry` against
+`cquarry --version` by hand. The upgrade command is fixed in the skills;
+this release makes the tools self-announcing so the next skew diagnoses
+itself.
+
+- **Every `scripts/` entry point announces its toolchain.** One line on
+  stderr, first thing after the arguments parse:
+  `toolchain: cquarry 1.28.0, vir_tui 2.5.0, cquarry_cli 3.64.0`. The
+  line prefers the version of the module object the process actually
+  imported (a checkout fallback's src/ copy reports itself) and falls
+  back to the installed distribution metadata, `absent` for a package
+  that is not installed at all; it never imports anything and never
+  touches stdout, so machine-report contracts (check_pdf's JSON) stay
+  clean. The import is resilient: a lone deployed copy with no
+  `version_guard.py` beside it (the documented deploy-a-copy pattern)
+  runs exactly as before, announcing nothing; in reconcile the skipped
+  floor check says so on stderr instead of vanishing silently. The
+  shared helper is `scripts/version_guard.py`.
+- **reconcile_file_metadata.py floor-checks the module it imported
+  (the strong half of the issue's fix).** The identifier pass's
+  behavior moved in 3.63.5 (the default-namespace EPUB3 synthesis), so
+  an older module refuses files the current code handles silently --
+  exactly the skew symptom. The script now refuses at startup, exit 2,
+  naming the version found, the floor required, and the fix command
+  (`pip install --user --upgrade calibrequarry`); the version that
+  counts is the imported module's own `__version__`, never the dist
+  metadata, which can lag a checkout. Unreadable refuses too
+  (fail-closed, the pgrep-guard shape).
+- **A refused normalization is judged by the read-back re-diff, not by
+  the refusal itself (the issue's secondary nit).** The live run's
+  apply log reported eight "identifier normalization failed" lines
+  where the follow-up dry run found one drifted file: several refusals
+  rode files the embed had already brought in sync, so the failure
+  count overstated the work remaining. The apply pass now holds
+  normalization refusals per file and arbitrates them after the
+  read-back: a file still drifted keeps its refusal as a failure (the
+  issue-#6 durable FAILURES-block contract is unchanged there), a file
+  the read-back finds in sync is demoted to a NOTES line with the
+  "(already in sync)" suffix and does not fail the run, and the DONE
+  line counts the demoted passes. An unreadable read-back keeps the
+  failure (silence must not stand in for a file nobody saw).
+  Contract change, pinned: a refused normalization over an in-sync
+  read-back used to fail the run; it is now a note at exit 0.
+
 # 3.64.0 (2026-10-13)
 
 ### The evening-wave batch: edition-tag stripping, the refusal-split detail, and the preempted-consent record (issues #17, #18, #19)
