@@ -70,6 +70,16 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 RESET = "\033[0m"
 YELLOW = "\033[1;33m"
 RED = "\033[1;31m"
@@ -321,6 +331,8 @@ def main() -> int:
         help="also write the machine report ({files: [{file, status, ...}]})",
     )
     args = parser.parse_args()
+
+    announce()
 
     files = [Path(f).expanduser() for f in args.files]
     if rc := _check_files(files):

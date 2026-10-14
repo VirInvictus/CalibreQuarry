@@ -68,6 +68,14 @@ from pathlib import Path
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 from vir_tui import core as ui
 
 # ANSI colours; suppress when stdout isn't a TTY.
@@ -555,6 +563,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     ui.print_header("audit_drm.py - Execution")
+    announce()
     csv_path = Path(args.csv).expanduser() if args.csv else None
     if args.directory:
         return run_directory(Path(args.directory).expanduser(), csv_path)

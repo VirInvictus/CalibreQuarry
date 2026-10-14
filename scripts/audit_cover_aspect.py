@@ -35,6 +35,16 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 LOW_BAND = 0.55
 HIGH_BAND = 0.80
 
@@ -72,6 +82,8 @@ def main() -> int:
         "--format", choices=("text", "json"), default="text", dest="fmt"
     )
     args = parser.parse_args()
+
+    announce()
 
     id_filter: set[int] | None = None
     if args.ids:

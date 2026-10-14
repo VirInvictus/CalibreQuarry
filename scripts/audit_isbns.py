@@ -111,6 +111,15 @@ import zipfile
 from urllib.parse import quote
 
 from db_util import cleanup_tmp, connect_ro
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 from vir_tui import core as ui
 
 # A number only counts when the book introduces it as an ISBN. Bare 10-13 digit
@@ -585,6 +594,7 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true", help="suppress per-book lines")
     args = ap.parse_args()
     ui.print_header("audit_isbns.py - Execution")
+    announce()
 
     ids = None
     if args.id:

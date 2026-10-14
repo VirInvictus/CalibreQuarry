@@ -40,6 +40,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 from vir_tui import core as ui
 
 # Ghostscript pdfwrite quality presets:
@@ -576,6 +584,7 @@ def main() -> int:
     )
     args = p.parse_args()
     ui.print_header("Compress PDF")
+    announce()
     if args.inspect:
         inspect_path(args.path.resolve(), args.min_size_mb)
         return 0

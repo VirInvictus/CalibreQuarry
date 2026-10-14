@@ -81,6 +81,15 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 
 from cquarry.write import WritableCalibreDB
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 from vir_tui import core as ui
 
 SRU_BASE = "http://lx2.loc.gov:210/LCDB"
@@ -611,6 +620,7 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true", help="suppress per-book lines")
     args = ap.parse_args()
     ui.print_header("fetch_library_codes.py - Execution")
+    announce()
 
     if args.delay < 1.0:
         print(

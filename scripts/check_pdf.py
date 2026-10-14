@@ -27,6 +27,17 @@ import argparse
 import json
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
 
 _PDF_MAGIC = b"%PDF-"
 _DJVU_MAGIC = b"AT&TFORM"
@@ -283,6 +294,8 @@ def main() -> int:
         "--quiet", action="store_true", help="suppress the per-file progress lines"
     )
     args = ap.parse_args()
+
+    announce()
 
     reports = []
     for path in args.files:

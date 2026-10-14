@@ -62,6 +62,16 @@ import sys
 import unicodedata
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3"}
 
 # Identifier types whose value is an edition ASIN. z-lib rips routinely
@@ -678,6 +688,8 @@ def main() -> int:
         help="report format (json is the batch-report shape)",
     )
     args = parser.parse_args()
+
+    announce()
 
     files, skipped = _scan_files(args.paths)
     if not files:

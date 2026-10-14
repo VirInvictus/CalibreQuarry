@@ -62,6 +62,15 @@ import zipfile
 from urllib.parse import unquote
 
 from db_util import cleanup_tmp, connect_ro
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 from vir_tui import core as ui
 
 FMT_EXT = {
@@ -602,6 +611,7 @@ def main() -> int:
     args = ap.parse_args()
     ui.print_header("spot_check.py - Random spot check")
     ui.print_header("spot_check.py - Execution")
+    announce()
 
     ledger_path = Path(args.ledger).expanduser()
     if args.worklist:

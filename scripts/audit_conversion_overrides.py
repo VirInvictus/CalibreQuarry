@@ -22,6 +22,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 RESET = "\033[0m"
 YELLOW = "\033[1;33m"
 
@@ -43,6 +51,8 @@ def main() -> int:
     )
     parser.add_argument("--quiet", action="store_true", help="print only the book ids")
     args = parser.parse_args()
+
+    announce()
 
     db_path = resolve_db(args.path)
     if db_path is None:

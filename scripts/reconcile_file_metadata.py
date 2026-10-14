@@ -70,6 +70,20 @@ block on stdout immediately before the summary, and the summary counts them
 (issue #6): the inline failure lines ride stderr, so a capture that lost
 stderr showed "COMPLETED WITH ERRORS (see above)" over an empty above.
 
+A refused normalization is judged by the read-back re-diff, not by the
+refusal itself (issue #20's secondary nit): on a file the read-back finds
+in sync it is demoted to a NOTES line ("(already in sync)"), because no
+drift remains for the refused pass to close, and only on a file still
+drifted does it stay a failure. The failure count is work that remains,
+not attempts that stumbled.
+
+The script self-identifies its toolchain: one "toolchain:" line on stderr
+names the cquarry / vir_tui / cquarry_cli versions this run sits on, and
+the cquarry_cli module the import above resolved is floor-checked against
+the release the identifier pass's behavior moved in (3.63.5), because the
+scripts import the pip-installed module while the `cquarry` binary runs
+from the uv tool's own venv and the two upgrade on different commands.
+
 Usage:
     python3 reconcile_file_metadata.py                 # dry-run report, ./metadata.db
     python3 reconcile_file_metadata.py ~/Calibre       # a library directory
@@ -87,7 +101,8 @@ slow (tens of minutes for thousands of books). Scope with --sample / --id /
 Exit codes:
     0 = no drift found (or --apply completed with no failures)
     1 = drift found (dry run), or one or more apply/embed operations failed
-    2 = setup error (metadata.db or a required external tool not found)
+    2 = setup error (metadata.db or a required external tool not found, or
+        the imported cquarry_cli is older than the floor this script needs)
 
 Stdlib plus vir_tui (the shared terminal helpers); shells out to `ebook-meta`,
 `djvused`, and `exiftool` to read (all
@@ -112,6 +127,25 @@ import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
+try:
+    from version_guard import announce, floor_refusal, imported_version
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+    def imported_version(module_name):
+        return None
+
+    def floor_refusal(found, floor, *, what, why, fix):
+        print(
+            "NOTE: version_guard.py is not beside this script; the "
+            "cquarry_cli floor check was skipped.",
+            file=sys.stderr,
+        )
+        return None
+
+
 from vir_tui import core as ui
 
 try:
@@ -131,6 +165,16 @@ except ImportError:  # a repo checkout run without the package importable
         normalize_epub_dates,
         normalize_epub_identifiers,
     )
+
+# The behavior of the identifier pass below moved in 3.63.5 (the
+# default-namespace EPUB3 synthesis): on an older module --apply refuses
+# files the current code handles silently, which is the version-skew
+# symptom of issue #20. The version that counts is the imported module's
+# own __version__ (the try/except above decided which copy runs, pip's or
+# the checkout fallback's), never the distribution metadata, which can lag
+# the checkout. Unreadable refuses too (fail-closed).
+_CQUARRY_CLI_FLOOR = (3, 63, 5)
+_CQUARRY_CLI_VERSION = imported_version("cquarry_cli")
 
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 RED = "\033[31m" if USE_COLOR else ""
@@ -856,6 +900,23 @@ def main() -> int:
     )
     args = parser.parse_args()
     ui.print_header("reconcile_file_metadata.py - Execution")
+    announce()
+
+    # The scripts import the pip-installed module, not the uv tool's copy,
+    # so the skew between the two is invisible until behavior differs
+    # (issue #20's live run). Refuse here, naming both versions.
+    refusal = floor_refusal(
+        _CQUARRY_CLI_VERSION,
+        _CQUARRY_CLI_FLOOR,
+        what="the cquarry_cli module this script imported",
+        why="the EPUB identifier normalizer that handles default-namespace "
+        "packages; on an older module --apply refuses files the current "
+        "code handles silently",
+        fix="Fix with: pip install --user --upgrade calibrequarry",
+    )
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
 
     if args.id and parse_id_list(args.id) is None:
         print(
@@ -977,6 +1038,12 @@ def main() -> int:
     # they happen, so a capture that lost stderr showed "COMPLETED WITH
     # ERRORS (see above)" over an empty above).
     failures: list[str] = []
+    # A normalization refusal is held per-file and arbitrated by the
+    # read-back re-diff below (issue #20's secondary nit): on a file the
+    # read-back finds in sync the refusal is a note, because there is no
+    # drift left for the refused pass to close; on a residual file it is a
+    # failure, a candidate cause of the drift that remains.
+    normalization_failed: list[tuple[dict, Path, str]] = []
     unique_ids = sorted(set(drifted_calibredb))
     if unique_ids:
         print(f"  embedding {len(unique_ids)} book(s) via calibredb...")
@@ -1000,9 +1067,7 @@ def main() -> int:
                         f"#{rec['id']} [EPUB] {fpath.name}: "
                         "dc:date normalization failed"
                     )
-                    print(f"  {RED}{line}{RESET}", file=sys.stderr)
-                    failures.append(line)
-                    ok = False
+                    normalization_failed.append((rec, fpath, line))
             # The identifier cleanup rides the same seam (issue #11's
             # reopen): the embed writer preserves the package
             # unique-identifier element verbatim and never removes
@@ -1020,9 +1085,7 @@ def main() -> int:
                         f"#{rec['id']} [EPUB] {fpath.name}: "
                         "identifier normalization failed"
                     )
-                    print(f"  {RED}{line}{RESET}", file=sys.stderr)
-                    failures.append(line)
-                    ok = False
+                    normalization_failed.append((rec, fpath, line))
     if drifted_pdf:
         via = "exiftool, qpdf-repairing broken ones" if args.repair_pdf else "exiftool"
         print(f"  embedding {len(drifted_pdf)} PDF(s) via {via}...")
@@ -1039,6 +1102,19 @@ def main() -> int:
             ok = False
 
     residuals = verify_embedded(verify_rows) if verify_rows else []
+    # Arbitrate the held normalization refusals by the read-back (the
+    # arbiter for the whole apply pass): a residual file keeps its refusal
+    # as a failure; an in-sync one gets a note instead, so the failure
+    # count names work that actually remains (issue #20's secondary nit).
+    residual_keys = {(bid, fmt) for bid, _title, fmt, _drift in residuals}
+    normalization_notes: list[str] = []
+    for rec, fpath, line in normalization_failed:
+        if (rec["id"], "EPUB") in residual_keys:
+            print(f"  {RED}{line}{RESET}", file=sys.stderr)
+            failures.append(line)
+            ok = False
+        else:
+            normalization_notes.append(f"{line} (already in sync)")
     if residuals:
         ok = False
         print(
@@ -1052,13 +1128,6 @@ def main() -> int:
         if args.quiet and len(residuals) > len(shown):
             print(f"  ... and {len(residuals) - len(shown)} more")
 
-    if ok:
-        print(
-            f"\n{GREEN}DONE{RESET}: embedded {len(unique_ids)} via calibredb, "
-            f"{len(drifted_pdf)} PDF via exiftool, {len(drifted_djvu)} DJVU via djvused; "
-            f"{len(verify_rows)} file(s) verified by read-back."
-        )
-        return 0
     if failures:
         print(f"\n{RED}{BOLD}FAILURES ({len(failures)}){RESET}:")
         shown = failures if not args.quiet else failures[:40]
@@ -1066,6 +1135,30 @@ def main() -> int:
             print(f"  {line}")
         if len(failures) > len(shown):
             print(f"  ... and {len(failures) - len(shown)} more")
+    if normalization_notes:
+        print(
+            f"\n{YELLOW}{BOLD}NOTES ({len(normalization_notes)}){RESET}: "
+            "a normalization pass refused, but the read-back found the file "
+            "in sync, so no drift remains for it to close:"
+        )
+        shown = normalization_notes if not args.quiet else normalization_notes[:40]
+        for line in shown:
+            print(f"  {line}")
+        if len(normalization_notes) > len(shown):
+            print(f"  ... and {len(normalization_notes) - len(shown)} more")
+    if ok:
+        done = (
+            f"\n{GREEN}DONE{RESET}: embedded {len(unique_ids)} via calibredb, "
+            f"{len(drifted_pdf)} PDF via exiftool, {len(drifted_djvu)} DJVU via djvused; "
+            f"{len(verify_rows)} file(s) verified by read-back."
+        )
+        if normalization_notes:
+            done += (
+                f" {len(normalization_notes)} normalization pass(es) were "
+                "refused on file(s) the read-back found in sync (noted above)."
+            )
+        print(done)
+        return 0
     parts = []
     if failures:
         parts.append(f"{len(failures)} failed operation(s) (listed above)")

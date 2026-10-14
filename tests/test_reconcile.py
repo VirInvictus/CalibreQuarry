@@ -493,47 +493,66 @@ class TestVerifyWiring(unittest.TestCase):
         self.assertEqual(args[0].name, "The Hobbit.epub")
         self.assertEqual(args[1], "1937-09-21T00:00:00Z")
 
-    def test_failed_normalization_fails_the_run(self):
-        # An OPF the normalizer cannot rewrite is a named failure, not a
-        # silent pass-through to the read-back.
+    def test_refused_normalization_on_in_sync_file_is_a_note(self):
+        # Issue #20's secondary nit: the read-back re-diff arbiters a
+        # normalization refusal. This file verifies in sync, so the refusal
+        # is a NOTE (no drift remains for the pass to close), the failure
+        # count stays empty, and the run is DONE at exit 0.
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds, norm, idents, err = self._run_main(
+            rc, out, _, _, _, err = self._run_main(
                 tmp, [drifted, file_meta()], normalize_result=False
             )
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("normalization failed", err)
-        self.assertIn("The Hobbit.epub", err)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("NOTES (1)", out)
+        self.assertIn("dc:date normalization failed (already in sync)", out)
+        self.assertIn("refused on file(s) the read-back found in sync", out)
+        self.assertNotIn("FAILURES", out)
+        self.assertNotIn("COMPLETED WITH ERRORS", out)
 
-    def test_failed_normalization_reaches_a_stdout_failures_block(self):
-        # Issue #6: the inline failure line rides stderr, so a capture that
-        # lost stderr saw "COMPLETED WITH ERRORS (see above)" over an empty
-        # above. The durable record is the FAILURES block on stdout, with
-        # the count and the book id in the summary's reach.
+    def test_refused_normalization_on_residual_file_fails(self):
+        # The refusal rides a file the read-back still finds drifted: it
+        # stays a failure, reaches the stdout FAILURES block (issue #6's
+        # durable record -- the inline line rides stderr), and fails the
+        # run with the count in the summary.
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
-            rc, out, embeds, norm, idents, err = self._run_main(
-                tmp, [drifted, file_meta()], normalize_result=False
+            rc, out, _, _, _, err = self._run_main(
+                tmp, [drifted, drifted], normalize_result=False
             )
         self.assertEqual(rc, 1, out + err)
+        self.assertIn("dc:date normalization failed", err)
         self.assertIn("FAILURES (1)", out)
         self.assertIn("#1 [EPUB] The Hobbit.epub: dc:date normalization failed", out)
         self.assertIn("COMPLETED WITH ERRORS: 1 failed operation(s)", out)
 
-    def test_failed_identifier_normalization_fails_the_run(self):
-        # Issue #11's reopen: the identifier pass is on the same contract as
-        # the dc:date pass — an OPF it cannot rewrite is a named failure on
-        # both streams, never a silent pass-through to the read-back.
+    def test_refused_identifier_normalization_fails_on_a_residual_file(self):
+        # Issue #11's reopen: the identifier pass is on the same contract
+        # as the dc:date pass, both halves of it -- on a file the read-back
+        # still finds drifted, the refusal is a named failure on both
+        # streams and the run fails.
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, _, err = self._run_main(
+                tmp, [drifted, drifted], idents_result=False
+            )
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("identifier normalization failed", err)
+        self.assertIn("FAILURES (1)", out)
+        self.assertIn("#1 [EPUB] The Hobbit.epub: identifier normalization failed", out)
+
+    def test_refused_identifier_normalization_on_in_sync_file_is_a_note(self):
+        # The other half of the arbitration: the embed already brought the
+        # identifiers in sync, so a refused identifier pass is a note, not
+        # a failure (issue #20's secondary nit).
         drifted = file_meta(published="2010-10-25")
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _, _, _, err = self._run_main(
                 tmp, [drifted, file_meta()], idents_result=False
             )
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("identifier normalization failed", err)
-        self.assertIn("The Hobbit.epub", err)
-        self.assertIn("FAILURES (1)", out)
-        self.assertIn("#1 [EPUB] The Hobbit.epub: identifier normalization failed", out)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("identifier normalization failed (already in sync)", out)
+        self.assertNotIn("FAILURES", out)
 
     def test_pdf_failure_reaches_a_stdout_failures_block(self):
         # Issue #6 again, through the exiftool seam: a failed write must
@@ -564,6 +583,64 @@ class TestVerifyWiring(unittest.TestCase):
         self.assertIn(
             "COMPLETED WITH ERRORS: 1 failed operation(s) (listed above).", text
         )
+
+
+class TestVersionFloor(unittest.TestCase):
+    """Issue #20's strong fix: main() refuses on an imported cquarry_cli
+    below the floor the identifier pass assumes (3.63.5, the
+    default-namespace synthesis), naming the version found, the floor, and
+    the fix -- before any tool probe or library resolution. The honest
+    version source is the imported module's own __version__ (the captured
+    module constant), never the dist metadata, which can lag a checkout."""
+
+    def _run(self, version=None):
+        argv = ["reconcile_file_metadata.py", "/nonexistent-library"]
+        out, err = io.StringIO(), io.StringIO()
+        patches = [
+            mock.patch.object(sys, "argv", argv),
+            # Truthy which() results: the floor gate must decide before the
+            # tool probes do, on any machine (CI has no calibre binaries).
+            mock.patch.object(rfm, "shutil"),
+        ]
+        if version is not None:
+            patches.append(mock.patch.object(rfm, "_CQUARRY_CLI_VERSION", version))
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            with (
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                rc = rfm.main()
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_stale_module_refuses_naming_both_versions_and_the_fix(self):
+        rc, out, err = self._run("3.63.4")
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("3.63.4", err)
+        self.assertIn("3.63.5+", err)
+        self.assertIn("pip install --user --upgrade calibrequarry", err)
+
+    def test_unreadable_version_refuses_fail_closed(self):
+        rc, out, err = self._run("")
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("unreadable", err)
+
+    def test_passing_version_reaches_the_library_check(self):
+        # A version at/above the floor gets past the gate and stops on the
+        # missing library instead (exit 2, different refusal).
+        rc, out, err = self._run()
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("no metadata.db found", err)
+        self.assertNotIn("needs 3.63.5+", err)
+
+    def test_main_announces_the_toolchain(self):
+        # Direction 1 of issue #20: every run puts the toolchain split the
+        # repro compared (the binary's version vs the imported module's) on
+        # the record, one stderr line, from the top of the output.
+        _, _, err = self._run()
+        self.assertIn("toolchain:", err)
+        self.assertIn("cquarry_cli", err)
 
 
 class TestEmbedFailureCollection(unittest.TestCase):

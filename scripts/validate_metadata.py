@@ -77,6 +77,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
+
 from vir_tui import core as ui
 
 # ANSI colours; suppress when stdout isn't a TTY or NO_COLOR is set
@@ -552,6 +560,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     ui.print_header("validate_metadata.py - Execution")
+    announce()
 
     db_path = resolve_db_path(args.path)
     if db_path is None:

@@ -33,7 +33,18 @@ import re
 import sqlite3
 import sys
 from collections import defaultdict
+from pathlib import Path
 from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from version_guard import announce
+except ImportError:  # a lone deployed copy: no siblings beside it
+
+    def announce(stream=None):
+        pass
+
 
 # The classic UTF-8-read-as-Latin1/CP1252 double-encode fragments. Only the
 # high-confidence lead-ins are flagged (an accented character alone is
@@ -139,6 +150,8 @@ def main() -> int:
         "--quiet", action="store_true", help="summary only, no per-book lines"
     )
     args = ap.parse_args()
+
+    announce()
 
     db_path = args.db or "metadata.db"
     try:
