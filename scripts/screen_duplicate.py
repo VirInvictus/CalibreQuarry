@@ -47,6 +47,23 @@ edition tags (", 3rd Edition", ": 2nd Edition", "4th ed.") strip from
 every compared string, while the volume annotations the series rules
 read stay on the RAW title.
 
+Issue #28 (3.68.0) gates every identifier binding by SHAPE: the
+2026-10-15 wave refused Poem of the Cid as a duplicate of Return to
+Nevèrÿon because both amateur conversions carried the SAME junk
+dc:identifier (their shared template's URL, typed isbn by the
+converter). An identical value now binds only when it is ISBN-shaped
+(10/13 ISBN characters; checksum not required) or ASIN-shaped (B + 9
+alphanumerics; an ISBN-shaped value under the asin type still binds,
+the pre-2001 ASINs are ISBN-10s). The same gate covers the
+within-batch intersection and the library keypair searches. And when
+BOTH sides of a title+author duplicate carry VALID (checksum-passing)
+but DIFFERENT ISBNs, that is evidence AGAINST a duplicate: no refusal
+(the 2026-10-15 seven-volume stamp collapse). Issue #30 makes every
+binding carry its evidence: hit descriptors carry `basis`, within-batch
+refusals record a `batch_duplicate_basis` map (isbn/asin value, or the
+title+author verdict with the ISBN state named), which is the suffix
+the duplicate decision's detail quotes.
+
 Report-only: nothing is deleted or moved here. Removing a library duplicate
 needs Brandon's explicit OK in phase 3; loose-file removal is his too.
 
@@ -80,6 +97,63 @@ EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3"}
 # file-side `asin` meets a library-side `mobi-asin`, and the uuid/calibre
 # values the writer re-adds can never collide with an ASIN-shaped string.
 _ASIN_TYPES = frozenset({"asin", "mobi-asin"})
+
+# Identifier shapes a binding may use (issue #28): the 2026-10-15 wave
+# bound Poem of the Cid to Return to Nevèrÿon through the SAME junk
+# dc:identifier — an amateur-conversion template's URL, typed isbn by the
+# converter — because any identical identifier VALUE was a same-book
+# signal. Only real identifier SHAPES bind now: a value is ISBN-shaped
+# when it is 10 or 13 ISBN characters once everything outside [0-9Xx]
+# strips (the house normalization; checksum NOT required — a same-typo
+# pair out of one rip's source is still evidence), and ASIN-shaped when
+# it is B + 9 alphanumerics.
+_ISBN_SHAPE_RE = re.compile(r"^(?:[0-9]{9}[0-9Xx]|[0-9]{13})$")
+_ASIN_SHAPE_RE = re.compile(r"^[Bb][A-Za-z0-9]{9}$")
+
+
+def _isbn_digits(value: str) -> str:
+    """The value reduced to its ISBN characters, uppercased (the house
+    normalization: every non [0-9Xx] byte drops, so dashed, spaced, and
+    dotted producer spellings all compare equal)."""
+    return re.sub(r"[^0-9Xx]", "", (value or "").upper())
+
+
+def _isbn_shaped(value: str) -> bool:
+    """True for an ISBN-10/13-shaped value (producer punctuation
+    tolerated, no checksum). The gate every ISBN binding passes; the
+    junk-URL class fails the shape alone."""
+    return bool(_ISBN_SHAPE_RE.match(_isbn_digits(value)))
+
+
+def _isbn_valid(value: str) -> bool:
+    """True for an ISBN-10/13 whose check digit passes (the
+    validate_metadata rule, both lengths). The different-ISBN evidence
+    rule needs VALID, not merely shaped: two VALID but different ISBNs
+    are evidence AGAINST a duplicate, a valid-vs-junk difference is
+    not. The digits are normalized first, so only [0-9Xx] reach the
+    arithmetic."""
+    digits = _isbn_digits(value)
+    if len(digits) == 10:
+        total = 0
+        for i, ch in enumerate(digits):
+            if ch == "X" and i == 9:
+                v = 10
+            else:
+                v = int(ch)
+            total += (10 - i) * v
+        return total % 11 == 0
+    if len(digits) == 13:
+        stem = sum((1 if i % 2 == 0 else 3) * int(c) for i, c in enumerate(digits[:12]))
+        return (10 - stem % 10) % 10 == int(digits[12])
+    return False
+
+
+def _bindable_asin(value: str) -> bool:
+    """True for an ASIN-typed value that may bind: ASIN-shaped (B + 9
+    alphanumerics, case-insensitive) or ISBN-shaped (the pre-2001 ASINs
+    ARE ISBN-10s, and rips file ISBN-10 values under asin)."""
+    return bool(_ASIN_SHAPE_RE.match(value or "")) or _isbn_shaped(value)
+
 
 RESET = "\033[0m"
 YELLOW = "\033[1;33m"
@@ -466,25 +540,30 @@ def _library_hits(
     classify_titles() judges the pair. Related hits are the containment
     candidates a series/store prefix can mask (the 2026-09-21 "Mothership:
     Wages of Sin" vs "Wages of Sin" silent pass): reported for judgment,
-    never as duplicates. Hydrated list fields stay lists (never
-    comma-split) per the cquarry contract.
+    never as duplicates. Every identifier keypair search is shape-gated
+    (issue #28): a junk URL in the isbn or asin slot searches nothing.
+    Each hit descriptor carries `basis`: the field that matched (the
+    first route that found the book, in search order). Hydrated list
+    fields stay lists (never comma-split) per the cquarry contract.
     """
     hits: list[dict[str, object]] = []
     related: list[dict[str, object]] = []
     seen: set[int] = set()
 
     isbn = fields.get("isbn") or ""
-    if isbn:
+    if isbn and _isbn_shaped(isbn):
         for b in db.search_books(f"isbn:{_search_escape(isbn)}"):
             if b["id"] not in seen:
                 seen.add(b["id"])
-                hits.append(b)
+                hits.append({**b, "basis": f"isbn {isbn}"})
 
     for asin in fields.get("asins") or []:
+        if not _bindable_asin(asin):
+            continue
         for b in db.search_books(f"identifiers:={_search_escape(asin)}"):
             if b["id"] not in seen:
                 seen.add(b["id"])
-                hits.append(b)
+                hits.append({**b, "basis": f"asin {asin}"})
 
     title = fields.get("title") or ""
     authors = fields.get("authors") or []
@@ -500,7 +579,7 @@ def _library_hits(
             verdict = classify_titles(title, b["title"] or "")
             if verdict == "duplicate":
                 seen.add(b["id"])
-                hits.append(b)
+                hits.append({**b, "basis": "title+author"})
             elif verdict == "related":
                 seen.add(b["id"])
                 related.append(b)
@@ -509,7 +588,7 @@ def _library_hits(
         for b in strict:
             if b["id"] not in seen:
                 seen.add(b["id"])
-                hits.append(b)
+                hits.append({**b, "basis": "title+author"})
     return hits, related
 
 
@@ -569,15 +648,59 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
             else:
                 verdict = classify_titles(titles[key_a], titles[key_b])
             same_isbn = bool(rec.get("isbn")) and rec["isbn"] == other.get("isbn")
-            # The ASIN binds within the batch exactly like the ISBN: same
-            # edition key, and rips that strip ISBNs keep ASINs (issue #13).
-            same_asin = bool(
-                {a.casefold() for a in rec.get("asins") or []}
-                & {a.casefold() for a in other.get("asins") or []}
+            junk_isbn = bool(same_isbn) and not _isbn_shaped(str(rec["isbn"]))
+            # Issue #28: only a real identifier shape may bind. The ASIN
+            # binds within the batch exactly like the ISBN: same edition
+            # key, and rips that strip ISBNs keep ASINs (issue #13).
+            rec_asins = {
+                a.casefold(): a for a in rec.get("asins") or [] if _bindable_asin(a)
+            }
+            other_asins = {
+                a.casefold() for a in other.get("asins") or [] if _bindable_asin(a)
+            }
+            shared_asin = sorted(set(rec_asins) & other_asins)
+            # Issue #28's second half: two VALID but different ISBNs are
+            # evidence AGAINST a duplicate, not neutral. The 2026-10-15
+            # mint refused seven distinct series volumes whose stamps had
+            # collapsed to one identical title; their real, differing
+            # ISBNs said distinct all along. A valid-vs-junk difference is
+            # NOT evidence (one side is garbage), so only two checksum-
+            # passing ISBNs suppress the title judge.
+            isbn_conflict = (
+                bool(rec.get("isbn"))
+                and bool(other.get("isbn"))
+                and rec["isbn"] != other.get("isbn")
+                and _isbn_valid(str(rec["isbn"]))
+                and _isbn_valid(str(other["isbn"]))
             )
-            if same_isbn or same_asin or (same_author and verdict == "duplicate"):
+            basis = None
+            if same_isbn and not junk_isbn:
+                basis = f"isbn {rec['isbn']}"
+            elif shared_asin:
+                basis = f"asin {rec_asins[shared_asin[0]]}"
+            elif same_author and verdict == "duplicate":
+                a_isbn, b_isbn = (
+                    str(rec.get("isbn") or ""),
+                    str(other.get("isbn") or ""),
+                )
+                if a_isbn and b_isbn and a_isbn != b_isbn:
+                    basis = f"title+author, isbn differs: {a_isbn} vs {b_isbn}"
+                elif not a_isbn or not b_isbn:
+                    basis = "title+author, isbn absent on one side"
+                else:
+                    # Identical values that the shape gate refused to
+                    # bind on (junk): the titles and author are the
+                    # evidence, the identifier equality is not.
+                    basis = "title+author"
+            if (
+                (same_isbn and not junk_isbn)
+                or shared_asin
+                or (same_author and verdict == "duplicate" and not isbn_conflict)
+            ):
                 rec.setdefault("batch_duplicates", []).append(other["file"])
                 other.setdefault("batch_duplicates", []).append(rec["file"])
+                rec.setdefault("batch_duplicate_basis", {})[str(other["file"])] = basis
+                other.setdefault("batch_duplicate_basis", {})[str(rec["file"])] = basis
             elif not same_author:
                 continue
             elif verdict == "related":
@@ -590,8 +713,10 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
 
 
 def _describe(b: dict) -> dict[str, object]:
-    """The comparison columns the phase-1 skill says to report per copy."""
-    return {
+    """The comparison columns the phase-1 skill says to report per copy,
+    plus `basis`: the field that matched (issue #30), always present for
+    descriptors _library_hits built, absent for anything else."""
+    out = {
         "id": b["id"],
         "title": b["title"],
         "authors": b["authors"],
@@ -599,6 +724,9 @@ def _describe(b: dict) -> dict[str, object]:
         "size": b.get("size"),
         "pages": b.get("pages"),
     }
+    if b.get("basis"):
+        out["basis"] = b["basis"]
+    return out
 
 
 def _print_report(records: list[dict[str, object]], skipped: list[str]) -> None:
@@ -625,8 +753,9 @@ def _print_report(records: list[dict[str, object]], skipped: list[str]) -> None:
             fmts = ", ".join(h["formats"]) or "no formats"
             size = f", {h['size']:,} bytes" if h.get("size") else ""
             pages = f", {h['pages']} pages" if h.get("pages") else ""
+            basis = f" on {h['basis']}" if h.get("basis") else ""
             print(
-                f"           {RED}vs library #{h['id']}{RESET}: {h['title']}"
+                f"           {RED}vs library #{h['id']}{RESET}{basis}: {h['title']}"
                 f": {' & '.join(h['authors'])} ({fmts}{size}{pages})"
             )
             print(
@@ -643,9 +772,11 @@ def _print_report(records: list[dict[str, object]], skipped: list[str]) -> None:
                 f"{DIM}             one title is the other's series prefix or subtitle: "
                 f"masked duplicate or two products? decide by hand.{RESET}"
             )
+        batch_basis = rec.get("batch_duplicate_basis") or {}
         for other in batch:
             candidates += 1
-            print(f"           {YELLOW}duplicate within batch{RESET}: {other}")
+            suffix = f" ({batch_basis[other]})" if other in batch_basis else ""
+            print(f"           {YELLOW}duplicate within batch{RESET}: {other}{suffix}")
         for other in batch_rel:
             candidates += 1
             print(f"           {YELLOW}related within batch (judge){RESET}: {other}")

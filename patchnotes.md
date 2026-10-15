@@ -1,5 +1,76 @@
 # CalibreQuarry Patch Notes
 
+# 3.68.0 (2026-10-15)
+
+### The duplicate-triage batch: identifier bindings shape-gated, match evidence in every refusal detail, and the wave stamp driver as a tool (issues #28, #29, #30)
+
+Three issues out of the 2026-10-15 wave (378 files, two false-binding
+refusal classes, and the fifth hand-rolled stamp driver): the duplicate
+screen now binds only on real identifier shapes, every refusal names
+the field that bound it, and the driver that took the oct-15 wave down
+twice is a script with the coverage assert built in.
+
+- **The screen binds identifiers by SHAPE, not by value (issue #28).**
+  Poem of the Cid and Return to Nevèrÿon were refused as duplicates of
+  each other because both amateur conversions carried the SAME junk
+  dc:identifier: the tutorial template's own URL, typed isbn by the
+  converter, which calibre faithfully reports in its Identifiers line.
+  An identical value now binds (within the batch and in the library
+  keypair searches alike) only when it is ISBN-shaped (10 or 13 ISBN
+  characters once everything outside [0-9Xx] strips, the house
+  normalization, so dashed, spaced, and dotted producer spellings all
+  compare equal; checksum NOT required, so a same-typo pair out of one
+  rip's source still binds) or ASIN-shaped
+  (B + 9 alphanumerics; an ISBN-shaped value filed under the asin type
+  still binds, the pre-2001 ASINs ARE ISBN-10s). Junk URLs and uuids
+  bind nothing at either site.
+- **Two VALID but different ISBNs are evidence AGAINST a duplicate
+  (issue #28's second half).** The same wave's completed/ mint refused
+  seven Heaven Official's Blessing volumes as mutual duplicates because
+  one slice agent had stamped them to an identical title; every pair
+  carried a checksum-passing, different ISBN that said distinct all
+  along. When both sides of a title+author duplicate carry valid but
+  different ISBNs the refusal no longer fires at all (the stamps were
+  the defect, and the phase-1 skill's title-form census rule covers the
+  stamp-side fix); a valid-vs-junk difference is not evidence, and the
+  pair still binds. The accepted trade: a genuinely two-edition pair
+  (same title/author, paperback vs hardcover ISBNs) also stops
+  refusing -- the held-copy screen and phase 3's byte-identity floor
+  remain the backstops for that class.
+- **Every duplicate refusal names its binding evidence (issue #30).**
+  Library hit descriptors carry `basis`: the field that matched, in
+  search order ("isbn <value>", "asin <value>", "title+author").
+  Within-batch records carry a `batch_duplicate_basis` map keyed by the
+  sibling path, and the title+author route names the ISBN state
+  ("title+author, isbn absent on one side", "title+author, isbn
+  differs: <a> vs <b>"). `_screen_duplicates` hands the map out as
+  `basis` beside the refusal split, and `_duplicate_detail` suffixes it
+  onto both the library-hit and batch-sibling names, so the CQ#28 pair
+  and the seven-volume collapse are diagnosable from decisions_needed
+  alone. A refusal without the evidence (a mocked seam) renders exactly
+  as before.
+- **`scripts/drive_stamps.py` is the wave stamp driver (issue #29).**
+  The five hand-rolled copies (oct11 through oct15, one per wave) were
+  the same driver adapted by string-replace, and the adaptation
+  silently matched nothing twice on 2026-10-15: the copy ran twice
+  against the WRONG WAVE's stamp table, saved its results into the
+  wrong wave's directory, and only its hand-written coverage assert
+  kept both runs harmless. The tool owns the whole contract now: it
+  loads a researched stamps map (filename basename -> {title, authors,
+  publisher, isbn, cut, notes}; a NONE/empty value OMITS the flag,
+  never writes the literal string), coverage-asserts the map against
+  the ACTUAL target directory passed (keys minus `--discard` entries ==
+  top-level ebook files on disk, the diff named both directions, the
+  loaded size printed before anything runs), dispatches
+  stamp_epub.py/stamp_pdf.py by extension with `--apply --backup-dir`,
+  continues past failures naming the remainder, and writes
+  stamp_results.json beside the stamps file by default. Bad rows (no
+  stampable field, non-list authors), a backup dir inside the target,
+  and a results path inside the target or equal to the stamps map all
+  refuse at exit 2 before anything runs; MOBI/AZW3/DJVU entries ride
+  the coverage assert and are named skipped (the phase-1 skill routes
+  them by hand). Dry-run by default; `--apply --backup-dir` writes.
+
 # 3.67.0 (2026-10-14)
 
 ### The triage batch: machine-format stdout hygiene for the ISBN audit, the fetch-apply seam pinned field-limited, and the provenance stamp proven live (issues #25, #26, #27)

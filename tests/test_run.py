@@ -1064,6 +1064,52 @@ class TestRunPhase1(RunCase):
             "duplicate detected by the screen (class breakdown unavailable)",
         )
 
+    def test_duplicate_detail_quotes_the_match_basis(self):
+        # Issue #30: each named match carries the binding evidence the
+        # screen reported, so the CQ#28 junk-identifier pair and the
+        # seven-volume stamp collapse are diagnosable from the decision
+        # alone. A refusal without the basis (a mocked seam) renders
+        # exactly as before.
+        from cquarry_cli.run import _duplicate_detail
+
+        self.assertEqual(
+            _duplicate_detail(
+                {
+                    "library": [
+                        {
+                            "id": 3123,
+                            "title": "Same Title",
+                            "basis": "isbn 9780140445688",
+                        }
+                    ],
+                    "batch": ["/tmp/mate.epub"],
+                    "basis": {
+                        "/tmp/mate.epub": "title+author, isbn absent on one side"
+                    },
+                }
+            ),
+            "matches an existing library book: #3123 Same Title "
+            "(matched on isbn 9780140445688); "
+            "matches another file in this batch: mate.epub "
+            "(title+author, isbn absent on one side)",
+        )
+        self.assertEqual(
+            _duplicate_detail({"batch": ["/tmp/mate.epub"]}),
+            "matches another file in this batch: mate.epub",
+        )
+        self.assertEqual(
+            _duplicate_detail({"library": [{"id": 1, "title": "T"}]}),
+            "matches an existing library book: #1 T",
+        )
+        # A basis key naming a path that is not in the batch list is
+        # ignored (the map only ever suffixes its own sibling).
+        self.assertEqual(
+            _duplicate_detail(
+                {"batch": ["/tmp/mate.epub"], "basis": {"/tmp/other.epub": "isbn X"}}
+            ),
+            "matches another file in this batch: mate.epub",
+        )
+
     def test_preempted_note_yields_to_a_consent_path_record(self):
         # A same-day manifest recording the strips as APPLIED means the
         # consent path ran (an --apply-lossy mint, or phase 2 consuming an
@@ -1388,6 +1434,35 @@ class TestPhase1Seams(RunCase):
                     "batch": ["/tmp/batch_mate.epub"],
                 }
             },
+        )
+
+    def test_screen_duplicates_carries_the_batch_basis(self):
+        # Issue #30: the report's batch_duplicate_basis map rides the
+        # refusal evidence out as `basis`, keyed by the sibling path, for
+        # the duplicate decision's detail to quote. A report without the
+        # map (an older screen) carries no basis key at all.
+        hit = self._make_file("Basis Author - Basis Title.epub")
+        report = [
+            {
+                "file": hit,
+                "title": "Basis Title",
+                "authors": ["Basis Author"],
+                "isbn": "",
+                "library_hits": [],
+                "batch_duplicates": ["/tmp/the-mate.epub"],
+                "batch_duplicate_basis": {
+                    "/tmp/the-mate.epub": "title+author, isbn absent on one side"
+                },
+            },
+        ]
+        proc = mock.Mock(returncode=1, stdout=json.dumps(report), stderr="")
+        refusals: dict = {}
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            dups = _screen_duplicates([hit], self.db_path, refusals=refusals)
+        self.assertEqual(dups, {hit})
+        self.assertEqual(
+            refusals[hit]["basis"],
+            {"/tmp/the-mate.epub": "title+author, isbn absent on one side"},
         )
 
     def test_phase1_hands_the_screen_only_screenable_files(self):

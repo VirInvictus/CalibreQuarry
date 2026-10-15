@@ -5,6 +5,87 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.68.0 onward, the duplicate-triage batch, issues #28-#30)
+
+- **Identifier bindings are shape-gated, and the gates live in
+  screen_duplicate.py.** `_isbn_shaped` (10 or 13 ISBN characters once
+  everything outside [0-9Xx] strips -- `_isbn_digits`, the house
+  normalization, so dashed/spaced/dotted producer spellings compare
+  equal; checksum NOT required: a same-typo pair out of one rip's
+  source is still binding evidence), `_isbn_valid` (both lengths,
+  checksum strict, the validate_metadata rule), and `_bindable_asin`
+  (B + 9 alphanumerics case-insensitive, OR ISBN-shaped: the pre-2001
+  ASINs are ISBN-10s and rips file ISBN-10 values under asin) gate
+  EVERY identifier binding at BOTH sites: `_screen`'s within-batch
+  isbn/asin intersection and `_library_hits`' two keypair searches (a
+  junk URL in the isbn or asin slot searches nothing, so a held
+  tutorial-conversion twin cannot be matched by its own junk). The
+  issue-#28 mechanism, verified live on calibre 9.15: an amateur
+  conversion's `<dc:identifier opf:scheme="ISBN">http://...`
+  (the tutorial template's URL as the package unique-identifier)
+  reports through ebook-meta as `Identifiers : isbn:http://...` and
+  `_embedded_fields` collects it verbatim into the `isbn` slot; a
+  scheme-less URL identifier reports nothing (calibre drops
+  scheme-less values), so the junk only ever arrives TYPED.
+  `_embedded_fields`' record shape is unchanged (raw values, display
+  and evidence); only the binding is gated.
+- **Two VALID but different ISBNs suppress the within-batch title
+  refusal.** `_screen`'s title+author duplicate path refuses only when
+  NOT `isbn_conflict` (both isbns present, different, BOTH
+  `_isbn_valid`; the 2026-10-15 seven-volume stamp collapse). A
+  valid-vs-junk difference is not evidence and still binds. THE
+  ACCEPTED TRADE: a same-work, same-title pair that is genuinely two
+  EDITIONS (paperback vs hardcover re-rip) also stops refusing -- it
+  was a refusal in 3.67.0 and is now a silent pass; the backstops are
+  the library screen (a held copy still hits) and phase 3's
+  byte-identity floor (identical bytes refuse at add_book). The
+  library-side title+author path is unchanged (the library hit
+  descriptor carries no ISBN to compare), and the `related`/
+  `volume_sibling` advisory classes are untouched: only the duplicate
+  refusal reads ISBN evidence.
+- **Every binding carries its evidence, and the refusals dict has a
+  third key.** `_library_hits` descriptors gain `basis` (the first
+  route that found the book: `isbn <value>`, `asin <value>`, or
+  `title+author`; `_describe` passes it through). Within-batch records
+  gain `batch_duplicate_basis` (sibling path -> basis string; the
+  exact strings are `isbn <value>`, `asin <value>`, `title+author` (plain,
+  the shared-identifier-equality state the shape gate refused to bind
+  on -- identical junk values are NOT "differs"),
+  `title+author, isbn absent on one side`, `title+author, isbn
+  differs: <a> vs <b>` -- comma form, no nested parens). run.py's
+  `_screen_duplicates` hands the map out as `refusal["basis"]` beside
+  the issue-#18 `library`/`batch` split, and `_duplicate_detail`
+  suffixes `(matched on <basis>)` onto library hits and `(<basis>)`
+  onto batch siblings; a refusal without the basis (a mocked seam)
+  renders byte-identical to 3.67.0, and the class-breakdown-unavailable
+  neutral is unchanged. The screen's text report shows the evidence
+  too (`on <basis>` after the library id, `(<basis>)` after the batch
+  sibling).
+- **`scripts/drive_stamps.py` is the wave stamp driver; its coverage
+  assert is the incident protection.** Map shape: filename basename ->
+  {title, authors (list), publisher, isbn, cut, notes}; None/""/"NONE"
+  OMITS the flag (never the literal string); cut/notes ride for the
+  record and never stamp (stamp --author REPLACES the list, so the
+  cut is already applied in authors). The coverage assert runs after
+  plan-time row validation and before any spawn: (map keys minus
+  `--discard`) == the target dir's TOP-LEVEL ebook files
+  (.epub/.pdf/.mobi/.azw3/.djvu), both diff directions named, exit 2;
+  a discarded name still on disk is an extra. Rows with no stampable
+  field (or a non-list authors) refuse at exit 2 before coverage;
+  unknown fields warn and ride. Dispatch is stamp_epub.py (`.epub`)
+  and stamp_pdf.py (`.pdf`) ONLY, sorted order, 300s per file,
+  continuing past failures with the remainder named (exit 1);
+  everything else in the map is a named skip (the phase-1 skill
+  routes MOBI/DJVU by hand) and `--format epub|pdf` skips the other
+  format named, coverage still whole. Defaults: dry-run (the tools
+  run without `--apply`), results beside the stamps file
+  (`stamp_results.json`; the association the oct-15 hand-rolled copy
+  got wrong), `--results`/backup-dir refused inside the target, the
+  results path refused equal to the stamps map. The spawn seam is
+  `_spawn(cmd)` (text-mode, errors="replace", the AST tripwire's
+  blanket); tests mock it and drive `main()` over a fake wave dir
+  (`TestDriveStamps`).
+
 ## Programmer-facing contract notes (3.67.0 onward, the triage batch, issues #25-#27)
 
 - **audit_isbns.py's machine formats own stdout exclusively.** Under

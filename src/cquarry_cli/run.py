@@ -265,13 +265,21 @@ def _provenance_from_filename(path: str) -> str:
     return _PROVENANCE_BARE_DEFAULT
 
 
-def _duplicate_detail(refusals: dict[str, dict[str, list]] | None) -> str:
+def _duplicate_detail(refusals: dict[str, dict[str, object]] | None) -> str:
     """The duplicate decision's detail, split by the screen's two refusal
     classes (issue #18). The JSON report always carried the split; the
     single hard-coded string ("matches an existing library book") sent
     triage hunting through the library for a hit that was actually the
     other file in the same batch. Library hits name the held book; batch
-    hits name the sibling file; when both fire the detail says both."""
+    hits name the sibling file; when both fire the detail says both.
+    Since issue #30 (3.68.0) each named match also quotes its BASIS when
+    the screen reported one: "on isbn <value>" / "on asin <value>" /
+    "on title+author (...)" for library hits, and the batch sibling's
+    entry from the report's `batch_duplicate_basis` map as a parenthesized
+    suffix — the binding evidence that made the CQ#28 junk-identifier pair
+    and the seven-volume stamp collapse diagnosable from the decision
+    alone. A refusal without the basis (a mocked seam) renders exactly as
+    before."""
     if not refusals:
         # A mocked seam (or a future shape change) that records a refusal
         # without the breakdown: neutral, never a guess about which class.
@@ -280,12 +288,23 @@ def _duplicate_detail(refusals: dict[str, dict[str, list]] | None) -> str:
     hits = refusals.get("library") or []
     if hits:
         named = "; ".join(
-            f"#{h.get('id')} {h.get('title') or ''}".strip() for h in hits
+            f"#{h.get('id')} {h.get('title') or ''}".strip()
+            + (f" (matched on {h['basis']})" if h.get("basis") else "")
+            for h in hits
         )
         bits.append(f"matches an existing library book: {named}")
     batch = refusals.get("batch") or []
     if batch:
-        named = ", ".join(os.path.basename(str(p)) for p in batch)
+        basis = refusals.get("basis") or {}
+        named = ", ".join(
+            os.path.basename(str(p))
+            + (
+                f" ({basis[str(p)]})"
+                if isinstance(basis, dict) and str(p) in basis
+                else ""
+            )
+            for p in batch
+        )
         bits.append(f"matches another file in this batch: {named}")
     return (
         "; ".join(bits)
@@ -298,7 +317,7 @@ def _screen_duplicates(
     files: list[str],
     db_path: str,
     notes: dict[str, dict[str, list]] | None = None,
-    refusals: dict[str, dict[str, list]] | None = None,
+    refusals: dict[str, dict[str, object]] | None = None,
 ) -> set[str]:
     """screen_duplicate.py --format json over the inventoried files: the
     paths with a library or within-batch duplicate hit.
@@ -312,7 +331,9 @@ def _screen_duplicates(
     sees what the screen saw. When `refusals` is given it receives the
     screen's refusal evidence per path (the library_hits descriptors and
     the batch_duplicates paths), the split the duplicate decision's detail
-    quotes (issue #18)."""
+    quotes (issue #18), plus the report's `batch_duplicate_basis` map as
+    `basis` when present — the match evidence the detail suffixes (issue
+    #30)."""
     if not files:
         return set()
     script = _scripts_dir() / "screen_duplicate.py"
@@ -359,7 +380,7 @@ def _screen_duplicates(
         for record in records:
             if not isinstance(record, dict) or not isinstance(record.get("file"), str):
                 continue
-            refusal: dict[str, list] = {}
+            refusal: dict[str, object] = {}
             hits = record.get("library_hits")
             if isinstance(hits, list) and hits:
                 refusal["library"] = [h for h in hits if isinstance(h, dict)]
@@ -367,6 +388,9 @@ def _screen_duplicates(
             if isinstance(batch, list) and batch:
                 refusal["batch"] = batch
             if refusal:
+                basis = record.get("batch_duplicate_basis")
+                if isinstance(basis, dict) and basis:
+                    refusal["basis"] = basis
                 refusals[record["file"]] = refusal
     return {
         record["file"]
@@ -818,7 +842,7 @@ def run_phase1(
     # its own contract, and the refusal evidence (library hit vs in-batch
     # sibling) feeds the duplicate decision's detail (issue #18).
     screen_notes: dict[str, dict[str, list]] = {}
-    screen_refusals: dict[str, dict[str, list]] = {}
+    screen_refusals: dict[str, dict[str, object]] = {}
     dup_paths = _screen_duplicates(
         [f for f in files if os.path.splitext(f)[1].lower() in _SCREEN_EXTS],
         db_path,

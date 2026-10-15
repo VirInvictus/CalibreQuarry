@@ -1161,6 +1161,21 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             "INSERT INTO identifiers (book, type, val) VALUES"
             " (5, 'mobi-asin', 'B005Q8EAEI')"
         )
+        # The issue-#28 shape: a held book that came in through the same
+        # amateur tutorial conversion carries the SAME junk URL identifier
+        # a new sibling conversion carries. The keypair searches must not
+        # bind on it.
+        c.execute(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (6, 'A Tutorial Conversion', 'Tutorial Conversion, A',"
+            " 'Someone, Else', 'p6', 1)"
+        )
+        c.execute("INSERT INTO authors VALUES (6, 'Someone Else')")
+        c.execute("INSERT INTO books_authors_link (book, author) VALUES (6, 6)")
+        c.execute(
+            "INSERT INTO identifiers (book, type, val) VALUES"
+            " (6, 'isbn', 'http://www.hxa7241.org/articles/content/epup-guide')"
+        )
         # Tables _BOOK_SELECT joins; empty here, present so get_all_books works.
         c.execute("CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT)")
         c.execute(
@@ -1606,6 +1621,281 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         self.assertIsNotNone(
             screen_duplicate._filename_seed({"title": "Foo (Alice)", "authors": []})
         )
+
+    def test_junk_typed_isbn_does_not_bind_within_batch(self):
+        # Issue #28's live pair: two unrelated tutorial conversions carry
+        # the SAME junk dc:identifier (the template's URL, typed isbn by
+        # the converter). Identical junk values bind nothing: different
+        # titles and authors never reach the title judge, and the
+        # isbn-equality signal is shape-gated away.
+        _JUNK = "http://www.hxa7241.org/articles/content/epup-guide"
+        files = [Path("/dl/cid.epub"), Path("/dl/neveryon.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Poem of the Cid",
+                    "author(s)": "Rita Hamilton",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+                {
+                    "title": "Return to Neveryon",
+                    "author(s)": "Samuel R. Delany",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_duplicate_basis", rec)
+
+    def test_junk_isbn_keypair_searches_nothing(self):
+        # The library-side half of the same gate: the held book #6 carries
+        # the junk URL under isbn (another tutorial conversion imported
+        # earlier), and the new sibling carries the same junk. The exact
+        # isbn keypair must not match them; the title/author gates agree
+        # (different works), so nothing surfaces.
+        fields = {
+            "file": "/dl/tutorial2.epub",
+            "title": "A Different Book Entirely",
+            "authors": ["Different Author"],
+            "isbn": "http://www.hxa7241.org/articles/content/epup-guide",
+        }
+        self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
+
+    def test_junk_typed_asin_does_not_bind_within_batch(self):
+        # Same gate on the asin slot: a junk URL filed under asin binds
+        # nothing; the _bindable_asin shapes (B+9 alnum, ISBN-shaped) are
+        # the only admissible values.
+        _JUNK = "http://www.hxa7241.org/articles/content/epup-guide"
+        files = [Path("/dl/j1.epub"), Path("/dl/j2.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "First Unrelated Work",
+                    "author(s)": "Author One",
+                    "identifiers": f"asin:{_JUNK}",
+                },
+                {
+                    "title": "Second Unrelated Work",
+                    "author(s)": "Author Two",
+                    "identifiers": f"asin:{_JUNK}",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+
+    def test_different_valid_isbns_are_evidence_against_a_duplicate(self):
+        # Issue #28's second half, the 2026-10-15 seven-volume shape:
+        # identical stamped titles + same author used to refuse as mutual
+        # duplicates even though every pair carried a VALID, DIFFERENT
+        # ISBN. Two checksum-passing different ISBNs are evidence AGAINST
+        # a duplicate: no refusal at all.
+        files = [Path("/dl/hob5.epub"), Path("/dl/hob6.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Heaven Official's Blessing",
+                    "author(s)": "Mo Xiang Tong Xiu",
+                    "identifiers": "isbn:9780316469005",
+                },
+                {
+                    "title": "Heaven Official's Blessing",
+                    "author(s)": "Mo Xiang Tong Xiu",
+                    "identifiers": "isbn:9780316469012",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_related", rec)
+            self.assertNotIn("batch_volumes", rec)
+
+    def test_valid_vs_junk_isbn_difference_still_binds_on_title_author(self):
+        # The suppression needs both ISBNs VALID: a valid-vs-junk
+        # difference is not evidence (one side is garbage). The pair binds
+        # through the title judge, and the basis names the conflicting
+        # values so triage sees the junk side immediately (issue #30).
+        files = [Path("/dl/ed1.epub"), Path("/dl/ed2.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": "isbn:9780140445688",
+                },
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": "isbn:http://junk.example/template",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/ed2.epub"])
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"]["/dl/ed2.epub"],
+            "title+author, isbn differs: 9780140445688 vs http://junk.example/template",
+        )
+
+    def test_identical_junk_isbn_pair_reads_plain_title_author_basis(self):
+        # The review-found shape: two files sharing the SAME junk-typed
+        # identifier AND the same title/author. The isbn equality is not
+        # binding evidence (the shape gate refused it), and the two
+        # values are identical, so "isbn differs: junk vs junk" would be
+        # a lie in the durable record; the basis is the plain verdict.
+        _JUNK = "http://junk.example/template"
+        files = [Path("/dl/s1.epub"), Path("/dl/s2.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/s2.epub"])
+        self.assertEqual(out[0]["batch_duplicate_basis"]["/dl/s2.epub"], "title+author")
+        self.assertEqual(out[1]["batch_duplicate_basis"]["/dl/s1.epub"], "title+author")
+
+    def test_batch_basis_isbn_and_title_routes(self):
+        # Issue #30: every within-batch refusal carries its basis, keyed
+        # by the sibling path, on BOTH records. p1<->p2 bind on the shared
+        # ISBN; p1/p2<->p3 bind on titles with the isbn state named.
+        files = [Path("/dl/p1.epub"), Path("/dl/p2.epub"), Path("/dl/p3.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Capital: Volume I",
+                    "author(s)": "Karl Marx",
+                    "identifiers": "isbn:9780140445688",
+                },
+                {
+                    "title": "Capital (Penguin Classics)",
+                    "author(s)": "Karl Marx",
+                    "identifiers": "isbn:9780140445688",
+                },
+                {
+                    "title": "Capital",
+                    "author(s)": "Karl Marx",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"]["/dl/p2.epub"], "isbn 9780140445688"
+        )
+        self.assertEqual(
+            out[1]["batch_duplicate_basis"]["/dl/p1.epub"], "isbn 9780140445688"
+        )
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"]["/dl/p3.epub"],
+            "title+author, isbn absent on one side",
+        )
+        self.assertEqual(
+            out[2]["batch_duplicate_basis"]["/dl/p1.epub"],
+            "title+author, isbn absent on one side",
+        )
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/p2.epub", "/dl/p3.epub"])
+
+    def test_library_hit_descriptors_carry_basis(self):
+        # Issue #30 on the library side: each hit names the field that
+        # matched, in the search order that found it first.
+        fields = {
+            "file": "/dl/tri.epub",
+            "title": "The Left Hand of Darkness",
+            "authors": ["Ursula K. Le Guin"],
+            "isbn": "9780140445688",
+            "asins": ["B005Q8EAEI"],
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(
+            [(h["id"], h["basis"]) for h in hits],
+            [
+                (1, "isbn 9780140445688"),
+                (5, "asin B005Q8EAEI"),
+                (2, "title+author"),
+            ],
+        )
+        self.assertEqual(related, [])
+        # The report descriptor keeps the basis through _describe.
+        described = screen_duplicate._describe(hits[0])
+        self.assertEqual(described["basis"], "isbn 9780140445688")
+
+
+class TestIdentifierShapes(unittest.TestCase):
+    """The issue-#28 binding gates: only real identifier SHAPES bind, and
+    only two VALID (checksum-passing) but different ISBNs count as
+    evidence against a duplicate."""
+
+    _JUNK = "http://www.hxa7241.org/articles/content/epup-guide"
+
+    def test_isbn_shape_accepts_both_lengths_and_separators(self):
+        for value in (
+            "9780140445688",
+            "978-0-14-044568-8",
+            "978 0 14 044568 8",
+            "978.0.14.044568.8",  # dotted producer spelling (the house strip)
+            "0140445684",
+            "0-14-044568-4",
+            "014044568X",  # the X check-digit form is still the shape
+        ):
+            self.assertTrue(screen_duplicate._isbn_shaped(value), value)
+
+    def test_isbn_shape_refuses_the_junk_classes(self):
+        for value in (
+            self._JUNK,
+            "urn:uuid:0a1b-2c3d",
+            "B005Q8EAEI",  # an ASIN is not an ISBN
+            "12345",  # too short
+            "9780140445688999",  # too long
+            "",
+        ):
+            self.assertFalse(screen_duplicate._isbn_shaped(value), value)
+
+    def test_isbn_valid_is_checksum_strict(self):
+        self.assertTrue(screen_duplicate._isbn_valid("9780140445688"))
+        self.assertTrue(screen_duplicate._isbn_valid("978-0-14-044568-8"))
+        self.assertTrue(screen_duplicate._isbn_valid("0140445684"))
+        self.assertFalse(
+            screen_duplicate._isbn_valid("014044568X")
+        )  # the X form is shaped; 4 is this number's real check digit
+        self.assertFalse(screen_duplicate._isbn_valid("9780140445689"))  # one digit off
+        self.assertFalse(screen_duplicate._isbn_valid(self._JUNK))
+
+    def test_bindable_asin_takes_asin_and_isbn_shapes_only(self):
+        self.assertTrue(screen_duplicate._bindable_asin("B005Q8EAEI"))
+        self.assertTrue(
+            screen_duplicate._bindable_asin("b005q8eaei")
+        )  # case-folded rips
+        self.assertTrue(
+            screen_duplicate._bindable_asin("0140445684")
+        )  # ISBN-10 values filed under asin bind (the pre-2001 ASINs)
+        self.assertFalse(screen_duplicate._bindable_asin(self._JUNK))
+        self.assertFalse(screen_duplicate._bindable_asin("urn:uuid:x"))
 
 
 class TestStampPdfGuards(unittest.TestCase):
@@ -4238,6 +4528,348 @@ class TestExtractStampEvidence(unittest.TestCase):
         with mock.patch.object(vg, "imported_version", return_value="3.66.0"):
             fresh = _load("extract_stamp_evidence")
         self.assertNotIn("_PROVENANCE_PATTERNS", fresh.__dict__)
+
+
+drive_stamps = _load("drive_stamps")
+
+
+class TestDriveStamps(unittest.TestCase):
+    """Issue #29: the wave stamp driver as a tool. The coverage assert
+    against the ACTUAL target directory runs before any spawn (the
+    wrong-table incident protection: the oct-15 hand-rolled copy ran
+    twice against the wrong wave's stamp table), NONE stamps omit the
+    flag, and the results record lands beside the stamps file. The stamp
+    tools themselves are mocked at the spawn seam."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.wave = self.root / "wave"
+        self.target = self.root / "target"
+        self.target.mkdir()
+        self.wave.mkdir()
+        self.backup = self.root / "backup"
+        self.stamps = self.wave / "stamps_final.json"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_map(self, rows):
+        self.stamps.write_text(json.dumps(rows), encoding="utf-8")
+
+    def _file(self, name):
+        (self.target / name).write_bytes(b"PAYLOAD")
+        return name
+
+    def _run_main(self, *extra, spawn_rc=(0, "")):
+        out, err = io.StringIO(), io.StringIO()
+        argv = ["drive_stamps.py", str(self.stamps), str(self.target), *extra]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(drive_stamps, "_spawn", return_value=spawn_rc) as spawn,
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            rc = drive_stamps.main()
+        return rc, spawn, out.getvalue(), err.getvalue()
+
+    def _spawned_cmds(self, spawn):
+        return [call.args[0] for call in spawn.call_args_list]
+
+    def test_command_shape_omits_none_flags(self):
+        # The NONE contract: a NONE/empty value OMITS the flag -- the
+        # tools write exactly what they are passed, so a literal-NONE
+        # publisher would be a phase-3 defect.
+        self._file("A Book (One).epub")
+        self._write_map(
+            {
+                "A Book (One).epub": {
+                    "title": "A Book",
+                    "authors": ["Author One", "Author Two"],
+                    "publisher": "NONE",
+                    "isbn": "",
+                    "cut": ["Translator (translator)"],
+                    "notes": "carried, never stamped",
+                }
+            }
+        )
+        rc, spawn, out, err = self._run_main("--backup-dir", str(self.backup))
+        self.assertEqual(rc, 0)
+        (cmd,) = self._spawned_cmds(spawn)
+        self.assertEqual(cmd[0], sys.executable)
+        self.assertTrue(cmd[1].endswith("stamp_epub.py"))
+        self.assertEqual(cmd[2], str(self.target / "A Book (One).epub"))
+        self.assertIn("--title", cmd)
+        self.assertEqual(cmd[cmd.index("--title") + 1], "A Book")
+        self.assertEqual(cmd.count("--author"), 2)
+        self.assertNotIn("--publisher", cmd)
+        self.assertNotIn("--isbn", cmd)
+        self.assertNotIn("--apply", cmd)  # dry run by default
+        # A dry preview with a backup dir shows the real command: the
+        # value rides through, never a literal "None".
+        self.assertEqual(cmd[cmd.index("--backup-dir") + 1], str(self.backup))
+        self.assertIn("coverage assert OK: 1 stamps == 1 files on disk", out)
+
+    def test_apply_mode_passes_the_apply_flag(self):
+        name = self._file("B Book.pdf")
+        self._write_map(
+            {
+                name: {
+                    "title": "B Book",
+                    "authors": [],
+                    "publisher": "Pr Press",
+                    "isbn": "9780140445688",
+                }
+            }
+        )
+        rc, spawn, out, err = self._run_main(
+            "--apply", "--backup-dir", str(self.backup)
+        )
+        self.assertEqual(rc, 0)
+        (cmd,) = self._spawned_cmds(spawn)
+        self.assertTrue(cmd[1].endswith("stamp_pdf.py"))
+        self.assertEqual(cmd[-1], "--apply")
+        # An empty authors list omits --author entirely.
+        self.assertNotIn("--author", cmd)
+
+    def test_coverage_assert_names_both_diffs_before_any_spawn(self):
+        # The incident protection: map vs ACTUAL target directory, both
+        # directions named, exit 2, and the spawn seam never reached.
+        self._file("On Disk.epub")
+        self._file("Stray.epub")
+        self._write_map(
+            {
+                "On Disk.epub": {"title": "On Disk", "authors": ["A"]},
+                "Missing.epub": {"title": "Missing", "authors": ["A"]},
+            }
+        )
+        rc, spawn, out, err = self._run_main("--backup-dir", str(self.backup))
+        self.assertEqual(rc, 2)
+        self.assertEqual(spawn.call_args_list, [])
+        self.assertIn("coverage assert FAILED", err)
+        self.assertIn("Missing.epub", err)
+        self.assertIn("Stray.epub", err)
+
+    def test_bad_rows_stop_the_run_before_coverage(self):
+        self._file("Fine.epub")
+        self._write_map(
+            {
+                "Fine.epub": {"title": "Fine", "authors": ["A"]},
+                "Empty.epub": {"title": "NONE", "authors": [], "cut": []},
+            }
+        )
+        rc, spawn, out, err = self._run_main("--backup-dir", str(self.backup))
+        self.assertEqual(rc, 2)
+        self.assertEqual(spawn.call_args_list, [])
+        self.assertIn("no stampable field", err)
+        self.assertIn("Empty.epub", err)
+
+    def test_unknown_field_warns_but_runs(self):
+        self._file("Warned.epub")
+        self._write_map(
+            {
+                "Warned.epub": {
+                    "title": "Warned",
+                    "authors": ["A"],
+                    "edition": "3rd",
+                }
+            }
+        )
+        rc, spawn, out, err = self._run_main("--backup-dir", str(self.backup))
+        self.assertEqual(rc, 0)
+        self.assertIn("unknown stamp field(s) ignored: edition", err)
+
+    def test_unstampable_format_is_a_named_skip(self):
+        # DJVU/MOBI ride the coverage assert but are never stamped here:
+        # the phase-1 skill routes them by hand, and the skip is named in
+        # the summary and the results record, never silent.
+        self._file("Scan.djvu")
+        self._write_map({"Scan.djvu": {"title": "Scan", "authors": ["A"]}})
+        rc, spawn, out, err = self._run_main("--backup-dir", str(self.backup))
+        self.assertEqual(rc, 0)
+        self.assertEqual(spawn.call_args_list, [])
+        self.assertIn("SKIP (unstampable format .djvu)", out)
+        report = json.loads((self.wave / "stamp_results.json").read_text())
+        self.assertEqual(report["skipped"][0]["file"], "Scan.djvu")
+
+    def test_format_filter_skips_the_other_format(self):
+        # The pdf/epub split: --format pdf dispatches PDFs only; the
+        # coverage assert still covers the whole map and directory.
+        self._file("E Book.epub")
+        self._file("P Book.pdf")
+        self._write_map(
+            {
+                "E Book.epub": {"title": "E", "authors": ["A"]},
+                "P Book.pdf": {"title": "P", "authors": ["A"]},
+            }
+        )
+        rc, spawn, out, err = self._run_main(
+            "--backup-dir", str(self.backup), "--format", "pdf"
+        )
+        self.assertEqual(rc, 0)
+        (cmd,) = self._spawned_cmds(spawn)
+        self.assertTrue(cmd[1].endswith("stamp_pdf.py"))
+        self.assertEqual(cmd[2], str(self.target / "P Book.pdf"))
+        self.assertIn("SKIP (outside --format pdf) E Book.epub", out)
+
+    def test_results_land_beside_the_stamps_file(self):
+        # The association the oct-15 hand-rolled driver got wrong (it
+        # wrote the oct-14 wave's directory): the default is the stamps
+        # file's own directory, never the other wave's.
+        self._file("Solo.epub")
+        self._write_map({"Solo.epub": {"title": "Solo", "authors": ["A"]}})
+        rc, spawn, out, err = self._run_main("--backup-dir", str(self.backup))
+        self.assertEqual(rc, 0)
+        report = json.loads((self.wave / "stamp_results.json").read_text())
+        self.assertEqual(report["done"], ["Solo.epub"])
+        self.assertEqual(report["failed"], [])
+        self.assertFalse(report["apply"])
+        self.assertEqual(report["loaded"], 1)
+
+    def test_results_inside_the_target_are_refused(self):
+        self._file("X.epub")
+        self._write_map({"X.epub": {"title": "X", "authors": ["A"]}})
+        rc, spawn, out, err = self._run_main("--results", str(self.target / "res.json"))
+        self.assertEqual(rc, 2)
+        self.assertIn("must not land inside the target directory", err)
+
+    def test_results_must_not_be_the_stamps_file(self):
+        self._write_map({"X.epub": {"title": "X", "authors": ["A"]}})
+        (self.target / "X.epub").write_bytes(b"P")
+        rc, spawn, out, err = self._run_main("--results", str(self.stamps))
+        self.assertEqual(rc, 2)
+        self.assertIn("must not be the stamps file", err)
+
+    def test_apply_requires_backup_dir(self):
+        self._write_map({"X.epub": {"title": "X", "authors": ["A"]}})
+        (self.target / "X.epub").write_bytes(b"P")
+        rc, spawn, out, err = self._run_main("--apply")
+        self.assertEqual(rc, 2)
+        self.assertIn("--apply requires --backup-dir", err)
+
+    def test_backup_dir_inside_the_target_is_refused(self):
+        self._write_map({"X.epub": {"title": "X", "authors": ["A"]}})
+        (self.target / "X.epub").write_bytes(b"P")
+        rc, spawn, out, err = self._run_main(
+            "--apply", "--backup-dir", str(self.target / "bak")
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("must sit OUTSIDE the target directory", err)
+
+    def test_failure_names_the_remainder_and_exits_1(self):
+        self._file("Bad.epub")
+        self._file("Good.epub")
+        self._write_map(
+            {
+                "Bad.epub": {"title": "Bad", "authors": ["A"]},
+                "Good.epub": {"title": "Good", "authors": ["A"]},
+            }
+        )
+        # Sorted dispatch order is Bad then Good: the first spawn fails,
+        # the second succeeds, and the run continues past the failure
+        # (the copies' shape) with the remainder named.
+        out, err = io.StringIO(), io.StringIO()
+        argv = [
+            "drive_stamps.py",
+            str(self.stamps),
+            str(self.target),
+            "--backup-dir",
+            str(self.backup),
+        ]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(
+                drive_stamps,
+                "_spawn",
+                side_effect=[(1, "read-back disagrees"), (0, "")],
+            ),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            rc = drive_stamps.main()
+        self.assertEqual(rc, 1)
+        self.assertIn("FAIL", out.getvalue())
+        self.assertIn("REMAINDER: Bad.epub", out.getvalue())
+        report = json.loads((self.wave / "stamp_results.json").read_text())
+        self.assertEqual(report["failed"][0]["file"], "Bad.epub")
+        self.assertEqual(report["failed"][0]["detail"], "read-back disagrees")
+        self.assertEqual(report["done"], ["Good.epub"])
+
+    def test_discard_excludes_a_key_and_a_stray_discard_is_an_error(self):
+        # A discarded key leaves the coverage; a discarded name still on
+        # disk stays an EXTRA (the quarantined file is still sitting
+        # there, and the assert must name it).
+        self._file("Kept.epub")
+        self._write_map(
+            {
+                "Kept.epub": {"title": "Kept", "authors": ["A"]},
+                "Gone.epub": {"title": "Gone", "authors": ["A"]},
+            }
+        )
+        rc, spawn, out, err = self._run_main(
+            "--backup-dir", str(self.backup), "--discard", "Gone.epub"
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("1 discarded", out)
+        self.assertEqual(
+            [c[2] for c in self._spawned_cmds(spawn)], [str(self.target / "Kept.epub")]
+        )
+        rc, spawn, out, err = self._run_main(
+            "--backup-dir", str(self.backup), "--discard", "Kept.epub"
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("Kept.epub", err)
+
+    def test_unwritable_results_dir_degrades_to_a_named_error(self):
+        # The stamps already ran; a dead results path must not traceback
+        # over the summary or flip the exit contract (setup trouble is a
+        # named error, never a traceback).
+        self._file("Solo.epub")
+        self._write_map({"Solo.epub": {"title": "Solo", "authors": ["A"]}})
+        rc, spawn, out, err = self._run_main(
+            "--backup-dir",
+            str(self.backup),
+            "--results",
+            str(self.root / "no-such-dir" / "res.json"),
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("could not write the results file", err)
+        self.assertIn("previewed 1, FAILED 0", out)
+
+    def test_none_is_recognized_in_any_spelling(self):
+        # A hand-edited table carrying Python-flavored "None" must omit
+        # the flag exactly like "NONE": a literal-NONE publisher is the
+        # phase-3 defect class.
+        self._file("Case.epub")
+        self._write_map(
+            {
+                "Case.epub": {
+                    "title": "Case",
+                    "authors": ["A"],
+                    "publisher": "None",
+                    "isbn": "none",
+                }
+            }
+        )
+        rc, spawn, out, err = self._run_main("--backup-dir", str(self.backup))
+        self.assertEqual(rc, 0)
+        (cmd,) = self._spawned_cmds(spawn)
+        self.assertNotIn("--publisher", cmd)
+        self.assertNotIn("--isbn", cmd)
+
+    def test_unreadable_stamps_file_exits_2(self):
+        self.stamps.write_text("{not json", encoding="utf-8")
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+            mock.patch.object(
+                sys, "argv", ["drive_stamps.py", str(self.stamps), str(self.target)]
+            ),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            drive_stamps.main()
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("unreadable", err.getvalue())
 
 
 if __name__ == "__main__":
