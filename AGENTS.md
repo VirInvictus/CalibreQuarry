@@ -5,6 +5,37 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.69.0 onward, the identifier-residual batch, issue #31)
+
+- **Identifier values compare whitespace-collapsed on BOTH sides of the
+  reconcile diff, and `db_record` is where the DB side collapses.** The
+  stored `lcc` `PR6045.Y64 C48  1992` (double space) rides the embed and
+  ebook-meta verbatim (calibre's OPF reader strips only element edges),
+  but `parse_identifiers` collapses runs over the whole Identifiers line;
+  the raw `.strip().lower()` DB compare could never match it, so the book
+  reported `identifiers` drift on every pass and no writer could close it.
+  `db_record` now returns `norm_text(val).lower()` per value, the same
+  reduction `parse_identifiers` applies file-side and the one
+  `canonical_dc_identifiers` builds its targets with (`_norm_ident`), so
+  one pair has one comparison form. Consumers of `rec["identifiers"]`:
+  `diff_fields` (both directions) and the normalize call, both of which
+  want exactly this form; inserts into files were already collapsed by
+  the writer and stay collapsed.
+- **The package-slot rewrite precedes the writer-scheme keep.**
+  `canonical_dc_identifiers` judges the package unique-identifier slot
+  before `_WRITER_SCHEMES`: any slot content that is not already
+  `<scheme="calibre"><books.uuid>` rewrites in place, so a slot typed
+  `uuid` (or `calibre`) carrying a FOREIGN books-uuid converges like
+  every other stale shape (the issue's live element; the keep used to
+  shield it forever). The keep still covers every NON-package
+  calibre/uuid element, and the empty-uuid edge is unchanged: with no
+  books.uuid a writer-scheme slot keeps standing (the read seam never
+  surfaces it) while any other stale slot still reaches
+  `_rewrite_package_identifier` and refuses the pass. A pass over a file
+  whose slot is already canonical is byte-identical without a rebuild
+  (the keep fires before `changed` is set), so convergence is one
+  one-time scheme flip at most.
+
 ## Programmer-facing contract notes (3.68.0 onward, the duplicate-triage batch, issues #28-#30)
 
 - **Identifier bindings are shape-gated, and the gates live in

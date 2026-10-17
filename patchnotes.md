@@ -1,5 +1,44 @@
 # CalibreQuarry Patch Notes
 
+# 3.69.0 (2026-10-17)
+
+### The identifier residual batch: the reconcile diff collapses identifier whitespace on both sides, and the package-slot rewrite no longer skips uuid-typed slots (issue #31)
+
+One live book (The Chrysalids, #10842) reported `still differs:
+identifiers` on every `--apply` pass, byte-identical OPF each time. The
+flagged pair was never the stale uuid slot the issue names: calibre's
+OPF reader drops uuid- and calibre-typed identifiers before ebook-meta
+prints anything, so that element is invisible to the diff. The real
+pair was the stored LC call number's double space.
+
+- **db_record hands the diff the same collapsed form the file side
+  parses.** The stored `lcc` value `PR6045.Y64 C48  1992` keeps its
+  double space through the embed (calibredb writes it verbatim) and
+  through ebook-meta (the reader strips only the element edges), but
+  parse_identifiers runs norm_text over the whole Identifiers line and
+  collapses whitespace runs, while the DB side compared
+  `.strip().lower()` raw: the two spellings could never match, and no
+  writer could close the drift it reported. db_record now reduces every
+  identifier value through the same norm_text + lowercase the file side
+  applies, which is also the comparison form the normalization pass
+  builds its targets with, so diff and writer judge one pair one way.
+- **The package-slot rewrite fires for uuid-typed slots.** The 3.63.3
+  rule rewrites a stale package unique-identifier element in place to
+  `calibre:<books.uuid>`, but the branch order let a slot typed `uuid`
+  (or `calibre`) reach the writer-scheme keep first, so The Chrysalids'
+  slot kept a foreign books-uuid forever. The stale-slot check now
+  precedes the keep: any slot content that is not already the canonical
+  `calibre:<books.uuid>` form rewrites in place (id attribute and
+  position stay), a pass over an already-canonical file is
+  byte-identical, and without a books.uuid a writer-scheme slot keeps
+  standing while any other stale slot refuses the pass exactly as
+  before. Non-package calibre/uuid elements keep as always.
+
+Both halves are pinned against the live shapes: the double-spaced call
+number (a real-sqlite db_record test plus the writer's verbatim-keep),
+the foreign uuid slot rewritten and idempotent, and the already-
+canonical slot never rebuilt.
+
 # 3.68.0 (2026-10-15)
 
 ### The duplicate-triage batch: identifier bindings shape-gated, match evidence in every refusal detail, and the wave stamp driver as a tool (issues #28, #29, #30)

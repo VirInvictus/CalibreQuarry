@@ -34,7 +34,9 @@ block, whole-archive rewrite through a temp file + os.replace):
   entries, and rewrite a stale package unique-identifier element IN PLACE
   (id attribute and position stay; scheme and text become the book uuid
   under the writer's own calibre scheme) so the package reference never
-  dangles. A default-namespace EPUB3 package — EPUB 3's alternate form,
+  dangles — the writer-scheme keep for calibre/uuid elements never shields
+  the package slot itself, whose value must be the book uuid (issue #31's
+  foreign uuid-typed slot). A default-namespace EPUB3 package — EPUB 3's alternate form,
   the OPF namespace bound as the default on <package> and dc bound there
   too, no OPF-prefix binding anywhere — is handled in place: when the
   surgery must name the OPF namespace it synthesizes the binding as a
@@ -311,7 +313,10 @@ def canonical_dc_identifiers(
     the last identifier, and rewrite a stale package unique-identifier
     element in place (its id attribute and position stay; scheme and text
     become the book uuid under the writer's own calibre scheme, which the
-    read seam never surfaces) so the package reference never dangles.
+    read seam never surfaces) so the package reference never dangles. The
+    stale-slot rule covers a slot typed uuid or calibre carrying a foreign
+    value: only a slot already in the canonical calibre form keeps (issue
+    #31), and the writer-scheme keep never applies to the package slot.
 
     Returns byte-identical text when the file is already canonical, or None
     when the shape cannot be safely rewritten: no metadata block, no uuid
@@ -335,6 +340,7 @@ def canonical_dc_identifiers(
         if _norm_ident(k) and _norm_ident(v)
     }
     uuid = (uuid or "").strip()
+    slot_uuid = _norm_ident(uuid)
     unique_m = _UNIQUE_IDENTIFIER.search(opf_text)
     unique_id = unique_m.group(1)[1:-1] if unique_m else None
     spans = list(_DC_IDENTIFIER_SPAN.finditer(block))
@@ -358,27 +364,38 @@ def canonical_dc_identifiers(
             # inserted duplicate on every pass.
             satisfied.add(scheme)
             actions.append((span, "keep"))
+        elif is_pkg and (scheme != "calibre" or value != slot_uuid):
+            # Stale or junk content in the package slot, checked before the
+            # writer-scheme keep below: the slot's one job is to carry the
+            # book uuid under the writer's own invisible scheme, so a slot
+            # typed `uuid` (or `calibre`) holding a FOREIGN uuid is exactly
+            # the stale shape this pass exists for, not a keeper (issue #31:
+            # the keep used to shield it and the foreign value stood
+            # forever). Only a slot already in the canonical calibre form
+            # keeps. Every scheme-less element lands here too. None of them
+            # may satisfy a database entry, because calibre's reader runs
+            # scheme-less urn:isbn values through check_isbn (dash-stripped,
+            # check-digit validated) while the diff compares the raw stored
+            # form — an element kept as a satisfier there could read back a
+            # different value than it stores and the book would never
+            # converge. The entry is inserted fresh in its scheme'd form
+            # instead, which round-trips raw. Without a uuid there is
+            # nothing to rewrite the slot to: a writer-scheme slot keeps
+            # standing (the read seam never surfaces it), anything else
+            # reaches _rewrite_package_identifier and refuses the pass.
+            if uuid or scheme not in _WRITER_SCHEMES:
+                actions.append((span, "rewrite"))
+                changed = True
+            else:
+                actions.append((span, "keep"))
         elif scheme in _WRITER_SCHEMES:
             actions.append((span, "keep"))
         elif (
-            not is_pkg
-            and scheme is not None
+            scheme is not None
             and scheme in FILE_ONLY_IDENTIFIERS
             and scheme not in target
         ):
             actions.append((span, "keep"))
-        elif is_pkg:
-            # Stale or junk content in the package slot: every scheme-less
-            # element lands here too. None of them may satisfy a database
-            # entry, because calibre's reader runs scheme-less urn:isbn
-            # values through check_isbn (dash-stripped, check-digit
-            # validated) while the diff compares the raw stored form — an
-            # element kept as a satisfier there could read back a different
-            # value than it stores and the book would never converge. The
-            # entry is inserted fresh in its scheme'd form instead, which
-            # round-trips raw.
-            actions.append((span, "rewrite"))
-            changed = True
         else:
             actions.append((span, "remove"))
             changed = True

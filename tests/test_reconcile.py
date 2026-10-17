@@ -584,6 +584,31 @@ class TestVerifyWiring(unittest.TestCase):
             "COMPLETED WITH ERRORS: 1 failed operation(s) (listed above).", text
         )
 
+    def test_db_identifier_values_collapse_whitespace_runs(self):
+        # Issue #31's residual, the actual flagged pair: the stored LC call
+        # number keeps its double space and calibre embeds it verbatim, but
+        # the file side of diff_fields parses ebook-meta's line through
+        # parse_identifiers, which collapses runs. db_record must hand the
+        # diff the same collapsed form, or the book reads identifiers drift
+        # forever and no --apply can close it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._library(tmp)
+            con = sqlite3.connect(root / "metadata.db")
+            con.execute(
+                "INSERT INTO identifiers (book,type,val) "
+                "VALUES (1,'lcc','PR6045.Y64 C48  1992')"
+            )
+            con.commit()
+            con.close()
+            con = sqlite3.connect(rfm.db_uri_ro(root / "metadata.db"), uri=True)
+            con.row_factory = sqlite3.Row
+            try:
+                rec = rfm.db_record(con.cursor(), 1, root)
+            finally:
+                con.close()
+        self.assertEqual(rec["identifiers"]["lcc"], "pr6045.y64 c48 1992")
+        self.assertEqual(rec["identifiers"]["isbn"], "9780000000001")
+
 
 class TestVersionFloor(unittest.TestCase):
     """Issue #20's strong fix: main() refuses on an imported cquarry_cli
@@ -1067,6 +1092,134 @@ class TestEpubIdentifierNormalization(unittest.TestCase):
         self.assertEqual(self.read_like_calibre(out), "isbn:9780000000002")
         self.assertIn(
             '<dc:identifier opf:scheme="isbn">9780000000002</dc:identifier>', out
+        )
+
+    # Issue #31's live shape (book #10842): the package slot wears the
+    # writer's `uuid` scheme and carries a FOREIGN books-uuid, and the
+    # writer's own calibre element stands beside it carrying the real one.
+    FOREIGN_UUID_SLOT_OPF = (
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" '
+        'unique-identifier="uuid_id">\n'
+        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:opf="http://www.idpf.org/2007/opf">\n'
+        "    <dc:title>The Foreign Slot Book</dc:title>\n"
+        '    <dc:identifier id="uuid_id" opf:scheme="uuid">'
+        "b92b24ac-fc69-4cb7-8930-84037f0f9a7c</dc:identifier>\n"
+        '    <dc:identifier opf:scheme="calibre">'
+        "d6f9ab80-884b-45b1-8774-157904d9849a</dc:identifier>\n"
+        '    <dc:identifier opf:scheme="ISBN">9780241950043</dc:identifier>\n'
+        "  </metadata>\n"
+        "</package>\n"
+    )
+    BOOK_UUID = "d6f9ab80-884b-45b1-8774-157904d9849a"
+    FOREIGN_DB = {"isbn": "9780241950043"}
+
+    def test_foreign_uuid_typed_package_slot_is_rewritten(self):
+        # Issue #31: the writer-scheme keep used to fire before the package
+        # slot rewrite, so a slot typed `uuid` carrying a foreign books-uuid
+        # stood forever. The slot is rewritten in place to the book uuid
+        # under the writer's own scheme; the correct calibre element beside
+        # it stays, and the read seam sees only the ISBN either way.
+        out = epd.canonical_dc_identifiers(
+            self.FOREIGN_UUID_SLOT_OPF, self.FOREIGN_DB, self.BOOK_UUID
+        )
+        self.assertIsNotNone(out)
+        spans = self.idents_in(out)
+        self.assertEqual(
+            spans[0],
+            '<dc:identifier id="uuid_id" opf:scheme="calibre">'
+            f"{self.BOOK_UUID}</dc:identifier>",
+        )
+        self.assertNotIn("b92b24ac", out)
+        self.assertEqual(self.read_like_calibre(out), "isbn:9780241950043")
+
+    def test_stale_calibre_typed_slot_and_correct_uuid_typed_slot_flip(self):
+        # The two other slot classes the reordered chain now catches: a slot
+        # typed `calibre` carrying a foreign uuid kept forever under the
+        # writer-scheme keep, and a slot typed `uuid` carrying the book's OWN
+        # uuid was byte-stable forever; both converge to the canonical
+        # calibre:<books.uuid> form now, once, and the value rides along.
+        calibre_typed = self.FOREIGN_UUID_SLOT_OPF.replace(
+            '<dc:identifier id="uuid_id" opf:scheme="uuid">'
+            "b92b24ac-fc69-4cb7-8930-84037f0f9a7c</dc:identifier>",
+            '<dc:identifier id="uuid_id" opf:scheme="calibre">'
+            "b92b24ac-fc69-4cb7-8930-84037f0f9a7c</dc:identifier>",
+        )
+        uuid_typed = self.FOREIGN_UUID_SLOT_OPF.replace(
+            "b92b24ac-fc69-4cb7-8930-84037f0f9a7c", self.BOOK_UUID
+        )
+        for opf in (calibre_typed, uuid_typed):
+            out = epd.canonical_dc_identifiers(opf, self.FOREIGN_DB, self.BOOK_UUID)
+            self.assertIsNotNone(out)
+            self.assertIn(
+                '<dc:identifier id="uuid_id" opf:scheme="calibre">'
+                f"{self.BOOK_UUID}</dc:identifier>",
+                out,
+            )
+            self.assertEqual(
+                epd.canonical_dc_identifiers(out, self.FOREIGN_DB, self.BOOK_UUID),
+                out,
+            )
+
+    def test_rewritten_foreign_slot_pass_is_idempotent(self):
+        once = epd.canonical_dc_identifiers(
+            self.FOREIGN_UUID_SLOT_OPF, self.FOREIGN_DB, self.BOOK_UUID
+        )
+        self.assertEqual(
+            epd.canonical_dc_identifiers(once, self.FOREIGN_DB, self.BOOK_UUID), once
+        )
+
+    def test_already_canonical_slot_is_not_rebuilt(self):
+        # A slot born in the canonical calibre:<uuid> form keeps without the
+        # pass even assembling a rewrite: the file comes back byte-identical.
+        canonical = self.FOREIGN_UUID_SLOT_OPF.replace(
+            '<dc:identifier id="uuid_id" opf:scheme="uuid">'
+            "b92b24ac-fc69-4cb7-8930-84037f0f9a7c</dc:identifier>",
+            f'<dc:identifier id="uuid_id" opf:scheme="calibre">{self.BOOK_UUID}'
+            "</dc:identifier>",
+        )
+        self.assertEqual(
+            epd.canonical_dc_identifiers(canonical, self.FOREIGN_DB, self.BOOK_UUID),
+            canonical,
+        )
+
+    def test_package_slot_without_a_book_uuid_keeps_or_refuses_by_scheme(self):
+        # No books.uuid to rewrite the slot to: a writer-scheme slot keeps
+        # standing (the read seam never surfaces it), while any other stale
+        # slot still refuses the pass rather than be removed and dangle the
+        # unique-identifier reference.
+        opf = self.REOPEN_OPF.replace(
+            '<dc:identifier id="BookId" opf:scheme="asin">B00STALEID1</dc:identifier>',
+            '<dc:identifier id="BookId" opf:scheme="uuid">b92b24ac</dc:identifier>',
+        )
+        out = epd.canonical_dc_identifiers(opf, self.DB_IDS, "")
+        self.assertIsNotNone(out)
+        self.assertIn("b92b24ac", out)
+        self.assertIsNone(
+            epd.canonical_dc_identifiers(self.REOPEN_OPF, self.DB_IDS, "")
+        )
+
+    def test_multi_space_db_value_matches_verbatim_file_element(self):
+        # The issue-#31 diff half end to end: the stored lcc keeps its double
+        # space, the embed writes it verbatim, and the comparison forms the
+        # writer builds (_norm_ident) collapse the run on both sides, so the
+        # stored spelling survives the pass untouched and the diff reads the
+        # file in sync — the script's db_record hands diff_fields the same
+        # collapsed form the file side parses out of ebook-meta's line.
+        opf = self.REOPEN_OPF.replace(
+            '<dc:identifier opf:scheme="ISBN">9780000000002</dc:identifier>',
+            '<dc:identifier opf:scheme="LCC">PR6045.Y64 C48  1992</dc:identifier>',
+        )
+        db = {"lcc": "pr6045.y64 c48 1992"}
+        out = epd.canonical_dc_identifiers(opf, db, self.UUID)
+        self.assertIsNotNone(out)
+        self.assertIn(
+            '<dc:identifier opf:scheme="LCC">PR6045.Y64 C48  1992</dc:identifier>', out
+        )
+        fm = file_meta(identifiers=self.read_like_calibre(out))
+        self.assertNotIn(
+            "identifiers", rfm.diff_fields(db_record(identifiers=db), fm, "EPUB")
         )
 
     def test_diff_judges_the_pass_output_in_sync(self):

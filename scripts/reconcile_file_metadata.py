@@ -364,8 +364,14 @@ def db_record(cur, book_id: int, library_root: Path) -> dict:
         "SELECT s.name FROM books_series_link bl JOIN series s ON s.id=bl.series WHERE bl.book=?",
         (book_id,),
     ).fetchone()
+    # Identifier values compare whitespace-collapsed on both sides: the file
+    # side collapses runs through norm_text (parse_identifiers over ebook-
+    # meta's line) while calibre preserves the stored spelling verbatim in
+    # the OPF, so a value carrying an internal multi-space run (the stored
+    # LC call number 'PR6045.Y64 C48  1992', issue #31) read file-side
+    # single-spaced and flagged identifiers drift no writer could close.
     idents = {
-        r["type"].lower(): r["val"].strip().lower()
+        r["type"].lower(): norm_text(r["val"]).lower()
         for r in cur.execute(
             "SELECT type, val FROM identifiers WHERE book=?", (book_id,)
         )
