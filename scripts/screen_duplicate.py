@@ -64,6 +64,22 @@ refusals record a `batch_duplicate_basis` map (isbn/asin value, or the
 title+author verdict with the ISBN state named), which is the suffix
 the duplicate decision's detail quotes.
 
+Issue #33 (3.71.0) closes the same-edition-different-notation miss: the
+2026-10-21 wave's A Pattern Language rip (stamped `Christopher
+Alexander`, ISBN-13 9780195019193) sat next to the held #1982
+(`Christopher W. Alexander`, ISBN-10 0195019199) and both doors passed
+it. ISBNs now compare through their 13-form: a 10-form converts through
+the 978 Bookland prefix with a recomputed check digit, the library
+keypair search also tries the cross notation, and a 10/13 pair binds as
+the ONE edition it is instead of reading as two valid different ISBNs
+(the evidence-against rule above only fires when the canonical forms
+differ). The first-author leg compares token sets with the single-letter
+tokens dropped, so a middle initial present on one side and absent on
+the other no longer splits one author in two; the library door supplies
+its candidates through a surname search and re-checks the author tokens
+itself, because the engine's exact `author:=` cannot see past the
+initial either.
+
 Report-only: nothing is deleted or moved here. Removing a library duplicate
 needs Brandon's explicit OK in phase 3; loose-file removal is his too.
 
@@ -130,9 +146,12 @@ def _isbn_valid(value: str) -> bool:
     validate_metadata rule, both lengths). The different-ISBN evidence
     rule needs VALID, not merely shaped: two VALID but different ISBNs
     are evidence AGAINST a duplicate, a valid-vs-junk difference is
-    not. The digits are normalized first, so only [0-9Xx] reach the
-    arithmetic."""
+    not. The digits are normalized first, and a non-shaped reduction is
+    simply not valid — the arithmetic never sees an X outside the check
+    position (issue #33's review closed that latent crash)."""
     digits = _isbn_digits(value)
+    if not _ISBN_SHAPE_RE.match(digits):
+        return False
     if len(digits) == 10:
         total = 0
         for i, ch in enumerate(digits):
@@ -153,6 +172,55 @@ def _bindable_asin(value: str) -> bool:
     alphanumerics, case-insensitive) or ISBN-shaped (the pre-2001 ASINs
     ARE ISBN-10s, and rips file ISBN-10 values under asin)."""
     return bool(_ASIN_SHAPE_RE.match(value or "")) or _isbn_shaped(value)
+
+
+def _isbn13_form(value: str) -> str | None:
+    """The value's ISBN-13 comparison form (issue #33): a 13-form passes
+    through; a 10-form converts through the 978 Bookland prefix with a
+    recomputed check digit; anything unshaped is None and can never
+    bind. The issue-#28 shape gate runs first: the arithmetic below
+    trusts its digits (an X outside the check position would crash
+    int()), and a 13-char reduction carrying an X is junk that the old
+    junk_isbn path kept off the isbn bind. No checksum requirement,
+    matching that gate: mechanical conversion preserves whatever
+    equality the pair already had (the same-typo rule), and a typo
+    converts to a 13-form nobody holds."""
+    digits = _isbn_digits(value)
+    if not _ISBN_SHAPE_RE.match(digits):
+        return None
+    if len(digits) == 13:
+        return digits
+    stem = "978" + digits[:9]
+    check = (
+        10 - sum((1 if i % 2 == 0 else 3) * int(c) for i, c in enumerate(stem)) % 10
+    ) % 10
+    return stem + str(check)
+
+
+def _isbn_cross_form(value: str) -> str | None:
+    """The opposite-notation spelling of a shaped ISBN, when one exists
+    (issue #33): a 10-form's 978-prefixed 13-form, or a 978-prefixed
+    13-form's 10-form with the check digit recomputed. A 979-prefixed
+    13-form has no 10-form (those registrations never carried one), and
+    an unshaped value has neither."""
+    digits = _isbn_digits(value)
+    if len(digits) == 10:
+        return _isbn13_form(digits)
+    if len(digits) == 13 and digits.startswith("978"):
+        stem = digits[3:12]
+        check = (11 - sum((10 - i) * int(c) for i, c in enumerate(stem)) % 11) % 11
+        return stem + ("X" if check == 10 else str(check))
+    return None
+
+
+def _isbn_pair_basis(a: str, b: str) -> str:
+    """The basis string for a cross-notation bind (issue #33): both
+    spellings quoted, the 13-form side first, order-free."""
+    if len(_isbn_digits(a)) == 13:
+        thirteen, ten = a, b
+    else:
+        thirteen, ten = b, a
+    return f"isbn {thirteen}, 13-form of {ten}"
 
 
 RESET = "\033[0m"
@@ -486,6 +554,47 @@ def normalize_author_brackets(author: str) -> str:
     return re.sub(r"\s*\[[^\]]*\]\s*", " ", author or "").strip()
 
 
+_AUTHOR_TOKEN_SPLIT = re.compile(r"[^0-9a-z]+")
+
+
+def _author_tokens(author: str) -> frozenset:
+    """The author's folded tokens with the single-letter ones dropped (the
+    middle initials, issue #33): "Christopher W. Alexander" and
+    "Christopher Alexander" share the comparison set. Every multi-letter
+    token stays, so genuinely different names stay different."""
+    return frozenset(
+        t for t in _AUTHOR_TOKEN_SPLIT.split(normalize_author(author)) if len(t) > 1
+    )
+
+
+def _same_author_tokens(a: str, b: str) -> bool:
+    """The first-author gate one step looser than string equality (issue
+    #33): identical folded names always match (a name with no ASCII
+    tokens — CJK, Cyrillic — has nothing for the token form to compare,
+    and 3.70.0's string equality matched those pairs), and otherwise the
+    token sets with the single-letter initials dropped must agree. An
+    initials-only name therefore matches only its own spelling."""
+    folded_a, folded_b = normalize_author(a), normalize_author(b)
+    if folded_a and folded_a == folded_b:
+        return True
+    tokens = _author_tokens(a)
+    return bool(tokens) and tokens == _author_tokens(b)
+
+
+def _author_surname(author: str) -> str:
+    """The author's last token, folded, when it is a real word (more
+    than one letter): the relaxed candidate supply for the library door
+    (issue #33 — the engine's exact `author:=` cannot supply a held book
+    whose author carries a middle initial the file's stamp lacks, and a
+    one-letter search term would substring-scan half the library).
+    Empty when there is no usable token (initials-only, non-ASCII
+    names); the caller covers that with the exact search."""
+    tokens = [t for t in _AUTHOR_TOKEN_SPLIT.split(normalize_author(author)) if t]
+    if tokens and len(tokens[-1]) > 1:
+        return tokens[-1]
+    return ""
+
+
 _FILENAME_PARENS = re.compile(r"^(.*?)\s*\(([^)]+)\)")
 
 
@@ -533,18 +642,24 @@ def _library_hits(
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Existing library copies of one candidate file, as (duplicates,
     related). Exact ISBN first (the search engine's `isbn:X` is an exact
-    keypair lookup), then ASIN values (the same class of edition key: an
+    keypair lookup), then the cross notation of that ISBN when one exists
+    (issue #33: the library may hold the 10-form of the file's 13-form or
+    the reverse), then ASIN values (the same class of edition key: an
     exact `identifiers:=VALUE` lookup matches ANY identifier type, so a
     file-side `asin` meets a library-side `mobi-asin`), then normalized
-    title + first author: the tight `=` search supplies candidates and
-    classify_titles() judges the pair. Related hits are the containment
-    candidates a series/store prefix can mask (the 2026-09-21 "Mothership:
-    Wages of Sin" vs "Wages of Sin" silent pass): reported for judgment,
-    never as duplicates. Every identifier keypair search is shape-gated
-    (issue #28): a junk URL in the isbn or asin slot searches nothing.
-    Each hit descriptor carries `basis`: the field that matched (the
-    first route that found the book, in search order). Hydrated list
-    fields stay lists (never comma-split) per the cquarry contract.
+    title + first author: candidates come from the tight `=` pair search
+    AND a surname search (issue #33: the exact `author:=` cannot supply a
+    held book whose author carries a middle initial the file's stamp
+    lacks, so the relaxed supply feeds the classifier and the author gate
+    below re-checks the tokens itself), and classify_titles() judges the
+    pair. Related hits are the containment candidates a series/store
+    prefix can mask (the 2026-09-21 "Mothership: Wages of Sin" vs "Wages
+    of Sin" silent pass): reported for judgment, never as duplicates.
+    Every identifier keypair search is shape-gated (issue #28): a junk
+    URL in the isbn or asin slot searches nothing. Each hit descriptor
+    carries `basis`: the field that matched (the first route that found
+    the book, in search order). Hydrated list fields stay lists (never
+    comma-split) per the cquarry contract.
     """
     hits: list[dict[str, object]] = []
     related: list[dict[str, object]] = []
@@ -552,10 +667,16 @@ def _library_hits(
 
     isbn = fields.get("isbn") or ""
     if isbn and _isbn_shaped(isbn):
-        for b in db.search_books(f"isbn:{_search_escape(isbn)}"):
-            if b["id"] not in seen:
-                seen.add(b["id"])
-                hits.append({**b, "basis": f"isbn {isbn}"})
+        searches = [(isbn, False)]
+        alt = _isbn_cross_form(isbn)
+        if alt:
+            searches.append((alt, True))
+        for value, cross in searches:
+            for b in db.search_books(f"isbn:{_search_escape(value)}"):
+                if b["id"] not in seen:
+                    seen.add(b["id"])
+                    basis = _isbn_pair_basis(isbn, value) if cross else f"isbn {isbn}"
+                    hits.append({**b, "basis": basis})
 
     for asin in fields.get("asins") or []:
         if not _bindable_asin(asin):
@@ -572,9 +693,22 @@ def _library_hits(
         strict = db.search_books(
             f"title:{_search_escape('=' + title)} AND author:{_search_escape('=' + first)}"
         )
-        author_exact = db.search_books(f"author:{_search_escape('=' + first)}")
-        for b in author_exact:
+        surname = _author_surname(first)
+        if surname:
+            relaxed = db.search_books(f"author:{_search_escape(surname)}")
+        else:
+            # No usable surname token (initials-only, or a name with no
+            # ASCII tokens): the exact form is the supply, the 3.70.0
+            # behavior, and the author gate passes it on string equality.
+            relaxed = db.search_books(f"author:{_search_escape('=' + first)}")
+        for b in relaxed:
             if b["id"] in seen:
+                continue
+            # The surname matched by construction; the rest of the name
+            # must agree modulo middle initials (issue #33), against ANY
+            # of the book's authors (the engine's author search matches
+            # any author value, and the gate keeps that semantics).
+            if not any(_same_author_tokens(first, a) for a in (b.get("authors") or [])):
                 continue
             verdict = classify_titles(title, b["title"] or "")
             if verdict == "duplicate":
@@ -625,11 +759,15 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
     for i, rec in enumerate(records):
         for other in records[i + 1 :]:
             key_a, key_b = str(rec["file"]), str(other["file"])
+            # Issue #33: the first-author leg compares token sets with the
+            # single-letter tokens (the middle initials) dropped, so
+            # "Christopher W. Alexander" and "Christopher Alexander" are
+            # one author; multi-letter tokens all compare, so different
+            # names stay different.
             same_author = bool(
                 rec.get("authors")
                 and other.get("authors")
-                and normalize_author(rec["authors"][0])
-                == normalize_author(other["authors"][0])
+                and _same_author_tokens(rec["authors"][0], other["authors"][0])
             )
             seed_a, seed_b = seeds[key_a], seeds[key_b]
             if (
@@ -647,8 +785,16 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                 verdict = classify_titles(str(seed_a["title"]), str(seed_b["title"]))
             else:
                 verdict = classify_titles(titles[key_a], titles[key_b])
-            same_isbn = bool(rec.get("isbn")) and rec["isbn"] == other.get("isbn")
-            junk_isbn = bool(same_isbn) and not _isbn_shaped(str(rec["isbn"]))
+            a_isbn = str(rec.get("isbn") or "")
+            b_isbn = str(other.get("isbn") or "")
+            a_can, b_can = _isbn13_form(a_isbn), _isbn13_form(b_isbn)
+            # Issue #33: one edition in two notations is ONE ISBN (the
+            # 10-form's 978-prefixed 13 conversion), binding evidence,
+            # not a conflict. Unshaped values carry no 13-form and stay
+            # unbindable (issue #28).
+            isbn_bound = (
+                bool(a_isbn) and bool(b_isbn) and a_can is not None and a_can == b_can
+            )
             # Issue #28: only a real identifier shape may bind. The ASIN
             # binds within the batch exactly like the ISBN: same edition
             # key, and rips that strip ISBNs keep ASINs (issue #13).
@@ -665,24 +811,28 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
             # collapsed to one identical title; their real, differing
             # ISBNs said distinct all along. A valid-vs-junk difference is
             # NOT evidence (one side is garbage), so only two checksum-
-            # passing ISBNs suppress the title judge.
+            # passing ISBNs suppress the title judge. Cross-notation pairs
+            # never reach this state: they bound above (issue #33).
             isbn_conflict = (
-                bool(rec.get("isbn"))
-                and bool(other.get("isbn"))
-                and rec["isbn"] != other.get("isbn")
-                and _isbn_valid(str(rec["isbn"]))
-                and _isbn_valid(str(other["isbn"]))
+                bool(a_isbn)
+                and bool(b_isbn)
+                and a_isbn != b_isbn
+                and _isbn_valid(a_isbn)
+                and _isbn_valid(b_isbn)
             )
             basis = None
-            if same_isbn and not junk_isbn:
-                basis = f"isbn {rec['isbn']}"
+            if isbn_bound:
+                # Digit-identical spellings (pure producer punctuation
+                # variants) quote one value; genuinely mixed notations
+                # name both, 13-form first (issue #33).
+                basis = (
+                    _isbn_pair_basis(a_isbn, b_isbn)
+                    if _isbn_digits(a_isbn) != _isbn_digits(b_isbn)
+                    else f"isbn {a_isbn}"
+                )
             elif shared_asin:
                 basis = f"asin {rec_asins[shared_asin[0]]}"
             elif same_author and verdict == "duplicate":
-                a_isbn, b_isbn = (
-                    str(rec.get("isbn") or ""),
-                    str(other.get("isbn") or ""),
-                )
                 if a_isbn and b_isbn and a_isbn != b_isbn:
                     basis = f"title+author, isbn differs: {a_isbn} vs {b_isbn}"
                 elif not a_isbn or not b_isbn:
@@ -693,7 +843,7 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                     # evidence, the identifier equality is not.
                     basis = "title+author"
             if (
-                (same_isbn and not junk_isbn)
+                isbn_bound
                 or shared_asin
                 or (same_author and verdict == "duplicate" and not isbn_conflict)
             ):

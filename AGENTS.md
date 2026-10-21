@@ -5,6 +5,63 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.71.0 onward, the notation-and-initials batch, issue #33)
+
+- **ISBNs compare through their 13-form, and the conversion is
+  shape-gated.** `_isbn13_form(value)` (screen_duplicate.py) returns
+  the canonical comparison value: a shaped 13-form passes through, a
+  shaped 10-form converts through the 978 Bookland prefix with a
+  recomputed check digit, and ANY unshaped reduction is None (the
+  `_ISBN_SHAPE_RE` gate runs BEFORE the arithmetic; a reduction like
+  `X123456789` used to crash `int()`). No checksum requirement,
+  matching the issue-#28 gate: a same-typo 10-form pair still converts
+  to the same (wrong) 13-form and binds, exactly as it bound before;
+  a 979-prefixed 13-form has no cross form. `_isbn_cross_form()` is
+  the opposite-notation search spelling (10 -> 978-13, 978-13 -> 10
+  with the X check digit possible). `_isbn_valid` now carries the same
+  shape gate (a non-shaped reduction is simply not valid, never a
+  crash).
+- **The within-batch bind compares canonical forms; the evidence rule
+  survives.** `isbn_bound` replaces the old `same_isbn`/`junk_isbn`
+  pair: both isbns present, both shaped, canonical 13-forms equal.
+  Raw-equal pairs quote `isbn <value>`; digit-differing cross-notation
+  pairs quote `isbn <13-form raw>, 13-form of <10-form raw>`
+  (`_isbn_pair_basis`, order-free, 13-form side always first);
+  digit-IDENTICAL punctuation variants (`978-0-14-044568-8` vs
+  `9780140445688`, which 3.70.0 read as a conflict) bind with the
+  plain single-value basis. `isbn_conflict` still requires raw
+  difference plus both checksums passing, so genuinely different
+  editions stay suppressed; identical junk pairs (both canonical None)
+  keep the plain `title+author` basis.
+- **The library keypair search runs the cross notation second.** After
+  the direct `isbn:VALUE` search, `_library_hits` searches
+  `isbn:<cross form>` when one exists; the hit's basis comes from
+  `_isbn_pair_basis` (the direct hit keeps `isbn <value>`), and `seen`
+  dedup stays first-route-wins, so a book held in both notations
+  reports the direct basis.
+- **The first-author leg compares middle-initial-stripped token sets.**
+  `_same_author_tokens(a, b)`: identical folded names match outright
+  (the non-Latin names whose token form is empty still bind their own
+  spelling, the 3.70.0 semantics), otherwise the `_author_tokens()`
+  frozensets (folded, split on non-ASCII-alphanumerics, single-letter
+  tokens DROPPED) must be equal and non-empty. "Christopher W.
+  Alexander" == "Christopher Alexander"; "Ursula K. Le Guin" ==
+  "Ursula Le Guin"; "Karl Marx" != "Groucho Marx"; initials-only names
+  match only themselves. `_screen`'s within-batch `same_author` uses
+  it on FIRST authors; the filename-seed branch is unchanged.
+- **The library door's candidate supply is surname-wide, then gated.**
+  `_author_surname()` returns the first author's last folded token when
+  it is a real word (more than one letter; never a one-letter
+  substring scan over the library), `_library_hits` searches
+  `author:<surname>` with it, and every candidate passes
+  `_same_author_tokens(first, any of the book's authors)` BEFORE
+  classify_titles judges (the any-author check keeps the engine's
+  author-search semantics, where a book matches on any author value).
+  No usable surname (initials-only, non-Latin) falls back to the exact
+  `author:=first` search, the 3.70.0 supply. Duplicate verdicts bind
+  with basis `title+author`; related verdicts still surface as
+  related candidates, now also gate-checked.
+
 ## Programmer-facing contract notes (3.70.0 onward, the staging-dir batch, issue #32)
 
 - **`_inventory` skips the staging directory name `completed/` under the

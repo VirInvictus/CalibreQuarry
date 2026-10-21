@@ -1,5 +1,72 @@
 # CalibreQuarry Patch Notes
 
+# 3.71.0 (2026-10-21)
+
+### The notation-and-initials batch: the duplicate screen reads a 10-form and its 13-form as the ONE edition they are, and a middle initial no longer splits one author in two (issue #33)
+
+The oct-21 wave's A Pattern Language rip sat next to the held #1982 and
+both screen doors passed it: the rip's stamp carried the ISBN-13
+(9780195019193) and the bare author form (Christopher Alexander), the
+held book carries the ISBN-10 (0195019199) and the middle-initial form
+(Christopher W. Alexander). The keypair search matches identifier
+values exactly, so the two notations never met; the engine's exact
+`author:=` search cannot supply a book whose author carries an initial
+the file's stamp lacks; and the 3.68.0 evidence rule read two valid,
+textually different ISBNs as evidence AGAINST a duplicate. Same
+edition, three separate no-ops.
+
+- **ISBNs compare through their 13-form.** `_isbn13_form()` builds the
+  comparison value: a 13-form passes through, a 10-form converts
+  through the 978 Bookland prefix with a recomputed check digit,
+  anything unshaped is None and can never bind (the issue-#28 shape
+  gate runs first; the arithmetic never sees an X outside the check
+  position). No checksum requirement, matching that gate: mechanical
+  conversion preserves whatever equality the pair already had, and a
+  typo converts to a 13-form nobody holds. Within the batch, the bind
+  compares canonical forms, so a 10-form and its 13-form bind as the
+  one edition they are; two VALID but different ISBNs still count as
+  evidence against a duplicate (the canonicals differ), and identical
+  junk still reads the plain title+author basis.
+- **The library keypair search also tries the cross notation.** After
+  the direct search, a 978-prefixed 13-form searches its 10-form and
+  the reverse (`_isbn_cross_form()`; a 979-prefixed 13-form has no
+  10-form and searches once). The live pair now surfaces with the
+  basis `isbn 9780195019193, 13-form of 0195019199`: both spellings
+  quoted, 13-form first, order-free (`_isbn_pair_basis()`). Digit-
+  identical producer punctuation variants (`978-0-14-044568-8` vs
+  `9780140445688`) now bind with the plain single-value basis;
+  3.70.0 read that pair as a conflict.
+- **The first-author leg drops middle initials before comparing.**
+  `_same_author_tokens()` matches identical folded names outright
+  (3.70.0's string equality, which the non-Latin names with no ASCII
+  tokens still need) and otherwise compares token sets with the
+  single-letter tokens removed: "Christopher W. Alexander" and
+  "Christopher Alexander" are one author; every multi-letter token
+  still compares, so genuinely different names stay different.
+- **The library door supplies candidates through a surname search.**
+  The engine's exact `author:=` cannot see past a middle initial, so
+  the relaxed supply is an `author:<last-token>` search (a real word,
+  never a one-letter substring scan) whose candidates pass the author
+  token gate against ANY of the book's authors before classify_titles
+  judges. A name with no usable surname token (initials-only,
+  non-Latin) falls back to the exact search, the 3.70.0 behavior.
+  Same-surname different-author books stay out; the gate is what
+  turned the surname search's ~60 live "Alexander" candidates into
+  exactly #1982.
+- **`_isbn_valid` carries the shape gate too** (the review's find): a
+  junk reduction with an X outside the check position used to be a
+  latent `int()` crash on the conflict path; it is simply not valid
+  now, and an identical junk pair keeps the plain title+author basis
+  3.70.0 gave it (pinned: `X123456789`, `123456789012X`).
+
+Verified against the live library: the stamped APL file that passed
+silently yesterday now hits #1982 through the cross-notation keypair,
+and the surname supply adds zero related noise. New tests pin the
+conversion both directions (including the X check digit and the 979
+dead end), the cross-notation library and within-batch binds, the
+middle-initial author gate at both doors, the initials-only and
+non-Latin fallbacks, and the survived evidence rule.
+
 # 3.70.0 (2026-10-21)
 
 ### The staging-dir batch: phase 1's inventory walk skips a populated completed/ under the vetted root (issue #32)

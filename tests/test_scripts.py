@@ -1176,6 +1176,37 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             "INSERT INTO identifiers (book, type, val) VALUES"
             " (6, 'isbn', 'http://www.hxa7241.org/articles/content/epup-guide')"
         )
+        # The issue-#33 fixture: the held A Pattern Language carries the
+        # ISBN-10 notation and the middle-initial author form, while the
+        # arriving rip's stamp carries the 13-form and the bare name. Book
+        # 8 lists its Alexander second, the any-author gate's shape.
+        c.execute(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (7, 'A Pattern Language', 'Pattern Language, A',"
+            " 'Alexander, Christopher W.', 'p7', 1)"
+        )
+        c.execute("INSERT INTO authors VALUES (7, 'Christopher W. Alexander')")
+        c.execute("INSERT INTO authors VALUES (8, 'Howard Davis')")
+        c.execute("INSERT INTO books_authors_link (book, author) VALUES (7, 7)")
+        c.execute(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (8, 'The Production of Houses', 'Production of Houses, The',"
+            " 'Davis, Howard', 'p8', 1)"
+        )
+        c.execute("INSERT INTO authors VALUES (9, 'Christopher Alexander')")
+        c.execute("INSERT INTO books_authors_link (book, author) VALUES (8, 8), (8, 9)")
+        # The initials-only shape: no surname token exists, so the
+        # library door's relaxed supply is the exact search (3.70.0
+        # behavior) and the author gate's string equality passes it.
+        c.execute(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (9, 'Tree and Leaf', 'Tree and Leaf', 'J. R. R.', 'p9', 1)"
+        )
+        c.execute("INSERT INTO authors VALUES (10, 'J. R. R.')")
+        c.execute("INSERT INTO books_authors_link (book, author) VALUES (9, 10)")
+        c.execute(
+            "INSERT INTO identifiers (book, type, val) VALUES (7, 'isbn', '0195019199')"
+        )
         # Tables _BOOK_SELECT joins; empty here, present so get_all_books works.
         c.execute("CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT)")
         c.execute(
@@ -1845,6 +1876,267 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         described = screen_duplicate._describe(hits[0])
         self.assertEqual(described["basis"], "isbn 9780140445688")
 
+    def test_cross_notation_isbn_hits_the_library(self):
+        # Issue #33's live pair: the rip's stamp carries the 13-form, the
+        # held book the 10-form; the cross-notation keypair finds the ONE
+        # edition and the basis names both spellings.
+        fields = {
+            "file": "/dl/apl.pdf",
+            "title": "A Pattern Language",
+            "authors": ["Christopher Alexander"],
+            "isbn": "9780195019193",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(
+            [(h["id"], h["basis"]) for h in hits],
+            [(7, "isbn 9780195019193, 13-form of 0195019199")],
+        )
+        self.assertEqual(related, [])
+
+    def test_reverse_cross_notation_isbn_hits_the_library(self):
+        # The mirror direction: the file carries the 10-form, the held
+        # book the 978-prefixed 13-form (the Capital fixture).
+        fields = {
+            "file": "/dl/capital.pdf",
+            "title": "Capital",
+            "authors": ["Karl Marx"],
+            "isbn": "0140445684",
+        }
+        hits, _ = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(
+            [(h["id"], h["basis"]) for h in hits],
+            [(1, "isbn 9780140445688, 13-form of 0140445684")],
+        )
+
+    def test_middle_initial_author_still_hits_the_library(self):
+        # Issue #33's secondary: the engine's exact author search cannot
+        # supply a "Christopher W. Alexander" book for a bare "Christopher
+        # Alexander" stamp. The surname search supplies the candidate and
+        # the token gate passes it; the verdict stays title+author.
+        fields = {
+            "file": "/dl/apl2.pdf",
+            "title": "A Pattern Language",
+            "authors": ["Christopher Alexander"],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([(h["id"], h["basis"]) for h in hits], [(7, "title+author")])
+        self.assertEqual(related, [])
+
+    def test_surname_match_without_the_author_stays_out(self):
+        # The relaxed supply is surname-wide; the token gate is what
+        # keeps a same-surname, different-author book out.
+        fields = {
+            "file": "/dl/other.pdf",
+            "title": "A Pattern Language",
+            "authors": ["Sara Alexander"],
+            "isbn": "",
+        }
+        self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
+
+    def test_author_gate_checks_any_of_the_book_authors(self):
+        # The engine's author search matches ANY author value; the token
+        # gate keeps that semantics: the held Production of Houses lists
+        # Christopher Alexander second, and a file stamped him first
+        # still meets it on title+author.
+        fields = {
+            "file": "/dl/poh.pdf",
+            "title": "The Production of Houses",
+            "authors": ["Christopher Alexander"],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([(h["id"], h["basis"]) for h in hits], [(8, "title+author")])
+        self.assertEqual(related, [])
+
+    def test_cross_notation_isbn_binds_batch_duplicates(self):
+        # Issue #33's live pair within one completed/ mint: same edition,
+        # ISBN-10 vs ISBN-13 stamps, middle-initial author variance. The
+        # canonical 13-forms agree, so the pair binds on the ISBN with
+        # both spellings named in the basis.
+        files = [Path("/dl/apl1.pdf"), Path("/dl/apl2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "A Pattern Language",
+                    "author(s)": "Christopher Alexander",
+                    "identifiers": "isbn:9780195019193",
+                },
+                {
+                    "title": "A Pattern Language",
+                    "author(s)": "Christopher W. Alexander",
+                    "identifiers": "isbn:0195019199",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        want = "isbn 9780195019193, 13-form of 0195019199"
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/apl2.pdf"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/apl1.pdf"])
+        self.assertEqual(out[0]["batch_duplicate_basis"]["/dl/apl2.pdf"], want)
+        self.assertEqual(out[1]["batch_duplicate_basis"]["/dl/apl1.pdf"], want)
+        # The same edition also meets the held #7 through the cross
+        # notation, in the library route that runs first.
+        self.assertEqual([h["id"] for h in out[0]["library_hits"]], [7])
+
+    def test_middle_initial_variance_binds_on_title_author(self):
+        # The author leg alone: same title, no identifiers either side,
+        # one stamp carries the middle initial the other lacks. The pair
+        # binds through the token gate.
+        files = [Path("/dl/apl3.pdf"), Path("/dl/apl4.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "A Pattern Language",
+                    "author(s)": "Christopher Alexander",
+                    "identifiers": "",
+                },
+                {
+                    "title": "A Pattern Language",
+                    "author(s)": "Christopher W. Alexander",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/apl4.pdf"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/apl3.pdf"])
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"]["/dl/apl4.pdf"],
+            "title+author, isbn absent on one side",
+        )
+
+    def test_cross_notation_of_different_editions_still_conflicts(self):
+        # The evidence rule survives the canonical form: a 10-form and
+        # the 13-form of a DIFFERENT edition convert to different
+        # canonicals, both checksums pass, and the title+author bind
+        # stays suppressed.
+        files = [Path("/dl/x1.pdf"), Path("/dl/x2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": "isbn:0195019199",
+                },
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": "isbn:9780316469012",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+
+    def test_initials_only_author_still_hits_the_library(self):
+        # No surname token exists ("J. R. R."), so the relaxed supply is
+        # the exact search and the author gate's string equality passes
+        # it: the 3.70.0 behavior survives for names the token form
+        # cannot parse.
+        fields = {
+            "file": "/dl/tree.pdf",
+            "title": "Tree and Leaf",
+            "authors": ["J. R. R."],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([(h["id"], h["basis"]) for h in hits], [(9, "title+author")])
+        self.assertEqual(related, [])
+
+    def test_junk_with_early_x_neither_crashes_nor_binds(self):
+        # The review's crash class: a junk value whose digit reduction is
+        # 10 chars with the X outside the check position used to reach
+        # int() through the conversion; the shape gate keeps it a None
+        # form, and an identical junk pair binds through the title judge
+        # with the plain basis, exactly like any other identical junk.
+        _JUNK = "X123456789"
+        self.assertIsNone(screen_duplicate._isbn13_form(_JUNK))
+        self.assertFalse(screen_duplicate._isbn_valid(_JUNK))
+        files = [Path("/dl/jx1.pdf"), Path("/dl/jx2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/jx2.pdf"])
+        self.assertEqual(out[0]["batch_duplicate_basis"]["/dl/jx2.pdf"], "title+author")
+
+    def test_thirteen_char_x_junk_stays_off_the_isbn_bind(self):
+        # The review's bypass class: a 13-char reduction carrying an X is
+        # junk the shape gate refuses, so an identical pair never gains
+        # the isbn basis 3.70.0 never gave it.
+        _JUNK = "123456789012X"
+        self.assertIsNone(screen_duplicate._isbn13_form(_JUNK))
+        files = [Path("/dl/j13a.pdf"), Path("/dl/j13b.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": f"isbn:{_JUNK}",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"]["/dl/j13b.pdf"], "title+author"
+        )
+
+    def test_punctuation_variant_isbn_binds_as_one(self):
+        # The same digits in two producer spellings are ONE ISBN: 3.70.0
+        # read this pair as a conflict (raw strings differ, both valid)
+        # and suppressed the bind; the canonical form binds it with the
+        # plain single-value basis, since there is nothing to convert.
+        files = [Path("/dl/pv1.pdf"), Path("/dl/pv2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": "isbn:978-0-14-044568-8",
+                },
+                {
+                    "title": "Same Work",
+                    "author(s)": "Same Author",
+                    "identifiers": "isbn:9780140445688",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/pv2.pdf"])
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"]["/dl/pv2.pdf"], "isbn 978-0-14-044568-8"
+        )
+
 
 class TestIdentifierShapes(unittest.TestCase):
     """The issue-#28 binding gates: only real identifier SHAPES bind, and
@@ -1896,6 +2188,106 @@ class TestIdentifierShapes(unittest.TestCase):
         )  # ISBN-10 values filed under asin bind (the pre-2001 ASINs)
         self.assertFalse(screen_duplicate._bindable_asin(self._JUNK))
         self.assertFalse(screen_duplicate._bindable_asin("urn:uuid:x"))
+
+
+class TestIsbnNotationAndAuthorTokens(unittest.TestCase):
+    """Issue #33's comparison forms: a 10-form and its 978-prefixed
+    13-form are ONE edition, and a middle initial does not split one
+    author in two."""
+
+    def test_isbn13_form_converts_and_passes_through(self):
+        self.assertEqual(screen_duplicate._isbn13_form("0195019199"), "9780195019193")
+        self.assertEqual(
+            screen_duplicate._isbn13_form("9780195019193"), "9780195019193"
+        )
+        self.assertEqual(
+            screen_duplicate._isbn13_form("978-0-14-044568-8"), "9780140445688"
+        )
+        # An X check digit converts (123456789X is a valid ISBN-10).
+        self.assertEqual(screen_duplicate._isbn13_form("123456789X"), "9781234567897")
+        self.assertIsNone(screen_duplicate._isbn13_form(""))
+
+    def test_isbn13_form_refuses_unshaped_values(self):
+        # The junk URL strips to a non-10/13 digit string and binds
+        # nothing; a too-short digit string neither.
+        self.assertIsNone(
+            screen_duplicate._isbn13_form(
+                "http://www.hxa7241.org/articles/content/epup-guide"
+            )
+        )
+        self.assertIsNone(screen_duplicate._isbn13_form("12345"))
+
+    def test_cross_form_both_directions_and_the_979_dead_end(self):
+        self.assertEqual(
+            screen_duplicate._isbn_cross_form("9780195019193"), "0195019199"
+        )
+        self.assertEqual(
+            screen_duplicate._isbn_cross_form("0195019199"), "9780195019193"
+        )
+        # An X check digit survives the 13 -> 10 recomputation.
+        self.assertEqual(
+            screen_duplicate._isbn_cross_form("9781234567897"), "123456789X"
+        )
+        # A 979-prefixed 13-form never carried a 10-form.
+        self.assertIsNone(screen_duplicate._isbn_cross_form("9791234567890"))
+
+    def test_pair_basis_is_order_free_and_quotes_both_spellings(self):
+        want = "isbn 9780195019193, 13-form of 0195019199"
+        self.assertEqual(
+            screen_duplicate._isbn_pair_basis("9780195019193", "0195019199"), want
+        )
+        self.assertEqual(
+            screen_duplicate._isbn_pair_basis("0195019199", "9780195019193"), want
+        )
+
+    def test_author_tokens_drop_middle_initials_only(self):
+        self.assertEqual(
+            screen_duplicate._author_tokens("Christopher W. Alexander"),
+            screen_duplicate._author_tokens("Christopher Alexander"),
+        )
+        self.assertEqual(
+            screen_duplicate._author_tokens("Ursula K. Le Guin"),
+            screen_duplicate._author_tokens("Ursula Le Guin"),
+        )
+        # Sort form meets display form (order-free tokens).
+        self.assertEqual(
+            screen_duplicate._author_tokens("Alexander, Christopher W."),
+            screen_duplicate._author_tokens("Christopher W. Alexander"),
+        )
+        # Multi-letter tokens all compare: different names stay different.
+        self.assertNotEqual(
+            screen_duplicate._author_tokens("Karl Marx"),
+            screen_duplicate._author_tokens("Groucho Marx"),
+        )
+        self.assertNotEqual(
+            screen_duplicate._author_tokens("Christopher Alexander"),
+            screen_duplicate._author_tokens("Christopher Alexandra"),
+        )
+
+    def test_same_author_tokens_requires_a_real_token(self):
+        self.assertTrue(
+            screen_duplicate._same_author_tokens(
+                "Christopher Alexander", "Christopher W. Alexander"
+            )
+        )
+        self.assertFalse(screen_duplicate._same_author_tokens("", "Karl Marx"))
+        # Identical folded names always match, whatever the token form
+        # can see: initials-only names, and names with no ASCII tokens
+        # at all (3.70.0's string equality covered both; the token form
+        # must not take it away).
+        self.assertTrue(screen_duplicate._same_author_tokens("J. R. R.", "J. R. R."))
+        self.assertTrue(screen_duplicate._same_author_tokens("村上春樹", "村上春樹"))
+        self.assertFalse(screen_duplicate._same_author_tokens("村上春樹", "Karl Marx"))
+
+    def test_author_surname_needs_a_word(self):
+        # The relaxed supply's search term must be a real word: a
+        # one-letter token would substring-scan half the library, and a
+        # non-Latin name has no token at all. Both fall back to the
+        # exact search at the call site.
+        self.assertEqual(screen_duplicate._author_surname("C. Alexander"), "alexander")
+        self.assertEqual(screen_duplicate._author_surname("Stroustrup, B."), "")
+        self.assertEqual(screen_duplicate._author_surname("村上春樹"), "")
+        self.assertEqual(screen_duplicate._author_surname("J. R. R."), "")
 
 
 class TestStampPdfGuards(unittest.TestCase):

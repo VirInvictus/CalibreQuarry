@@ -863,7 +863,9 @@ records every target exactly once.
 
 The one-pass duplicate screen the acquisition pathway uses: each file's
 embedded metadata is read with Calibre's `ebook-meta`, matched against the
-library (exact ISBN first, then classified normalized title + first author)
+library (exact ISBN first, with the 10-form and its 13-form read as the
+one edition they are, then classified normalized title + first author,
+where a middle initial on one side no longer splits one author in two)
 and within the batch, and printed as comparison columns. Beyond true
 duplicates, the classifier surfaces two advisory classes it never auto-
 refuses: differing declared volume annotations as one multi-volume set
