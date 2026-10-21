@@ -1,5 +1,45 @@
 # CalibreQuarry Patch Notes
 
+# 3.70.0 (2026-10-21)
+
+### The staging-dir batch: phase 1's inventory walk skips a populated completed/ under the vetted root (issue #32)
+
+A post-staging vetting pass over `~/Downloads` inventoried the 184 files
+already staged into `~/Downloads/completed/` alongside the 8 new
+re-source arrivals and minted a manifest whose approved list double-
+covers the signed completed/ mint; signing it would have re-imported
+184 books in one phase-2 run with nothing catching it (the duplicate
+screen reads the library, which does not have them yet). The
+import-agent handoff believed the walk already skipped the staging
+dir; it never did. `_inventory` has recursed everything except
+`/_quarantine` and `/_stamp_backups` since Phase 17, and the handoff's
+observation described an empty staging dir, not code.
+
+- **`_inventory` skips `completed/` under the vetted root, consistent
+  with `_quarantine`.** The staging contract says `completed/` holds
+  exactly what phase 2 should import, so staged files are the signed
+  mint's job, never the vetting pass's; a re-source round now mints its
+  vetting manifest over the top-level arrivals alone, and the staged
+  set stays owned by the completed/ manifest it was signed under. The
+  skip matches the name anywhere under the root (a nested `completed/`
+  is staging-shaped too), and the vetted root itself is exempt: the
+  documented step-5c invocation, `cquarry run phase1
+  ~/Downloads/completed`, still inventories the staging tree it was
+  pointed at, trailing slash included. The skip is silent, like the
+  `_quarantine` skip.
+- **The other phase-1 scans are unchanged by design.** `_pdf_battery`
+  and the duplicate screen take the inventory list, so they shrink with
+  it; audit_drm's directory scan still walks the whole tree, but its
+  verdicts are consumed only per inventoried entry, so rows for staged
+  files are inert. Nothing about how a manifest over the staging root
+  itself is built changes.
+
+Pinned by four tests in TestRunPhase1: the populated staging dir is not
+inventoried, its subtrees neither, the staging root itself still is
+(with and without a trailing slash), and an end-to-end phase-1 run over
+a tree with staged files mints an approved list holding the top-level
+arrival only.
+
 # 3.69.0 (2026-10-17)
 
 ### The identifier residual batch: the reconcile diff collapses identifier whitespace on both sides, and the package-slot rewrite no longer skips uuid-typed slots (issue #31)

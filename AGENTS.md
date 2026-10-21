@@ -5,6 +5,26 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.70.0 onward, the staging-dir batch, issue #32)
+
+- **`_inventory` skips the staging directory name `completed/` under the
+  vetted root, and the root itself is exempt.** Staged files are the
+  signed completed/ mint's job (step 5c mints over
+  `~/Downloads/completed`), never the vetting pass's: the skip uses the
+  same slash-anchored substring semantics as the `_quarantine`/
+  `_stamp_backups` skips (`"/completed" in rel`, so a nested
+  `completed/` is staging-shaped too) but only below the root, judged
+  on abspath-normalized paths, so `cquarry run phase1
+  ~/Downloads/completed` and its trailing-slash form still inventory
+  the staging tree itself. The skip is silent (the `_quarantine`
+  precedent). The inventory's consumers shrink with it (`_pdf_battery`,
+  the duplicate screen); audit_drm's directory scan still walks the
+  whole tree, and its extra verdict rows are inert because verdicts are
+  consumed only per inventoried entry. A vetting manifest minted after
+  staging now covers the top-level arrivals alone; the union of staged
+  + new remains the completed/ mint's shape, minted over the staging
+  root after the winners are staged.
+
 ## Programmer-facing contract notes (3.69.0 onward, the identifier-residual batch, issue #31)
 
 - **Identifier values compare whitespace-collapsed on BOTH sides of the

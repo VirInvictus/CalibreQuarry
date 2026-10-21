@@ -131,9 +131,15 @@ def _now_stamp() -> str:
 
 def _inventory(downloads_dir: str) -> list[str]:
     files = []
+    root = os.path.abspath(downloads_dir).replace(os.sep, "/")
     for dirpath, _dirnames, filenames in os.walk(downloads_dir):
-        rel = dirpath.replace(os.sep, "/")
+        rel = os.path.abspath(dirpath).replace(os.sep, "/")
         if "/_quarantine" in rel or "/_stamp_backups" in rel:
+            continue
+        # completed/ is the staging dir: its files belong to the signed
+        # mint over completed/ itself, never this vetting pass (issue #32;
+        # the root is exempt so that mint still inventories its own tree).
+        if rel != root and "/completed" in rel:
             continue
         for name in sorted(filenames):
             if os.path.splitext(name)[1].lower() in _EBOOK_EXTS:

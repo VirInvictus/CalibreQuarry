@@ -833,6 +833,57 @@ class TestRunPhase1(RunCase):
         live = self._make_file("real_book.epub")
         self.assertEqual(_inventory(self.downloads), [live])
 
+    def test_inventory_skips_populated_staging_dir(self):
+        # Issue #32: a vetting pass over ~/Downloads after staging must not
+        # re-inventory the files a signed completed/ mint already covers;
+        # the union manifest double-imports in phase 2.
+        completed = os.path.join(self.downloads, "completed")
+        os.makedirs(completed)
+        with open(os.path.join(completed, "staged.epub"), "wb") as f:
+            f.write(b"STAGED")
+        live = self._make_file("re-source.epub")
+        self.assertEqual(_inventory(self.downloads), [live])
+
+    def test_inventory_skips_staging_subtrees(self):
+        completed = os.path.join(self.downloads, "completed")
+        os.makedirs(os.path.join(completed, "sub"))
+        with open(os.path.join(completed, "staged.epub"), "wb") as f:
+            f.write(b"STAGED")
+        with open(os.path.join(completed, "sub", "nested.epub"), "wb") as f:
+            f.write(b"NESTED")
+        live = self._make_file("re-source.epub")
+        self.assertEqual(_inventory(self.downloads), [live])
+
+    def test_inventory_over_a_staging_root_still_inventories_it(self):
+        # Step 5c mints over completed/ itself; the vetted root is never
+        # its own staging skip, trailing slash included (abspath rounding).
+        completed = os.path.join(self.downloads, "completed")
+        os.makedirs(completed)
+        staged = os.path.join(completed, "staged.epub")
+        with open(staged, "wb") as f:
+            f.write(b"STAGED")
+        self.assertEqual(_inventory(completed), [staged])
+        self.assertEqual(_inventory(completed + os.sep), [staged])
+
+    def test_manifest_after_staging_covers_top_level_only(self):
+        completed = os.path.join(self.downloads, "completed")
+        os.makedirs(completed)
+        with open(os.path.join(completed, "staged.epub"), "wb") as f:
+            f.write(b"STAGED")
+        live = self._make_file("new_arrival.epub")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch("cquarry_cli.run._drm_verdicts", return_value={}),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path, quiet=True)
+        self.assertEqual(rc, 0)
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertEqual(man["approved_for_import"], [live])
+
     def test_stamp_backups_live_outside_the_tree(self):
         seen = {}
         self._make_file("Ann Leckie - Fifth Head of Data.epub")
