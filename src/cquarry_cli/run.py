@@ -45,6 +45,7 @@ from typing import Any
 
 from cquarry_cli import manifest
 from cquarry_cli.backups import make_backup
+from cquarry_cli.coverfind import declared_epub_cover
 from cquarry_cli.manifest import DEFAULT_AUDIENCE
 
 _PGREP_TIMEOUT = 15
@@ -1277,10 +1278,22 @@ def run_phase2(
                         )
                         continue
                     stamps = entry["stamps"] or {}
+                    # The GUI add door catalogues a declared EPUB cover on
+                    # import; the verb door owns the same extraction now
+                    # (issue #34). A file with no declared cover imports
+                    # uncovered exactly as before (has_cover=0; the library
+                    # linter's EVERY_BOOK_COVER check is the surfacing
+                    # mechanism), and the extractor never raises.
+                    cover = (
+                        declared_epub_cover(path) if entry["format"] == "EPUB" else None
+                    )
+                    if cover is not None:
+                        entry["import"]["fixes"].append("declared EPUB cover applied")
                     book_id = wdb.add_book(
                         stamps.get("title") or "Unknown",
                         stamps.get("authors") or [],
                         formats=[path],
+                        cover=cover,
                         identifiers=(
                             {"isbn": stamps["isbn"]} if stamps.get("isbn") else None
                         ),

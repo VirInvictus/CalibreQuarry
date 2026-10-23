@@ -5,6 +5,43 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.72.0 onward, the cover-import batch, issue #34)
+
+- **`run phase2` extracts the source EPUB's declared cover and passes
+  it to `add_book` in the same batch.** The extractor is
+  `declared_epub_cover(path)` in `src/cquarry_cli/coverfind.py` (the
+  epubdates.py sibling), tried in the issue's preference order: the
+  EPUB2 declaration (`<meta name="cover" content="id">` resolved
+  through the OPF manifest item that id names), then the EPUB3
+  declaration (the manifest item whose space-separated `properties`
+  carry `cover-image`), then the largest archive entry whose basename
+  contains "cover" (case-insensitive) and whose extension is
+  .jpg/.jpeg/.png. Preference is TIER-ordered, never size-ordered
+  across tiers: a resolving declaration beats any named-cover image at
+  any size; only the fallback tier compares sizes, and its name gate is
+  what keeps a distributor logo (never cover-named) from being
+  catalogued as the art (the issue's observed wrong-art trap). The
+  fallback scans archive NAMES, not the OPF manifest, so it also finds
+  covers the OPF never listed. The wiring gates on the entry's format:
+  EPUB only, and a mocked seam test pins that non-EPUB imports never
+  open the extractor.
+- **The extraction is fail-open by contract, never a refusal.** Every
+  candidate must resolve to real archive bytes AND sniff as JPEG/PNG
+  (`cquarry.helpers.sniff_image_format`, the same gate `add_book`
+  applies sniff-or-raise); a declared SVG, a declared path absent from
+  the archive, a corrupt zip, a missing rootfile, or a malformed OPF
+  falls through to the next tier or returns None, and a file with no
+  usable cover anywhere imports uncovered EXACTLY as before
+  (has_cover falsy in the DB; the library linter's EVERY_BOOK_COVER
+  check is the surfacing mechanism, per the issue). Hrefs resolve
+  against the OPF's directory inside the zip, percent-decoded,
+  fragment-stripped. The manifest shape is unchanged: a cover that
+  lands appends `declared EPUB cover applied` to the entry's existing
+  `import.fixes` list; an absent cover records nothing (byte-identical
+  to 3.71.0's manifest). Fixture note pinned by tests: `add_book`
+  inserts without the has_cover column and the test schema carries no
+  DEFAULT 0, so the uncovered assertion is falsy (NULL), not literal 0.
+
 ## Programmer-facing contract notes (3.71.0 onward, the notation-and-initials batch, issue #33)
 
 - **ISBNs compare through their 13-form, and the conversion is

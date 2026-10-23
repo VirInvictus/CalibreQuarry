@@ -1,5 +1,50 @@
 # CalibreQuarry Patch Notes
 
+# 3.72.0 (2026-10-22)
+
+### The cover-import batch: `run phase2` extracts the EPUB's own declared cover at import, so verb-door imports land `has_cover=1` like the GUI door's (issue #34)
+
+The 2026-10-22 noir batch was the first fully verb-run phase 2, and
+every import landed `has_cover = 0` on the linter's EVERY_BOOK_COVER
+check even though 7 of the 8 source EPUBs carry a declared cover
+(EPUB2 `<meta name="cover">` or EPUB3 `properties="cover-image"`) with
+the image present in the archive. The GUI import door auto-generates
+covers; the verb door never extracted one. The cquarry side was
+already correct (`add_book` accepts a cover, path or bytes); the gap
+was the verb's import path.
+
+- **`run phase2` now extracts the declared cover before `add_book` and
+  passes it in the same batch.** New module
+  `src/cquarry_cli/coverfind.py` (the epubdates.py sibling),
+  `declared_epub_cover(path)`: the EPUB2 declaration
+  (`<meta name="cover" content="id">` resolved through the OPF manifest
+  item that id names) first, the EPUB3 declaration (the manifest item
+  whose `properties` carry `cover-image`) second, and the largest
+  archive entry whose basename contains "cover" and whose extension is
+  a raster image last. Preference is TIER-ordered, never size-ordered
+  across tiers: a resolving declaration beats any named-cover image at
+  any size; only the fallback tier compares sizes. The name gate is the
+  point: one batch file declared a cover path absent from its archive
+  while unrelated internal images existed, and "largest image in the
+  archive" would have catalogued a distributor logo as the art.
+- **Every candidate must resolve to real archive bytes AND sniff as
+  JPEG/PNG** (`cquarry.helpers.sniff_image_format`, the same gate
+  `add_book` applies sniff-or-raise): a declared SVG, a declared path
+  not in the archive, or any content-level failure (not a zip, no
+  rootfile, malformed OPF) falls through to the next tier, and a file
+  with no usable cover anywhere imports uncovered EXACTLY as before -
+  `has_cover=0`, never a refusal. The library linter's EVERY_BOOK_COVER
+  check is the surfacing mechanism for genuinely cover-less files,
+  exactly as issue #34 specifies. Hrefs resolve against the OPF's
+  directory inside the zip, percent-decoded, fragment-stripped.
+  Non-EPUB imports never open the extractor (the gate is the entry's
+  format).
+- **The manifest shape is unchanged.** A cover that lands records
+  `declared EPUB cover applied` in the entry's existing `fixes` list;
+  an absent cover records nothing (byte-identical to 3.71.0's manifest).
+  The phase-3-import skill's 5.9 workaround paragraph (the per-batch
+  manual `set_cover` mini-batch) is retired in the same release.
+
 # 3.71.0 (2026-10-21)
 
 ### The notation-and-initials batch: the duplicate screen reads a 10-form and its 13-form as the ONE edition they are, and a middle initial no longer splits one author in two (issue #33)

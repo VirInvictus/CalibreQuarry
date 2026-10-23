@@ -10,6 +10,7 @@ which pins the two phase-1 seams to their instruments' REAL shapes (the
 that crashed on first real contact shipped green).
 """
 
+import glob
 import io
 import json
 import os
@@ -19,12 +20,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from cquarry_cli import manifest
 from cquarry_cli.backups import make_backup
 from cquarry_cli.cli import main
+from cquarry_cli.coverfind import declared_epub_cover
 from cquarry_cli.run import (
     _apply_opf,
     _run,
@@ -1873,6 +1876,214 @@ class TestApplyOpfWritesNoReaderCuratedFields(RunCase):
         self.assertEqual(ratings, [])
 
 
+# --- issue #34: the declared-cover extractor and its phase-2 wiring ----
+
+# Magic-byte image fixtures: both sniffs this chain depends on
+# (coverfind's tier gate and add_book's sniff-or-raise) read signatures
+# only, so no real encoder is needed.
+_JPEG = b"\xff\xd8\xff\xe0" + b"jpeg-payload" * 8
+_PNG = b"\x89PNG\r\n\x1a\n" + b"png-payload" * 8
+_SVG = b"<?xml version='1.0'?><svg xmlns='http://www.w3.org/2000/svg'/>"
+
+
+def _cover_opf(items: str, meta: str = "") -> str:
+    return (
+        "<?xml version='1.0'?><package version='2.0' "
+        "xmlns='http://www.idpf.org/2007/opf' "
+        "xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+        f"<metadata>{meta}<dc:title>T</dc:title>"
+        "<dc:creator>A</dc:creator></metadata>"
+        f"<manifest>{items}</manifest><spine/></package>"
+    )
+
+
+def _write_epub(path: str, opf: str, files: dict[str, bytes]) -> str:
+    """A fixture EPUB: mimetype, container.xml, the given OPF and payload
+    entries. The OPF always sits at OEBPS/content.opf, so every href in
+    the fixtures is exercised against a real OPF-relative resolution."""
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr(
+            "META-INF/container.xml",
+            "<?xml version='1.0'?><container version='1.0' "
+            "xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>"
+            "<rootfiles><rootfile full-path='OEBPS/content.opf' "
+            "media-type='application/oebps-package+xml'/></rootfiles>"
+            "</container>",
+        )
+        z.writestr("OEBPS/content.opf", opf)
+        for name, data in files.items():
+            z.writestr(name, data)
+    return path
+
+
+class TestDeclaredEpubCover(unittest.TestCase):
+    """The issue-#34 extractor tiers over fixture EPUBs. Preference is
+    TIER-ordered, never size-ordered across tiers: a resolving declared
+    cover wins over any named-cover image at any size. Only the
+    named-cover fallback tier compares sizes, and its name gate is what
+    keeps a distributor logo from being catalogued as the art."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="cquarry_cover_")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def _epub(self, opf: str, files: dict[str, bytes]) -> str:
+        return _write_epub(os.path.join(self.temp_dir, "book.epub"), opf, files)
+
+    def test_epub2_declaration_wins_over_everything(self):
+        # All three tiers present, EPUB2-declared smallest: the EPUB3
+        # declaration and the larger named cover must both lose.
+        opf = _cover_opf(
+            "<item id='my-cover' href='images/declared.jpg' "
+            "media-type='image/jpeg'/>"
+            "<item id='epub3-cover' href='images/epub3.png' "
+            "properties='cover-image' media-type='image/png'/>"
+            "<item id='thumb' href='images/cover.jpg' "
+            "media-type='image/jpeg'/>",
+            meta="<meta name='cover' content='my-cover'/>",
+        )
+        path = self._epub(
+            opf,
+            {
+                "OEBPS/images/declared.jpg": _JPEG,
+                "OEBPS/images/epub3.png": _PNG * 20,
+                "OEBPS/images/cover.jpg": _JPEG * 30,
+            },
+        )
+        self.assertEqual(declared_epub_cover(path), _JPEG)
+
+    def test_epub3_declaration_when_no_epub2_meta(self):
+        # properties is space-separated; cover-image among others counts.
+        # The bigger cover-named bystander loses to the declaration.
+        opf = _cover_opf(
+            "<item id='epub3-cover' href='images/epub3.png' "
+            "properties='cover-image thumbnail' media-type='image/png'/>"
+            "<item id='other' href='images/cover.jpg' "
+            "media-type='image/jpeg'/>"
+        )
+        path = self._epub(
+            opf,
+            {
+                "OEBPS/images/epub3.png": _PNG,
+                "OEBPS/images/cover.jpg": _JPEG * 20,
+            },
+        )
+        self.assertEqual(declared_epub_cover(path), _PNG)
+
+    def test_dangling_epub2_path_falls_through_to_epub3(self):
+        # The observed batch shape (issue #34 detail 1): the EPUB2 meta
+        # names an item whose file is not in the archive; the EPUB3
+        # declaration is real and must be the pick.
+        opf = _cover_opf(
+            "<item id='gone' href='images/gone.jpg' "
+            "media-type='image/jpeg'/>"
+            "<item id='epub3-cover' href='images/epub3.png' "
+            "properties='cover-image' media-type='image/png'/>",
+            meta="<meta name='cover' content='gone'/>",
+        )
+        path = self._epub(
+            opf,
+            {"OEBPS/images/epub3.png": _PNG, "OEBPS/images/other.jpg": _JPEG},
+        )
+        self.assertEqual(declared_epub_cover(path), _PNG)
+
+    def test_declared_svg_falls_through_to_named_cover(self):
+        # add_book refuses non-JPEG/PNG cover bytes sniff-or-raise, so a
+        # declared SVG is not an extraction result; the named-cover tier
+        # takes over, largest first (the thumbnail loses).
+        opf = _cover_opf(
+            "<item id='my-cover' href='images/cover.svg' media-type='image/svg+xml'/>",
+            meta="<meta name='cover' content='my-cover'/>",
+        )
+        path = self._epub(
+            opf,
+            {
+                "OEBPS/images/cover.svg": _SVG,
+                "OEBPS/images/cover.jpg": _JPEG * 10,
+                "OEBPS/images/cover_thumb.jpg": _JPEG,
+            },
+        )
+        self.assertEqual(declared_epub_cover(path), _JPEG * 10)
+
+    def test_largest_named_cover_beats_the_unnamed_logo(self):
+        # No declarations at all. The largest image in the archive is a
+        # distributor logo and must NOT be catalogued; the largest
+        # cover-NAMED image is the pick.
+        opf = _cover_opf(
+            "<item id='logo' href='images/logo.png' media-type='image/png'/>"
+        )
+        path = self._epub(
+            opf,
+            {
+                "OEBPS/images/logo.png": _PNG * 50,
+                "OEBPS/images/cover.png": _PNG,
+            },
+        )
+        self.assertEqual(declared_epub_cover(path), _PNG)
+
+    def test_fallback_takes_the_largest_not_the_first_named(self):
+        # Archive order puts the small named cover first; the fallback
+        # tier is size-ordered WITHIN itself, so the later, bigger cover
+        # wins (a first-named-raster implementation fails this).
+        opf = _cover_opf("")
+        path = self._epub(
+            opf,
+            {
+                "OEBPS/images/cover_thumb.jpg": _JPEG,
+                "OEBPS/images/text/cover.png": _PNG * 12,
+            },
+        )
+        self.assertEqual(declared_epub_cover(path), _PNG * 12)
+
+    def test_no_cover_anywhere_is_none(self):
+        opf = _cover_opf(
+            "<item id='logo' href='images/logo.png' media-type='image/png'/>"
+        )
+        path = self._epub(
+            opf, {"OEBPS/images/logo.png": _PNG, "OEBPS/chapter1.jpg": _JPEG}
+        )
+        self.assertIsNone(declared_epub_cover(path))
+
+    def test_percent_encoded_href_and_fragment_resolve(self):
+        opf = _cover_opf(
+            "<item id='my-cover' href='images/cover%20front.jpg#page=1' "
+            "media-type='image/jpeg'/>",
+            meta="<meta name='cover' content='my-cover'/>",
+        )
+        path = self._epub(opf, {"OEBPS/images/cover front.jpg": _JPEG})
+        self.assertEqual(declared_epub_cover(path), _JPEG)
+
+    def test_unreadable_sources_are_none(self):
+        plain = os.path.join(self.temp_dir, "plain.epub")
+        with open(plain, "wb") as f:
+            f.write(b"not a zip")
+        self.assertIsNone(declared_epub_cover(plain))
+        rootless = os.path.join(self.temp_dir, "rootless.epub")
+        with zipfile.ZipFile(rootless, "w") as z:
+            z.writestr(
+                "META-INF/container.xml",
+                "<?xml version='1.0'?><container version='1.0' "
+                "xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>"
+                "<rootfiles/></container>",
+            )
+        self.assertIsNone(declared_epub_cover(rootless))
+        malformed = os.path.join(self.temp_dir, "malformed.epub")
+        with zipfile.ZipFile(malformed, "w") as z:
+            z.writestr(
+                "META-INF/container.xml",
+                "<?xml version='1.0'?><container version='1.0' "
+                "xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>"
+                "<rootfiles><rootfile full-path='OEBPS/content.opf' "
+                "media-type='application/oebps-package+xml'/></rootfiles>"
+                "</container>",
+            )
+            z.writestr("OEBPS/content.opf", "<package><metadata>")
+        self.assertIsNone(declared_epub_cover(malformed))
+
+
 class TestRunPhase2(RunCase):
     def _manifest(self, *paths, signed=True):
         man = manifest.new_manifest(self.downloads)
@@ -2457,6 +2668,70 @@ class TestRunPhase2(RunCase):
         self.assertEqual(
             entry["import"]["clobber_watch"]["post_download"], ["Someone Else"]
         )
+
+    def test_import_applies_the_declared_epub_cover(self):
+        # The issue-#34 verb-side fix end to end: a fixture EPUB whose
+        # OPF declares an EPUB2 cover imports with has_cover=1 and the
+        # cover file in the book directory, and the manifest records
+        # what landed.
+        opf = _cover_opf(
+            "<item id='my-cover' href='cover.png' media-type='image/png'/>",
+            meta="<meta name='cover' content='my-cover'/>",
+        )
+        path = _write_epub(
+            os.path.join(self.downloads, "MaddAddam.epub"),
+            opf,
+            {"OEBPS/cover.png": _PNG},
+        )
+        man_path = self._manifest(path)
+        rc, _ = self._import(man_path)
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        try:
+            has_cover = con.execute("SELECT has_cover FROM books").fetchone()[0]
+        finally:
+            con.close()
+        self.assertEqual(has_cover, 1)
+        self.assertTrue(
+            glob.glob(os.path.join(self.library, "**", "cover.*"), recursive=True)
+        )
+        entry = manifest.load(man_path)["files"][0]
+        self.assertIn("declared EPUB cover applied", entry["import"]["fixes"])
+
+    def test_import_without_a_declared_cover_stays_uncovered(self):
+        # Detail 2: a genuinely cover-less EPUB imports exactly as
+        # before (has_cover=0, rc 0, no refusal; the library linter's
+        # EVERY_BOOK_COVER check is the surfacing mechanism).
+        opf = _cover_opf("<item id='ch1' href='chapter1.jpg' media-type='image/jpeg'/>")
+        path = _write_epub(
+            os.path.join(self.downloads, "Bare.epub"),
+            opf,
+            {"OEBPS/chapter1.jpg": _JPEG},
+        )
+        man_path = self._manifest(path)
+        rc, _ = self._import(man_path)
+        self.assertEqual(rc, 0)
+        con = sqlite3.connect(self.db_path)
+        try:
+            # Falsy, not literal 0: add_book inserts without the column
+            # and the fixture schema carries no DEFAULT 0 (a real library
+            # reads 0; the fixture reads NULL).
+            has_cover = con.execute("SELECT has_cover FROM books").fetchone()[0]
+        finally:
+            con.close()
+        self.assertFalse(has_cover)
+        entry = manifest.load(man_path)["files"][0]
+        self.assertNotIn("declared EPUB cover applied", entry["import"]["fixes"])
+
+    def test_non_epub_imports_never_extract_a_cover(self):
+        # The extraction gate is the entry's format; a PDF import never
+        # opens the extractor (and imports as before either way).
+        path = self._make_file("Manual.pdf")
+        man_path = self._manifest(path)
+        with mock.patch("cquarry_cli.run.declared_epub_cover") as extract:
+            rc, _ = self._import(man_path)
+        self.assertEqual(rc, 0)
+        extract.assert_not_called()
 
 
 class TestFetchMetadataSeam(unittest.TestCase):
