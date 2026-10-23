@@ -1,5 +1,42 @@
 # CalibreQuarry Patch Notes
 
+# 3.73.0 (2026-10-23)
+
+### The cquarry 1.28.1 floor: text-family custom-column writes preserve non-breaking spaces like the 9.17 GUI (issue #35)
+
+Calibre 9.16's whitespace collapse silently destroyed the three
+non-breaking spaces (U+00A0 NO-BREAK SPACE, U+2007 FIGURE SPACE, U+202F
+NARROW NO-BREAK SPACE) because Python's `str.split()` treats them as
+whitespace, and upstream 9.17 shipped `normalize_whitespace` to
+preserve them after users hit the corruption in text and comments
+columns. This frontend's write verbs pass values straight through
+`set_custom_column`/`add_custom_column_values` with no reduction of
+their own, so on the old floor a `--set-column` value carrying an NBSP
+stored corrupted bytes that disagreed with what the 9.17 GUI writes to
+the same column. The fix is the floor bump (the issue-#12 precedent):
+no frontend code changed.
+
+- **`pyproject.toml` now demands `cquarry>=1.28.1`, and the spec's
+  Dependencies line, 2.1 floor sentence, and per-bump list moved with
+  it.** Under the new floor every text-family custom-column write
+  normalizes through the NBSP-preserving collapse: interior
+  breaking-whitespace runs still collapse to one space and ends still
+  strip (a trailing NBSP strips away with them), but the three
+  non-breaking spaces survive interior runs in single-valued text,
+  series, enumeration, multi-valued items, and appends. Enumeration
+  values are still adapted before validation, so an NBSP spelling
+  matches no listed value and raises, same as upstream.
+- **One version-gated seam test pins the round-trip:**
+  `TestSetColumnNbspParity` (skipped below 1.28.1) drives `--set-column`
+  over a value carrying all three non-breaking spaces plus breaking
+  runs and asserts the exact stored form: spaces intact, runs
+  collapsed, ends stripped.
+- **Previously corrupted values stay as stored** (the fix changes new
+  writes only); if any exist in a library they are a one-off repair
+  lane, not a migration. Also in 1.28.1: `add_data_file` writes through
+  a temp file + atomic replace; this CLI does not call that verb, so it
+  does not drive the floor.
+
 # 3.72.0 (2026-10-22)
 
 ### The cover-import batch: `run phase2` extracts the EPUB's own declared cover at import, so verb-door imports land `has_cover=1` like the GUI door's (issue #34)

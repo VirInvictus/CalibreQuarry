@@ -5,6 +5,27 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.73.0 onward, the cquarry 1.28.1 floor, issue #35)
+
+- **The floor is `>=1.28.1`, and the text-family custom-column writes
+  preserve the three non-breaking spaces.** Calibre 9.17's
+  `normalize_whitespace` is what 1.28.1's adapters normalize through:
+  interior breaking-whitespace runs still collapse to one space and ends
+  still strip (a trailing NBSP strips away with them), but U+00A0,
+  U+2007, and U+202F survive interior runs in single-valued text,
+  series, enumeration, multi-valued items, and appends. This frontend
+  passes values verbatim (`--set-column` -> `set_custom_column`, the
+  set-mode appends -> `add_custom_column_values`), so the fix is the
+  floor bump alone (the issue-#12/#14 precedent): no frontend code
+  changed. `TestSetColumnNbspParity` (test_write_flow.py, skipped below
+  1.28.1) pins the round-trip through the CLI: an NBSP-bearing value
+  stores with the three spaces intact, runs collapsed, ends stripped.
+  Enumeration values are adapted before validation, so an NBSP spelling
+  still matches no listed value and raises. Previously corrupted rows
+  stay as stored; the fix changes new writes only. Also in 1.28.1,
+  `add_data_file` writes through a temp file + atomic replace; this CLI
+  has no consumer of that verb and it does not drive the floor.
+
 ## Programmer-facing contract notes (3.72.0 onward, the cover-import batch, issue #34)
 
 - **`run phase2` extracts the source EPUB's declared cover and passes

@@ -1,8 +1,8 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.72.0  
+**Version:** 3.73.0  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry` (>= 1.28.0), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.28.1), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -22,7 +22,9 @@ The CLI/TUI frontend is decoupled from the database and search logic:
 
 **`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package.
 
-The floor is `cquarry >= 1.28.0`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
+The floor is `cquarry >= 1.28.1`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
+
+- **1.28.1**: the text-family custom-column writes normalize through the NBSP-preserving whitespace collapse (upstream `normalize_whitespace`, Calibre 9.17's own adapter): interior breaking-whitespace runs still collapse to one space and ends still strip, but the three non-breaking spaces (U+00A0, U+2007, U+202F) that Python's `str.split()` destroys survive, so a `--set-column` value stores what the 9.17 GUI would store (issue #35; the version-gated seam test pins the round-trip). `add_data_file`'s atomic temp-file write is in the same release with no consumer here.
 
 - **1.28.0**: the entity case-change wave (cquarry issue #6): a name matching an existing entity row only by CASE is a real write now -- the shared row re-cases to the requested spelling (upstream `change_case`), every linked book is touched + queued for OPF resync, and the setter returns True (`set_publisher`, `set_series`, `set_authors`, `add_tag`, and the text-family custom-column writes; `add_tag` stops INSERTing duplicate case-variant rows and `remove_tag` gained a NOCASE fallback). A case-variant write consolidates, so the canonical-form linter's finding clears through the write itself; `--rename-entity` stays the tool for PRE-EXISTING case-duplicate rows, which cquarry no longer creates and deliberately does not heal (`TestSetPublisherCaseChangeParity` pins the seam).
 - **1.27.0**: the author display-form parity wave (the three issue-#5 follow-ups): `rename_entity` resolves author names through the display comma form of a piped-stored row (raw first, so stored-spelling addressing keeps working) -- `--rename-entity authors` is this frontend's one consumer of the wave; `set_authors`/`add_book` display-normalize pipe-bearing inputs; piped-stored authors lay out under display-form directories on their next write. The 1.26.3-era caveat that `set_author_sort_name` resolves stored spellings only is retired here.

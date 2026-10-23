@@ -836,5 +836,59 @@ class TestSetPublisherCaseChangeParity(_TempDBCase):
             con.close()
 
 
+@unittest.skipUnless(
+    _cquarry_at_least(1, 28, 1),
+    "needs cquarry >= 1.28.1 (the NBSP-preserving text adapters)",
+)
+class TestSetColumnNbspParity(_TempDBCase):
+    """Issue #35, the cquarry 1.28.1 adoption: Calibre 9.17 shipped
+    normalize_whitespace after users hit the corruption class where
+    Python's str.split() destroys the three non-breaking spaces (U+00A0,
+    U+2007, U+202F), and 1.28.1's text-family custom-column writers
+    normalize through it. Our --set-column values ride set_custom_column
+    verbatim, so below this floor an NBSP-bearing value stored corrupted
+    bytes that disagreed with what the 9.17 GUI writes. This pins the
+    round-trip at the seam -- the non-breaking spaces intact, interior
+    breaking runs still collapsed to one space, ends still stripped -- so
+    a library regression cannot come back through the floor."""
+
+    def setUp(self):
+        super().setUp()
+        con = sqlite3.connect(self.db_path)
+        # One single-valued text column: its registry row plus the
+        # value/link tables, appended here per the _fixtures.py rule.
+        con.execute(
+            "INSERT INTO custom_columns (id, label, name, datatype, "
+            "is_multiple, editable, display, normalized) "
+            "VALUES (1, 'notes', 'Notes', 'text', 0, 1, NULL, 0)"
+        )
+        con.execute("CREATE TABLE custom_column_1 (id INTEGER PRIMARY KEY, value TEXT)")
+        con.execute(
+            "CREATE TABLE books_custom_column_1_link (id INTEGER PRIMARY KEY, "
+            "book INT, value INT, UNIQUE (book, value))"
+        )
+        con.commit()
+        con.close()
+
+    def test_nbsp_bearing_value_stores_with_the_spaces_intact(self):
+        value = "  Poems\u00a0of\u2007W.\u202fB.  Yeats\u00a0  "
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--set-column", "1", "notes", value, "--db", self.db_path])
+        self.assertEqual(rc, 0, out.getvalue() + err.getvalue())
+        con = sqlite3.connect(self.db_path)
+        try:
+            stored = con.execute(
+                "SELECT c.value FROM books_custom_column_1_link l "
+                "JOIN custom_column_1 c ON c.id = l.value WHERE l.book = 1"
+            ).fetchone()[0]
+        finally:
+            con.close()
+        # The three non-breaking spaces survive; the breaking runs
+        # (leading double space, interior double space, trailing
+        # NBSP+space) still collapse/strip.
+        self.assertEqual(stored, "Poems\u00a0of\u2007W.\u202fB. Yeats")
+
+
 if __name__ == "__main__":
     unittest.main()
