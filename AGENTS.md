@@ -5,6 +5,57 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.74.0 onward, the LoC-fallback batch, issue #36)
+
+- **The work-level fallback queries a title fragment and filters records
+  by author surname client-side.** `title_fragment()` (cut at the first
+  colon, 45-char cap on a word boundary; an empty result falls back to
+  the full title) feeds a single-clause `work_query()`, sent with
+  `max_records=20`; `parse_mods_for_author()` donates classifications
+  only from records whose `mods:name` headings match the book's author
+  via `author_matches()` (heading == folded name, == a comma-form
+  stored name's pre-comma heading, or a whole-token tail of the folded
+  name, so "Le Guin, Ursula K." answers for "Ursula K. Le Guin").
+  `author_surname()` is the cache-key half (pre-comma heading of a
+  comma form, else last token; "" for empty/`Unknown`), and a usable
+  surname GATES the query: unusable-author books skip the fallback
+  entirely (the filter could never certify a record). Same-surname
+  different-forename collisions pass by design; the work-level caveat
+  is the boundary. Cache consequence: `work:` keys are now
+  fragment|surname, so pre-3.74 work keys are inert dead weight, and
+  two books sharing a fragment never share a verdict (the surname half
+  separates them).
+- **Only a well-formed `searchRetrieveResponse` can cache.** The shared
+  `_parse_srw()` gate raises `SRUResponseError` (a `SRUDiagnostic`
+  subclass) for an unparseable body or a wrong root element, and
+  `fetch_codes()` retries that class like a network error to None: a
+  throttle or proxy page can never fall through the parser as `{}` and
+  cache as a permanent miss (the issue's 5,835-poisoned-entries
+  mechanism). Genuine zero-hits are well-formed SRU with no records
+  and stay cacheable misses. `SRUResponseError` is never
+  strict-fatal (the query form cannot produce a non-SRU body; the
+  oversize refusal moved to it), so the first-query abort fires only
+  on real diagnostics.
+- **`--refresh` reads past the response cache.** `read_cache` is `{}`
+  under `--refresh` (both ISBN and work lookups) while cache WRITES
+  still land on the loaded dict, so a refresh overwrites the poisoned
+  entries and the accumulated cache file survives the run (it is NOT
+  rewritten to just that run's entries). The DB-side `_needs_query`
+  gate stays separate: `--refresh` still widens the target set.
+- **The misses worklist appends timestamped sections and keeps the
+  newest 8.** `write_misses_worklist(results, path, mode)` appends a
+  `# --- run <UTC stamp> (<mode>): N miss(es) of M queried` section
+  (`# ids:` comment lines, 16 ids per line, then the
+  `id<TAB>isbn<TAB>ddc<TAB>title` rows); pre-marker content from the
+  single-run era counts as one legacy section until pruned;
+  `MISSES_RUN_SECTIONS_KEPT` bounds the file. Zero misses still
+  touches nothing (the return-0/no-file contract). main() passes the
+  mode and prints "appended". The append heals a missing trailing
+  newline on prior content (a hand-edited file; an unhealed marker
+  glues onto the last line and fuses every later read into ONE legacy
+  section) and the legacy read carries errors="replace" (a stray byte
+  must never kill a finished --apply pass at its tail).
+
 ## Programmer-facing contract notes (3.73.0 onward, the cquarry 1.28.1 floor, issue #35)
 
 - **The floor is `>=1.28.1`, and the text-family custom-column writes

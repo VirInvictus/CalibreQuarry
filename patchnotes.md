@@ -1,5 +1,78 @@
 # CalibreQuarry Patch Notes
 
+# 3.74.0 (2026-10-23)
+
+### fetch_library_codes: fragment work queries, throttled responses never cached, --refresh bypasses the cache, append-only misses worklist (issue #36)
+
+Four defects from the 2026-10-23 LCC-residue session, one shared
+symptom: the fallback's hit rate was 0% in four runs while the same
+queries worked by hand, and the residue's own worklist kept
+disappearing.
+
+- **The work-level fallback queries a title FRAGMENT, and the author
+  filters client-side.** `work_query()` built `bath.title=` +
+  `bath.author=` from the DB's full title, and LoC's title index
+  matches the whole indexed string, so a subtitle killed the match
+  (`One Two Three . . . Infinity: Facts and Speculations of Science`
+  returned nothing; the pre-colon base returned five records carrying
+  LCC Q162 .G23). lx2 also answers `bath.author`/`bath.name` clauses
+  intermittently with the unsupported-attribute diagnostic (1/16,
+  Bib-1 114) while accepting the same forms at other times. The
+  fallback now queries `title_fragment()` (cut at the first colon,
+  capped at 45 characters on a word boundary) with `maximumRecords`
+  raised to 20, and `parse_mods_for_author()` donates classifications
+  only from records whose name headings match the book's author
+  (`author_matches()`: heading equality, a comma-form stored name's
+  own heading, or the heading as a whole-token tail of the stored
+  name). A usable surname gates the query: an empty or `Unknown`
+  author skips the fallback entirely, because the filter could never
+  certify a record. Same-surname different-forename collisions pass
+  by design; the work-level caveat in the report is the honest
+  boundary of a surname filter.
+- **A response that is not SRU is a failure, never a cached miss.**
+  `parse_mods()` used to swallow an unparseable body as `{}`, so a
+  throttle page cached a permanent miss (one throttled evening
+  poisoned the cache with hundreds of `{}` entries out of 9,958,
+  indistinguishable from genuine misses). The shared `_parse_srw()`
+  gate now refuses any body that does not parse as XML or whose root
+  is not `searchRetrieveResponse` (`SRUResponseError`, a
+  `SRUDiagnostic` subclass), and `fetch_codes()` retries those like
+  network errors and returns None, so nothing is cached from them and
+  each counts toward the consecutive-failure abort. A genuine zero-hit
+  is well-formed SRU carrying no records and stays a cacheable miss.
+  `SRUResponseError` is never strict-fatal: the query form cannot
+  produce a non-SRU body, so the first-query abort does not apply
+  (the oversize-response refusal moved to it for the same reason).
+- **`--refresh` bypasses the response cache.** It used to gate only
+  the DB-side already-has-lcc filter, so a refresh run still read
+  poisoned `{}` entries back as answers. Refresh now reads past the
+  cache entirely (both ISBN and work lookups) while cache WRITES
+  still land, so the accumulated cache file survives the run instead
+  of being rewritten to just that run's entries. The flag's help says
+  so; `--no-cache` remains the leave-the-cache-alone variant. Old
+  `work:` cache keys (full title + author) are inert under the new
+  fragment+surname keys and stay as harmless dead weight.
+- **The misses worklist is append-per-run, never truncate.** Any
+  later run, however small, used to clobber the accumulated list,
+  which is how the October residue grew invisible. Each run appends a
+  `# --- run <UTC stamp> (<mode>): N miss(es) of M queried` section
+  carrying the id list and the usual `id<TAB>isbn<TAB>ddc<TAB>title`
+  rows, and the file keeps the most recent
+  `MISSES_RUN_SECTIONS_KEPT` (8) sections; pre-marker content from
+  the single-run era counts as one legacy section until pruned. A
+  hand-edited file is safe: the append heals a missing trailing
+  newline (otherwise the next marker glues onto the last line and
+  fuses the sections permanently) and the legacy read decodes with
+  `errors="replace"`, so a stray byte never kills a finished pass at
+  its tail.
+
+Test evidence: the new `TestWorkFragmentAndAuthorFilter`,
+`TestSruResponseGate`, `TestParseModsForAuthor`,
+`TestRefreshBypassesResponseCache`, and `TestMissesWorklistSections`
+pin every half of all four fixes at unit and flow level; the existing
+fallback flow tests pass unchanged (the mocked seam absorbs the new
+`max_records`/`author` kwargs).
+
 # 3.73.0 (2026-10-23)
 
 ### The cquarry 1.28.1 floor: text-family custom-column writes preserve non-breaking spaces like the 9.17 GUI (issue #35)

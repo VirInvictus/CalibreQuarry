@@ -681,23 +681,36 @@ class TestFetchMissesDefault(unittest.TestCase):
 
 
 class TestFetchWorkFallback(unittest.TestCase):
-    """The title/author SRU fallback (--sru-fallback): the query form the
-    September 2026 hand pass used to recover 15 of 17 ISBN misses, a cache
-    key that cannot collide with an ISBN entry, and targets that carry the
-    author the fallback query needs."""
+    """The title-fragment SRU fallback (--sru-fallback): the query shape
+    issue #36 pinned (one pre-colon title fragment, no author clause, the
+    author filters client-side), a cache key that cannot collide with an
+    ISBN entry and carries the surname the records were filtered by, and
+    targets that carry the author the fallback filter needs."""
 
     def test_work_query_shape(self):
         self.assertEqual(
-            fetch_library_codes.work_query("Discourses", "Epictetus"),
-            'bath.title="Discourses" and bath.author="Epictetus"',
+            fetch_library_codes.work_query("Discourses"),
+            'bath.title="Discourses"',
+        )
+
+    def test_work_query_strips_quotes(self):
+        self.assertEqual(
+            fetch_library_codes.work_query('Say "Ah"'), 'bath.title="Say Ah"'
         )
 
     def test_work_cache_key_normalizes_and_never_collides_with_isbn(self):
         f = fetch_library_codes
-        key = f.work_cache_key("  The   Hobbit ", "J.R.R. Tolkien")
-        self.assertEqual(key, f.work_cache_key("The Hobbit", "j.r.r. tolkien"))
+        key = f.work_cache_key("  The   Hobbit ", "Tolkien")
+        self.assertEqual(key, f.work_cache_key("The Hobbit", "tolkien"))
         self.assertNotEqual(key, "9780261102214")
         self.assertTrue(key.startswith("work:"))
+
+    def test_work_cache_key_separates_authors_sharing_a_fragment(self):
+        f = fetch_library_codes
+        self.assertNotEqual(
+            f.work_cache_key("The Hobbit", "tolkien"),
+            f.work_cache_key("The Hobbit", "gaiman"),
+        )
 
     def test_load_targets_carries_authors_in_link_order(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4304,7 +4317,7 @@ class TestFetchWorkFallbackFlow(unittest.TestCase):
             rc, out, cached, _ = self._run(tmp, fetch_results=[{}, {"lcc": "B563"}])
         self.assertEqual(rc, 0, out)
         self.assertIn("(work-level)", out)
-        self.assertIn("title/author fallback", out)
+        self.assertIn("title-fragment fallback", out)
         work_keys = [k for k in cached if k.startswith("work:")]
         self.assertEqual(len(work_keys), 1)
         self.assertEqual(cached[work_keys[0]]["lcc"], "B563")
@@ -4343,6 +4356,384 @@ class TestFetchWorkFallbackFlow(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertNotIn("ERR", out)
         self.assertTrue(misses)
+
+
+class TestWorkFragmentAndAuthorFilter(unittest.TestCase):
+    """Issue #36, query shape: the fallback queries a pre-colon fragment of
+    the title (the full DB title dies on its subtitle in LoC's title index)
+    and filters records by the stored author's surname client-side (the
+    bath.author clause intermittently draws the unsupported-attribute
+    diagnostic, so no author clause is sent at all)."""
+
+    def test_fragment_cuts_at_the_first_colon(self):
+        f = fetch_library_codes
+        self.assertEqual(
+            f.title_fragment(
+                "One Two Three . . . Infinity: Facts and Speculations of Science"
+            ),
+            "One Two Three . . . Infinity",
+        )
+
+    def test_fragment_caps_on_a_word_boundary(self):
+        f = fetch_library_codes
+        self.assertEqual(
+            f.title_fragment("A Very Long Title With Many Words Here", cap=30),
+            "A Very Long Title With Many",
+        )
+        self.assertLessEqual(
+            len(f.title_fragment("Supercalifragilistic" + "expialidocious" * 4)),
+            45,
+        )
+
+    def test_fragment_without_a_colon_is_the_title(self):
+        self.assertEqual(fetch_library_codes.title_fragment("Discourses"), "Discourses")
+
+    def test_surname_key_forms(self):
+        f = fetch_library_codes
+        self.assertEqual(f.author_surname("George Gamow"), "gamow")
+        self.assertEqual(f.author_surname("Gamow, George"), "gamow")
+        self.assertEqual(f.author_surname("Ursula K. Le Guin"), "guin")
+        self.assertEqual(f.author_surname("Le Guin, Ursula"), "le guin")
+        self.assertEqual(f.author_surname("Epictetus"), "epictetus")
+
+    def test_surname_key_is_empty_for_unusable_authors(self):
+        f = fetch_library_codes
+        self.assertEqual(f.author_surname("Unknown"), "")
+        self.assertEqual(f.author_surname("unknown"), "")
+        self.assertEqual(f.author_surname(""), "")
+        self.assertEqual(f.author_surname(None), "")
+
+    def test_author_matches_by_heading_equality_or_tail(self):
+        f = fetch_library_codes
+        self.assertTrue(f.author_matches(["Gamow, George, 1904-1968"], "George Gamow"))
+        self.assertTrue(f.author_matches(["Le Guin, Ursula K."], "Ursula K. Le Guin"))
+        self.assertTrue(f.author_matches(["Epictetus"], "Epictetus"))
+        self.assertTrue(f.author_matches(["Gaiman, Neil"], "Gaiman, Neil"))
+
+    def test_author_matches_reject_other_authors_and_unusable_names(self):
+        f = fetch_library_codes
+        self.assertFalse(f.author_matches(["Sagan, Carl"], "George Gamow"))
+        self.assertFalse(f.author_matches(["Gamow, George"], "Unknown"))
+        self.assertFalse(f.author_matches([], "George Gamow"))
+        self.assertFalse(f.author_matches(["Gamow, George"], None))
+
+
+class TestSruResponseGate(unittest.TestCase):
+    """Issue #36, cache poisoning: a body that is not an SRU records answer
+    (the throttle page, a proxy body, truncated XML) is a FAILED request,
+    never a miss. fetch_codes retries it like a network error and returns
+    None, so nothing is cached from it; a genuine zero-hit answer is
+    well-formed SRU carrying no records and stays a cacheable {}. The gate
+    is never strict-fatal: the query form cannot produce a non-SRU body."""
+
+    def test_unparseable_body_raises_sru_response_error(self):
+        with self.assertRaises(fetch_library_codes.SRUResponseError):
+            fetch_library_codes.parse_mods(b"<html><body>slow down</body></html>")
+
+    def test_wrong_root_raises_sru_response_error(self):
+        with self.assertRaises(fetch_library_codes.SRUResponseError):
+            fetch_library_codes.parse_mods(
+                b"<error><message>throttled</message></error>"
+            )
+
+    def test_sru_response_error_is_a_diagnostic_subclass(self):
+        self.assertTrue(
+            issubclass(
+                fetch_library_codes.SRUResponseError,
+                fetch_library_codes.SRUDiagnostic,
+            )
+        )
+
+    def test_genuine_zero_hit_still_parses_as_a_cacheable_miss(self):
+        raw = (
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            "<numberOfRecords>0</numberOfRecords></searchRetrieveResponse>"
+        ).encode()
+        self.assertEqual(fetch_library_codes.parse_mods(raw), {})
+
+    @staticmethod
+    def _response(raw: bytes):
+        resp = mock.MagicMock()
+        resp.__enter__.return_value = resp
+        resp.read.return_value = raw
+        return resp
+
+    def test_fetch_codes_retries_a_throttle_page_to_none(self):
+        f = fetch_library_codes
+        with (
+            mock.patch.object(
+                f.urllib.request,
+                "urlopen",
+                return_value=self._response(b"<html>429</html>"),
+            ) as urlopen,
+            mock.patch.object(f.time, "sleep"),
+        ):
+            self.assertIsNone(f.fetch_codes("bath.isbn=9780000000001", 5))
+        self.assertEqual(urlopen.call_count, 3, "every retry fired")
+
+    def test_strict_first_query_does_not_abort_on_a_throttle_page(self):
+        # The strict abort is for query-form diagnostics (the dead
+        # dc.identifier index answered that way every time); a non-SRU body
+        # cannot be the query's fault, so it retries out to None even at
+        # queried == 0.
+        f = fetch_library_codes
+        with (
+            mock.patch.object(
+                f.urllib.request, "urlopen", return_value=self._response(b"garbage")
+            ),
+            mock.patch.object(f.time, "sleep"),
+        ):
+            self.assertIsNone(f.fetch_codes("bath.isbn=x", 5, strict=True))
+
+    def test_fetch_codes_returns_empty_dict_on_a_genuine_zero_hit(self):
+        raw = (
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            "<numberOfRecords>0</numberOfRecords></searchRetrieveResponse>"
+        ).encode()
+        f = fetch_library_codes
+        with (
+            mock.patch.object(
+                f.urllib.request, "urlopen", return_value=self._response(raw)
+            ),
+            mock.patch.object(f.time, "sleep"),
+        ):
+            self.assertEqual(f.fetch_codes("bath.isbn=9780000000001", 5), {})
+
+
+class TestParseModsForAuthor(unittest.TestCase):
+    """Issue #36, parse half: a fragment query asks for 20 records back, and
+    only records whose name headings match the requesting book's author may
+    donate a classification. Unfiltered parse_mods keeps its
+    first-record-carrying-each contract (the ISBN path never passes the
+    author)."""
+
+    @staticmethod
+    def _mods_response(*record_bodies: str) -> bytes:
+        records = "".join(
+            "<record><recordData>"
+            '<mods:mods xmlns:mods="http://www.loc.gov/mods/v3">'
+            + body
+            + "</mods:mods></recordData></record>"
+            for body in record_bodies
+        )
+        return (
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            f"<records>{records}</records></searchRetrieveResponse>"
+        ).encode()
+
+    @staticmethod
+    def _record(name_parts: list[str], body: str = "") -> str:
+        parts = "".join(
+            f'<mods:name type="personal"><mods:namePart>{p}</mods:namePart></mods:name>'
+            for p in name_parts
+        )
+        return parts + body
+
+    _SAGAN = '<mods:classification authority="lcc">QB64</mods:classification>'
+    _GAMOW = '<mods:classification authority="lcc">QC773</mods:classification>'
+
+    def test_a_matching_record_donates_its_code(self):
+        raw = self._mods_response(
+            self._record(["Sagan, Carl"], self._SAGAN),
+            self._record(["Gamow, George, 1904-1968"], self._GAMOW),
+        )
+        self.assertEqual(
+            fetch_library_codes.parse_mods_for_author(raw, "George Gamow"),
+            {"lcc": "QC773"},
+        )
+
+    def test_no_matching_record_is_a_clean_miss(self):
+        raw = self._mods_response(self._record(["Sagan, Carl"], self._SAGAN))
+        self.assertEqual(
+            fetch_library_codes.parse_mods_for_author(raw, "George Gamow"), {}
+        )
+
+    def test_junk_code_on_a_matching_record_skips_to_a_later_one(self):
+        raw = self._mods_response(
+            self._record(
+                ["Gamow, George"],
+                '<mods:classification authority="lcc">MLCM 2024/43047 (B)</mods:classification>',
+            ),
+            self._record(["Gamow, George"], self._GAMOW),
+        )
+        self.assertEqual(
+            fetch_library_codes.parse_mods_for_author(raw, "George Gamow"),
+            {"lcc": "QC773"},
+        )
+
+    def test_unfiltered_parse_mods_takes_the_first_records_code(self):
+        # The control: parse_mods stays record-order-first, so the author
+        # gate exists only where the fallback asks for it.
+        raw = self._mods_response(
+            self._record(["Sagan, Carl"], self._SAGAN),
+            self._record(["Gamow, George"], self._GAMOW),
+        )
+        self.assertEqual(fetch_library_codes.parse_mods(raw), {"lcc": "QB64"})
+
+
+class TestRefreshBypassesResponseCache(unittest.TestCase):
+    """Issue #36, --refresh: its contract is re-query, so it reads past the
+    response cache entirely (a stored {}, poisoned or genuine, can no
+    longer answer) while cache writes still land and the rest of the cache
+    file survives the run. Without --refresh the stored miss still answers
+    (the resume contract)."""
+
+    def _run(self, tmp, *, fetch_results, seed_cache, extra=()):
+        f = fetch_library_codes
+        db = TestFetchWorkFallbackFlow()._library(tmp)
+        cache = str(pathlib.Path(tmp) / "cache.json")
+        misses = str(pathlib.Path(tmp) / "misses.txt")
+        if seed_cache is not None:
+            f.save_cache(cache, seed_cache)
+        argv = [
+            "fetch_library_codes.py",
+            "--db",
+            str(db),
+            "--cache",
+            cache,
+            "--misses-file",
+            misses,
+            *extra,
+        ]
+        out = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(f, "fetch_codes", side_effect=fetch_results) as fetch,
+            mock.patch.object(f.time, "sleep"),
+            contextlib.redirect_stdout(out),
+        ):
+            rc = f.main()
+        return rc, out.getvalue(), f.load_cache(cache), fetch
+
+    def test_refresh_requeries_a_cached_miss_and_overwrites_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, fetch = self._run(
+                tmp,
+                fetch_results=[{"lcc": "B563"}],
+                seed_cache={"9780465032001": {}},
+                extra=["--refresh"],
+            )
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(
+            fetch.call_count, 1, "--refresh must not answer from the cache"
+        )
+        self.assertIn("HIT", out)
+        self.assertEqual(cached["9780465032001"], {"lcc": "B563"})
+
+    def test_refresh_keeps_entries_outside_this_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, cached, _ = self._run(
+                tmp,
+                fetch_results=[{"lcc": "B563"}],
+                seed_cache={"9780000000009": {"lcc": "Z1"}, "9780465032001": {}},
+                extra=["--refresh"],
+            )
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(cached.get("9780000000009"), {"lcc": "Z1"})
+        self.assertIn("response cache bypassed", out)
+
+    def test_without_refresh_the_cached_miss_still_answers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, fetch = self._run(
+                tmp,
+                fetch_results=AssertionError("network used"),
+                seed_cache={"9780465032001": {}},
+            )
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(fetch.call_count, 0)
+
+
+class TestMissesWorklistSections(unittest.TestCase):
+    """Issue #36, the worklist: runs append timestamped sections instead of
+    truncating (any later run, however small, used to clobber the
+    accumulated list); the file keeps the most recent
+    MISSES_RUN_SECTIONS_KEPT sections."""
+
+    @staticmethod
+    def _results(*ids: int) -> list[dict]:
+        return [
+            {
+                "id": i,
+                "title": f"T{i}",
+                "isbn": f"978000000000{i % 10}",
+                "lcc": None,
+                "ddc": None,
+            }
+            for i in ids
+        ]
+
+    def test_two_runs_append_two_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(pathlib.Path(tmp) / "misses.txt")
+            fetch_library_codes.write_misses_worklist(self._results(1, 2), path)
+            fetch_library_codes.write_misses_worklist(
+                self._results(3), path, mode="APPLY"
+            )
+            text = pathlib.Path(path).read_text()
+        self.assertEqual(text.count("# --- run "), 2)
+        self.assertIn("(APPLY)", text)
+        self.assertIn("T3", text)
+        self.assertIn("T1", text, "the first run's section survives the second run")
+
+    def test_header_carries_counts_and_the_id_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(pathlib.Path(tmp) / "misses.txt")
+            fetch_library_codes.write_misses_worklist(self._results(7, 8, 9), path)
+            text = pathlib.Path(path).read_text()
+        self.assertIn("3 miss(es) of 3 queried", text)
+        self.assertIn("# ids: 7 8 9", text)
+        self.assertIn("7\t9780000000007\t\tT7", text)
+
+    def test_cap_keeps_the_most_recent_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(pathlib.Path(tmp) / "misses.txt")
+            for i in range(fetch_library_codes.MISSES_RUN_SECTIONS_KEPT + 2):
+                fetch_library_codes.write_misses_worklist(self._results(i + 1), path)
+            text = pathlib.Path(path).read_text()
+        self.assertEqual(
+            text.count("# --- run "),
+            fetch_library_codes.MISSES_RUN_SECTIONS_KEPT,
+        )
+        self.assertNotIn("T1\n", text, "the oldest section is pruned")
+        self.assertIn("T10", text)
+
+    def test_legacy_pre_marker_content_counts_as_one_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "misses.txt"
+            path.write_text(
+                "# fetch_library_codes misses: old format\n"
+                "# id\tisbn\tddc\ttitle\n"
+                "9\t978\t\tOld\n"
+            )
+            fetch_library_codes.write_misses_worklist(self._results(1), str(path))
+            text = path.read_text()
+        self.assertIn("old format", text, "legacy content is preserved until pruned")
+        self.assertEqual(text.count("# --- run "), 1)
+
+    def test_a_trailing_line_without_a_newline_does_not_fuse_sections(self):
+        # A hand-edited worklist can end mid-line; the marker must start a
+        # real line or every later run reads the file as ONE legacy section.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "misses.txt"
+            path.write_text("9\t978\t\tOld")
+            fetch_library_codes.write_misses_worklist(self._results(1), path)
+            fetch_library_codes.write_misses_worklist(self._results(2), str(path))
+            text = path.read_text()
+        self.assertIn("9\t978\t\tOld\n", text, "the dangling line is healed")
+        self.assertEqual(text.count("# --- run "), 2)
+
+    def test_a_non_utf8_worklist_is_read_with_replacement_not_a_crash(self):
+        # The read happens at the tail of a run (after the network pass,
+        # before an --apply's DB write); a stray byte in a hand-edited file
+        # must degrade the old content, never kill the pass.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "misses.txt"
+            path.write_bytes(b"9\t978\t\t\xffOld\n")
+            n = fetch_library_codes.write_misses_worklist(self._results(1), str(path))
+            text = path.read_text(errors="replace")
+        self.assertEqual(n, 1)
+        self.assertIn("# --- run ", text)
+        self.assertIn("Old", text)
 
 
 class TestValidatorCoreChecks(unittest.TestCase):

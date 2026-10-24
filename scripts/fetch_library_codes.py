@@ -22,7 +22,11 @@ resetting connections after roughly twenty queries, so the default pacing here
 is 2.0s with exponential backoff, and every result (including a miss) is cached
 to disk so an interrupted run resumes without re-querying. A full pass over a
 few thousand ISBNs is measured in hours, not minutes; that is the service's
-constraint, not this tool's.
+constraint, not this tool's. Only a well-formed SRU answer is cached: a genuine
+zero-hit is a miss, but a throttle page, a proxy body or any other non-answer
+retries and never caches (issue #36: one throttled evening once poisoned the
+cache with hundreds of {} permanent misses). `--refresh` is the escape hatch
+from a poisoned cache: it re-queries past the stored answers entirely.
 
 Coverage is partial by nature. LoC catalogues what it catalogues: academic,
 canonical and mainstream trade titles resolve well, while genre fiction, indie
@@ -30,14 +34,19 @@ and small-press releases, translations and TTRPG material often have no record.
 Run in the default dry-run mode first and read the per-branch hit rate before
 committing to a full pass.
 
-Title/author fallback (`--sru-fallback`): the ISBN index is the narrowest door
-into the catalogue. The September 2026 hand pass showed most "no LoC record"
-ISBN misses were nothing of the kind: 15 of 17 misses resolved at work level
-through a `bath.title=` + `bath.author=` query (only a German Analysis 3 and a
-Chinese Kodaira title have no LoC record at all). With the flag, a clean ISBN
-miss gets one paced title/author query; hits are tagged work-level in the
-report because the classification belongs to the matched work, not necessarily
-this edition, and deserve a glance before they are trusted.
+Title-fragment fallback (`--sru-fallback`): the ISBN index is the narrowest
+door into the catalogue. The September 2026 hand pass showed most "no LoC
+record" ISBN misses were nothing of the kind: 15 of 17 misses resolved at work
+level through a `bath.title=` query (only a German Analysis 3 and a Chinese
+Kodaira title have no LoC record at all). Issue #36 sharpened the query shape:
+the DB's FULL title kills the LoC title-index match (the subtitle is part of
+the indexed string), and `bath.author` clauses intermittently draw the
+unsupported-attribute diagnostic (1/16, Bib-1 114), so the fallback queries a
+pre-colon fragment of the title (capped at 45 characters) with up to 20
+records back and filters those records by the book's author surname
+client-side before trusting a classification. Hits are tagged work-level in
+the report because the classification belongs to the matched work, not
+necessarily this edition, and deserve a glance before they are trusted.
 
 Placeholder classifications are refused, not stored (issue #10): LoC
 ebook-preview records carry 050 control numbers (`MLCM 2024/43047 (B)`,
@@ -200,27 +209,140 @@ def isbn_query(isbn: str) -> str:
     return f"bath.isbn={isbn}"
 
 
-def work_query(title: str, author: str) -> str:
-    """The work-level CQL the September 2026 hand pass used to recover 15 of
-    17 ISBN misses: the title and first author against LoC's title/author
-    indexes. Double quotes are stripped, never escaped: they cannot appear
-    inside a quoted CQL string, and a malformed query burns three retries
-    plus a slot in the consecutive-failure abort counter."""
+def title_fragment(title: str, cap: int = 45) -> str:
+    """The distinctive-fragment query shape the library CLAUDE.md coverage
+    rule documents (issue #36): LoC's title index matches the whole indexed
+    string, so the DB's full title-with-subtitle returns nothing. Cut at the
+    first colon, then cap on a word boundary. A title that leaves nothing
+    (a leading colon) comes back empty; the caller falls back to the full
+    title, no worse than the old query."""
+    frag = (title or "").split(":", 1)[0].strip()
+    if len(frag) > cap:
+        frag = frag[:cap].rsplit(" ", 1)[0]
+    return frag
 
-    def strip(s: str) -> str:
-        return (s or "").replace('"', "")
 
-    return f'bath.title="{strip(title)}" and bath.author="{strip(author)}"'
+def author_surname(name: str) -> str:
+    """The compact surname key a work-level lookup caches under: the
+    pre-comma heading of a 'Last, First' stored form, else the last token of
+    a plain display name. Empty when unusable (no name, or the Calibre
+    'Unknown' placeholder): the caller skips the fallback then, because the
+    client-side filter could never certify a record for it."""
+    s = " ".join((name or "").split())
+    if not s or s.lower() == "unknown":
+        return ""
+    if "," in s:
+        return s.split(",", 1)[0].strip().lower()
+    return s.rsplit(" ", 1)[-1].lower()
 
 
-def work_cache_key(title: str, author: str) -> str:
-    """Cache key for a work-level lookup. Distinct from any ISBN key, and
-    normalized so the same title asked twice shares one entry."""
+def work_query(fragment: str) -> str:
+    """The work-level CQL, one title-fragment clause. The September 2026
+    hand pass paired the title with `bath.author=`; issue #36 retired both
+    halves of that shape: the full DB title dies on its subtitle in the
+    title index, and lx2 intermittently answers `bath.author`/`bath.name`
+    clauses with the unsupported-attribute diagnostic (1/16, Bib-1 114)
+    while accepting the same forms at other times, so the author filters
+    client-side instead (parse_mods_for_author). Double quotes are
+    stripped, never escaped: they cannot appear inside a quoted CQL string,
+    and a malformed query burns three retries plus a slot in the
+    consecutive-failure abort counter."""
+    return f'bath.title="{(fragment or "").replace(chr(34), "")}"'
+
+
+def work_cache_key(fragment: str, surname: str) -> str:
+    """Cache key for a work-level lookup: the queried fragment plus the
+    author-surname key the records were filtered by. Distinct from any ISBN
+    key, and normalized so the same lookup asked twice shares one entry.
+    The surname half is what keeps two books that share a title fragment
+    from sharing an author's verdict."""
 
     def norm(s: str) -> str:
         return " ".join((s or "").split()).lower()
 
-    return f"work:{norm(title)}|{norm(author)}"
+    return f"work:{norm(fragment)}|{norm(surname)}"
+
+
+class SRUDiagnostic(Exception):
+    """The SRU server answered with a diagnostic instead of records."""
+
+
+class SRUResponseError(SRUDiagnostic):
+    """The response body is not an SRU records answer at all: unparseable
+    XML, a wrong root element, an oversize body. This is the issue-#36
+    throttle gate: a rate-limit or proxy page must never fall through the
+    parser as {}, because the caller caches a miss. Retried like a network
+    error and never strict-fatal: the query form cannot produce a non-SRU
+    body, so the first-query abort does not apply."""
+
+
+def _parse_srw(raw: bytes) -> ET.Element:
+    """The shared SRU answer gate: parse, prove the body IS a
+    searchRetrieveResponse, and surface a server diagnostic. A genuine
+    zero-hit answer is always well-formed SRU carrying no records, so an
+    unparseable body reads as a failed request (SRUResponseError), never as
+    a cacheable miss."""
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        raise SRUResponseError(
+            "response is not well-formed XML (a throttle or proxy page?)"
+        )
+    if root.tag != f"{SRW_NS}searchRetrieveResponse":
+        raise SRUResponseError(
+            f"response is not an SRU answer (root element {root.tag})"
+        )
+    diag = root.find(f".//{SRW_NS}diagnostics")
+    if diag is not None:
+        msg = root.find(".//{http://www.loc.gov/zing/srw/diagnostic/}message")
+        raise SRUDiagnostic(msg.text if msg is not None else "unknown diagnostic")
+    return root
+
+
+def _record_codes(mods: ET.Element) -> dict[str, str]:
+    """The validated {'lcc': ..., 'ddc': ...} one MODS record carries; junk
+    values (issue #10) are absent, never stored."""
+    out: dict[str, str] = {}
+    for authority, guard in _CODE_GUARDS.items():
+        el = mods.find(f"./mods:classification[@authority='{authority}']", MODS_NS)
+        if el is not None and el.text and el.text.strip():
+            value = el.text.strip()
+            if guard(value):
+                out[authority] = value
+    return out
+
+
+def _record_authors(mods: ET.Element) -> list[str]:
+    """Every namePart the record carries (LoC headings, 'Surname, Forename',
+    dates after a second comma)."""
+    return [
+        el.text.strip()
+        for el in mods.findall("./mods:name/mods:namePart", MODS_NS)
+        if el.text and el.text.strip()
+    ]
+
+
+def author_matches(name_parts: list[str], author: str) -> bool:
+    """Does any LoC name heading carry this stored author? The heading is a
+    namePart's pre-comma form ('Gamow' out of 'Gamow, George, 1904-1968').
+    It matches the folded stored name at whole-token width: equality, the
+    stored name's own pre-comma heading (a 'Last, First' stored form), or
+    the heading as a tail of the stored name ('le guin' ends 'ursula k. le
+    guin'). Same-surname different-forename collisions pass by design: the
+    work-level caveat in the report is the honest boundary of a surname
+    filter. Unusable authors (empty, the 'Unknown' placeholder) match
+    nothing."""
+    folded = " ".join((author or "").split()).lower()
+    if not folded or folded == "unknown":
+        return False
+    head = folded.split(",", 1)[0].strip() if "," in folded else ""
+    for part in name_parts:
+        heading = " ".join(part.split(",", 1)[0].split()).lower()
+        if heading and (
+            heading == folded or heading == head or folded.endswith(" " + heading)
+        ):
+            return True
+    return False
 
 
 def parse_mods(raw: bytes) -> dict[str, str]:
@@ -228,37 +350,41 @@ def parse_mods(raw: bytes) -> dict[str, str]:
     validated by the classification guards (issue #10): a junk 050 on the
     first record is skipped, not stored, and a later record's real
     classification still wins."""
+    root = _parse_srw(raw)
     out: dict[str, str] = {}
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError:
-        return out
-
-    diag = root.find(f".//{SRW_NS}diagnostics")
-    if diag is not None:
-        msg = root.find(".//{http://www.loc.gov/zing/srw/diagnostic/}message")
-        raise SRUDiagnostic(msg.text if msg is not None else "unknown diagnostic")
-
     # Walk record by record so a code is never taken from a sibling record
     # that happens to sit later in the same response.
     for mods in root.findall(f".//{SRW_NS}recordData/mods:mods", MODS_NS):
-        for authority in ("lcc", "ddc"):
-            if authority in out:
-                continue
-            el = mods.find(f"./mods:classification[@authority='{authority}']", MODS_NS)
-            if el is not None and el.text and el.text.strip():
-                value = el.text.strip()
-                if _CODE_GUARDS[authority](value):
-                    out[authority] = value
+        for authority, value in _record_codes(mods).items():
+            out.setdefault(authority, value)
     return out
 
 
-class SRUDiagnostic(Exception):
-    """The SRU server answered with a diagnostic instead of records."""
+def parse_mods_for_author(raw: bytes, author: str) -> dict[str, str]:
+    """parse_mods over a title-fragment answer, scored against the
+    requesting book's author (issue #36): only records whose name headings
+    match the stored author may donate a classification, so a 20-record
+    fragment response cannot hand over a different author's work. No
+    matching record is the genuine miss it reads as: the fragment was
+    asked, this author did not answer."""
+    root = _parse_srw(raw)
+    out: dict[str, str] = {}
+    for mods in root.findall(f".//{SRW_NS}recordData/mods:mods", MODS_NS):
+        if not author_matches(_record_authors(mods), author):
+            continue
+        for authority, value in _record_codes(mods).items():
+            out.setdefault(authority, value)
+    return out
 
 
 def fetch_codes(
-    cql: str, timeout: int, retries: int = 3, *, strict: bool = False
+    cql: str,
+    timeout: int,
+    retries: int = 3,
+    *,
+    strict: bool = False,
+    max_records: int = 5,
+    author: str | None = None,
 ) -> dict[str, str] | None:
     """Query LoC with one CQL string. Returns a dict (possibly empty) or None
     on failure.
@@ -269,23 +395,41 @@ def fetch_codes(
     returned a record on the very next try. Aborting the whole pass on one of
     those throws away hours of work for a server hiccup.
 
+    A body that is not an SRU answer at all (SRUResponseError: the throttle
+    page, a proxy body, truncated XML) retries the same way and comes back
+    None, so nothing is ever cached from it (issue #36's cache poisoning:
+    hundreds of throttled requests once landed as {} permanent misses). A
+    genuine zero-hit parses to {} and stays cacheable.
+
     `strict` is set for the very first query of a run. There a diagnostic is far
     more likely to mean the query form itself is wrong (the plugin's dead
     `dc.identifier` index answers this way every single time), which is worth
     failing loudly and immediately instead of retrying 2,900 times. Later
     queries are never strict, even if nothing has succeeded yet; the
     consecutive-failure abort catches a systemically broken run instead.
+
+    `author` switches the parse to the surname-gated form
+    (parse_mods_for_author); the title-fragment fallback is its only caller,
+    with `max_records` raised to 20 for the same reason.
     """
     delay = 5.0
     for attempt in range(retries):
         try:
-            with urllib.request.urlopen(sru_url(cql), timeout=timeout) as resp:
+            with urllib.request.urlopen(
+                sru_url(cql, max_records), timeout=timeout
+            ) as resp:
                 raw = resp.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
-                raise SRUDiagnostic(
+                raise SRUResponseError(
                     f"response exceeded {MAX_RESPONSE_BYTES} bytes; refusing to parse"
                 )
-            return parse_mods(raw)
+            if author is None:
+                return parse_mods(raw)
+            return parse_mods_for_author(raw, author)
+        except SRUResponseError:
+            if attempt < retries - 1:
+                time.sleep(delay)
+                delay *= 2
         except SRUDiagnostic:
             if strict:
                 raise
@@ -481,26 +625,62 @@ def default_misses_file() -> str:
     return str(Path(__file__).resolve().parent / "fetch_library_codes_misses.txt")
 
 
-def write_misses_worklist(results: list[dict], path: str) -> int:
-    """Emit the manual-research worklist: every book the SRU pass could not
-    code, one per line as `id<TAB>isbn<TAB>ddc<TAB>title`, so the follow-up
-    research pass starts from a file instead of terminal scrollback. A report
-    artifact, not a database write: it is produced in dry runs too."""
+# Run sections the worklist file keeps. The file is append-per-run now
+# (issue #36): the old truncate-on-write destroyed the accumulated worklist
+# whenever any later run fired, however small, which is how the October 2026
+# residue grew invisible. The cap keeps a full-library run from stacking
+# hundreds-of-line sections forever; the newest sections are the live list.
+MISSES_RUN_SECTIONS_KEPT = 8
+_MISSES_RUN_MARKER = "# --- run "
+
+
+def write_misses_worklist(results: list[dict], path: str, mode: str = "DRY RUN") -> int:
+    """Append this run's manual-research worklist as a timestamped section:
+    every book the SRU pass could not code, one per line as
+    `id<TAB>isbn<TAB>ddc<TAB>title`, under a `# --- run <UTC stamp>
+    (<mode>): N miss(es) of M queried` header with the id list beside it.
+    Append, never truncate (issue #36: any later run, however small, used
+    to clobber the accumulated list); the file keeps the most recent
+    MISSES_RUN_SECTIONS_KEPT sections, with pre-marker (single-run-era)
+    content counting as one legacy section until pruned. A report artifact,
+    not a database write: it is produced in dry runs too."""
     misses = [r for r in results if not r.get("lcc")]
     if not misses:
         return 0
-    lines = [
-        f"# fetch_library_codes misses: {len(misses)} book(s) with no LCC.",
-        "# Manual research pass: find the code, then",
-        "#   wdb.set_identifier(<id>, 'lcc', '<code>')",
-        "# id\tisbn\tddc\ttitle",
+
+    ids = [str(r["id"]) for r in misses]
+    section = [
+        f"{_MISSES_RUN_MARKER}"
+        f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} ({mode}): "
+        f"{len(misses)} miss(es) of {len(results)} queried\n",
     ]
+    for i in range(0, len(ids), 16):
+        section.append("# ids: " + " ".join(ids[i : i + 16]) + "\n")
+    section.append("# Manual research pass: find the code, then\n")
+    section.append("#   wdb.set_identifier(<id>, 'lcc', '<code>')\n")
+    section.append("# id\tisbn\tddc\ttitle\n")
     for r in misses:
-        lines.append(
-            f"{r['id']}\t{r.get('isbn', '')}\t{r.get('ddc') or ''}\t{r['title']}"
+        section.append(
+            f"{r['id']}\t{r.get('isbn', '')}\t{r.get('ddc') or ''}\t{r['title']}\n"
         )
+
+    sections: list[list[str]] = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith(_MISSES_RUN_MARKER) or not sections:
+                    sections.append([line])
+                else:
+                    sections[-1].append(line)
+    sections.append(section)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
+        for kept in sections[-MISSES_RUN_SECTIONS_KEPT:]:
+            # A hand-edited file may end without a newline; gluing the next
+            # run's marker onto its last line would fuse the sections
+            # permanently (the marker would never start a line again).
+            if kept and not kept[-1].endswith("\n"):
+                kept[-1] += "\n"
+            fh.writelines(kept)
     return len(misses)
 
 
@@ -535,7 +715,7 @@ def report(results: list[dict], quiet: bool, want_ddc: bool = False) -> None:
     work_hits = sum(1 for r in results if r.get("lcc") and r.get("via") == "work")
     if work_hits:
         print(
-            f"  of the {got} LCC hit(s), {work_hits} came via the title/author "
+            f"  of the {got} LCC hit(s), {work_hits} came via the title-fragment "
             "fallback (work-level: the matched work's class; verify against "
             "this edition)"
         )
@@ -555,7 +735,7 @@ def report(results: list[dict], quiet: bool, want_ddc: bool = False) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Derive LCC/DDC codes from the Library of Congress SRU catalogue.",
-        epilog="Default is a dry run; nothing is written to the database without --apply. (The misses worklist file is a report artifact and is written in dry runs too.)",
+        epilog="Default is a dry run; nothing is written to the database without --apply. (The misses worklist file is a report artifact and is written in dry runs too; runs append timestamped sections and the file keeps the most recent ones.)",
     )
     ap.add_argument("--db", help="path to metadata.db (default: ./metadata.db)")
     ap.add_argument(
@@ -574,10 +754,11 @@ def main() -> int:
     ap.add_argument(
         "--misses-file",
         default=default_misses_file(),
-        help="worklist file for the manual-research pass, written whenever a "
-        f"book ends the pass with no LCC (default: {default_misses_file()}, "
-        "beside this script; the documented invocation runs from the library "
-        "root and the worklist must not land inside the library)",
+        help="worklist file for the manual-research pass; each run appends a "
+        "timestamped section listing every book that ended the pass with no "
+        f"LCC (default: {default_misses_file()}, beside this script; the "
+        "documented invocation runs from the library root and the worklist "
+        "must not land inside the library)",
     )
     ap.add_argument("--sample", type=int, metavar="N", help="random sample of N books")
     ap.add_argument(
@@ -592,14 +773,20 @@ def main() -> int:
     )
     ap.add_argument("--limit", type=int, help="stop after N queries")
     ap.add_argument(
-        "--refresh", action="store_true", help="re-query books that already have lcc"
+        "--refresh",
+        action="store_true",
+        help="re-query books that already have lcc, bypassing the response "
+        "cache (stored answers, misses included, are fetched again and "
+        "replaced: the escape from a poisoned cache; writes still land, so "
+        "the rest of the cache file survives)",
     )
     ap.add_argument(
         "--sru-fallback",
         dest="sru_fallback",
         action="store_true",
-        help="after a clean ISBN miss, try one title/author SRU query "
-        "(work-level: the matched work's classification, not necessarily "
+        help="after a clean ISBN miss, try one title-fragment SRU query "
+        "(20 records, filtered client-side by the book's author surname; "
+        "work-level: the matched work's classification, not necessarily "
         "this edition's; hit lines and the report say so)",
     )
     ap.add_argument(
@@ -672,12 +859,23 @@ def main() -> int:
         return 0
 
     cache = {} if args.no_cache else load_cache(args.cache)
+    # --refresh reads past the response cache (issue #36): its contract is
+    # "re-query", and a stored {} read back as a miss would defeat it. Cache
+    # WRITES still land on `cache` (and overwrite), so the accumulated cache
+    # file survives a refresh run intact instead of being rewritten to just
+    # this run's entries.
+    read_cache = {} if args.refresh else cache
     mode = "APPLY" if args.apply else "DRY RUN"
     print(
         f"{mode}: {len(targets)} book(s) with an ISBN and no "
         f"{'LCC/DDC' if want_ddc else 'LCC'}"
     )
-    print(f"pacing {args.delay}s between requests; cached results reused")
+    if args.refresh:
+        print(
+            f"pacing {args.delay}s between requests; response cache bypassed (--refresh)"
+        )
+    else:
+        print(f"pacing {args.delay}s between requests; cached results reused")
     if not args.apply:
         print("(nothing will be written; re-run with --apply to store)")
     print()
@@ -691,7 +889,7 @@ def main() -> int:
     try:
         for i, t in enumerate(ui.tqdm(targets, desc=ui.info("Fetching codes")), 1):
             isbn = t["isbn"]
-            cached = cache.get(isbn)
+            cached = read_cache.get(isbn)
             if cached is not None:
                 codes = sanitize_codes(cached)
                 src = "cache"
@@ -741,20 +939,32 @@ def main() -> int:
                         save_cache(args.cache, cache)
             if not codes and args.sru_fallback and t.get("authors"):
                 # A clean ISBN miss, fresh OR cached-out (a resume re-run
-                # must get the work-level retry too): one paced title/author
-                # query (the 2026-09 hand pass recovered 15 of 17 misses
-                # this way). A fallback failure counts toward the abort
+                # must get the work-level retry too): one paced
+                # title-fragment query with 20 records back, filtered
+                # client-side by the book's author surname (issue #36: the
+                # full DB title dies on its subtitle in LoC's title index,
+                # and the bath.author clause intermittently draws the
+                # unsupported-attribute diagnostic; the September 2026 hand
+                # pass first proved the shape). A usable surname gates the
+                # query: without one the filter could never certify a
+                # record. A fallback failure counts toward the abort
                 # counter, but the book itself stays a miss, never an ERR.
-                wtitle, wauthor = t["title"], t["authors"][0]
-                wkey = work_cache_key(wtitle, wauthor)
-                wcached = None if args.no_cache else cache.get(wkey)
+                frag = title_fragment(t["title"]) or t["title"]
+                surname = author_surname(t["authors"][0])
+                wkey = work_cache_key(frag, surname)
+                wcached = None if args.refresh else read_cache.get(wkey)
                 if wcached is not None:
                     if wcached:
                         codes = sanitize_codes(wcached)
                         src = "cache-work"
-                else:
+                elif surname:
                     time.sleep(args.delay)
-                    wcodes = fetch_codes(work_query(wtitle, wauthor), args.timeout)
+                    wcodes = fetch_codes(
+                        work_query(frag),
+                        args.timeout,
+                        max_records=20,
+                        author=t["authors"][0],
+                    )
                     queried += 1
                     if wcodes is None:
                         consecutive_failures += 1
@@ -820,9 +1030,9 @@ def main() -> int:
             save_cache(args.cache, cache)
 
     report(results, args.quiet, want_ddc=want_ddc)
-    misses = write_misses_worklist(results, args.misses_file)
+    misses = write_misses_worklist(results, args.misses_file, mode)
     if misses:
-        print(f"wrote {misses} miss(es) to {args.misses_file} for the manual pass")
+        print(f"appended {misses} miss(es) to {args.misses_file} for the manual pass")
 
     if not writes:
         print("\nno codes found; nothing to write")
