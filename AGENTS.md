@@ -5,6 +5,54 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.75.0 onward, the embed-scar batch, issue #37)
+
+- **The embed's NCX half is healed by a third post-embed pass.**
+  `normalize_epub_ncx` (epubdates.py) reads the freshly normalized OPF's
+  unique-identifier element (`_opf_unique_identifier_value`: the element
+  the `unique-identifier` attribute names, entity-decoded, stripped) and
+  rewrites every `dtb:uid` meta's content in the NCX the OPF's manifest
+  declares (`_ncx_entry_name`: media-type `application/x-dtbncx+xml`,
+  the spine's `toc` attribute naming THE one when several, href
+  resolved against the OPF's directory, fragment-stripped and
+  percent-decoded). Regex surgery like the two OPF passes, precisely
+  because a scarred OPF (an unbound ns0 attribute prefix) must stay
+  rewriteable. Already-synced files are byte-identical no-ops, and the
+  no-sync states (no unique-identifier, the dangling OPF-030 slot, no
+  NCX declared or present, no `dtb:uid` meta) are True no-ops because
+  none of them can mismatch epubcheck NCX-001. Refusals (unreadable
+  zip, no container, no OPF entry) share the two OPF passes' surface:
+  reconcile's normalization arbitration (note on in-sync, failure on
+  residual) and flush's fail-the-verb arm. Both embed consumers run it
+  after the identifier pass.
+- **The verify grew a structural half, and a scar never arbitrates
+  away.** After the passes, reconcile parses each embedded EPUB's OPF
+  and NCX strictly (`epub_parse_errors`; expat's "unbound prefix" is
+  exactly the embed-scar fatal class) and rows every refusal as a SCARS
+  entry. Block order is RESIDUAL, SCARS, FAILURES, NOTES, DONE. A scar
+  is structural, not drift, so the read-back's in-sync arbitration does
+  not apply: scars fail the run unconditionally and join the summary as
+  "N file(s) structurally scarred (unparseable OPF/NCX, follow-up
+  above)". Beneath the block prints the exact scoped remediation, dry
+  run as printed: `bindery library <root> --id <scarred ids>
+  --fix-unbound-prefix`. A strict parser stops at a document's first
+  well-formedness error, so a multiply-scarred document reports one row;
+  the bindery probe enumerates the rest. A file that is not a readable
+  zip scans EMPTY (the read-back's `<unreadable after embed>` residual
+  owns that class; never double-reported). The `dc:date`
+  element-prefix class has no bindery repair yet and the printed note
+  says so (bindery-cli#22).
+- **`run flush` runs the NCX pass too** (same seam, same order; refusal
+  fails the verb like the other two) and its report carries the count
+  (`epub_ncx_normalized` in JSON, an "NCX dtb:uid normalized in N EPUB
+  file(s)." text clause). The scar scan stays reconcile-only: flush
+  heals, reconcile verifies.
+- **The reconcile floor is (3, 75, 0)** (the two new imported names,
+  `normalize_epub_ncx` and `epub_parse_errors`; the 3.63.5
+  identifier-synthesis floor is superseded). `run flush` needs no floor:
+  integrate.py ships inside the package it imports.
+
+
 ## Programmer-facing contract notes (3.74.0 onward, the LoC-fallback batch, issue #36)
 
 - **The work-level fallback queries a title fragment and filters records

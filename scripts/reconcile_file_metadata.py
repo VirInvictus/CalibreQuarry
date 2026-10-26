@@ -45,7 +45,13 @@ With --apply (only the drifted books are touched):
     stay, everything else goes, missing database entries are inserted, and a
     stale unique-identifier element is rewritten in place to the book uuid
     under calibre's own invisible scheme so the package reference never
-    dangles).
+    dangles). The embed is also followed by an NCX dtb:uid sync (issue
+    #37): calibre's writer updates the OPF's unique-identifier element but
+    never the EPUB2 NCX's dtb:uid meta, so every embedded EPUB with a
+    producer uid there (an ISBN, an old uuid) fails epubcheck NCX-001 from
+    that day on; the sync rewrites every NCX dtb:uid to the freshly
+    embedded OPF identifier (1,133 books took that scar on one structural
+    apply).
   * PDF: `exiftool` writes title/author/publisher/date to the Info dict and
     XMP. calibredb is skipped for PDF because it silently leaves some PDFs
     unchanged; exiftool wrote every PDF tested. A few PDFs have a damaged xref
@@ -60,9 +66,18 @@ Verify after embed (2026-09-16 lesson, the #9177 Discourses book): a writer
 that exits 0 is not proof the file changed. `calibredb embed_metadata`
 reported success while the book's EPUB kept its original EPUB3 `dc:date`, so
 the file stayed drifted forever with nothing on the record. Every file an
-embed claimed is read back and re-diffed after the pass; files still drifted
+embed claims is read back and re-diffed after the pass; files still drifted
 are reported as RESIDUAL rows (and fail the run), converting the silent no-op
 into an actionable finding.
+
+The read-back grew a structural half after the 2026-10-25 structural apply
+(issue #37): a file can converge the field diff while staying unparseable
+(calibre 9.7.0's writer scarred 27 previously-clean books with unbound
+ns0/dc:date XML prefixes), and no field diff ever reads the NCX. Every
+embedded EPUB's OPF and NCX is parsed strictly after the passes; refusals
+are reported as SCARS rows (and fail the run), with the exact scoped bindery
+follow-up command printed beneath them, so the remediation that used to live
+in session memory is on the record every time it is needed.
 
 Failed operations (a calibredb chunk, an exiftool or djvused write, a dc:date
 normalization) are also collected as they happen and printed as a FAILURES
@@ -119,6 +134,7 @@ import json
 import os
 import random
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -152,28 +168,52 @@ try:
     from cquarry_cli.epubdates import (
         FILE_ONLY_IDENTIFIERS,
         canonical_date_target,
+        epub_parse_errors,
         norm_date,
         normalize_epub_dates,
         normalize_epub_identifiers,
+        normalize_epub_ncx,
     )
 except ImportError:  # a repo checkout run without the package importable
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-    from cquarry_cli.epubdates import (
-        FILE_ONLY_IDENTIFIERS,
-        canonical_date_target,
-        norm_date,
-        normalize_epub_dates,
-        normalize_epub_identifiers,
-    )
+    # A stale installed copy can satisfy the first import yet lack the new
+    # names, and the failed from-import leaves it in sys.modules: a bare
+    # retry would return the cached module and fail identically, a raw
+    # traceback in exactly the version-skew window the floor below exists
+    # to make graceful (issue #20's shape). Evict before retrying so the
+    # checkout's src/ actually serves it. A second failure means no
+    # importable copy anywhere carries the names (a lone deployed script
+    # over a stale package): the names stay unbound, imported_version()
+    # reads None, and the floor refusal fires fail-closed instead.
+    for _name in [
+        m
+        for m in list(sys.modules)
+        if m == "cquarry_cli" or m.startswith("cquarry_cli.")
+    ]:
+        del sys.modules[_name]
+    try:
+        from cquarry_cli.epubdates import (
+            FILE_ONLY_IDENTIFIERS,
+            canonical_date_target,
+            epub_parse_errors,
+            norm_date,
+            normalize_epub_dates,
+            normalize_epub_identifiers,
+            normalize_epub_ncx,
+        )
+    except ImportError:
+        pass
 
 # The behavior of the identifier pass below moved in 3.63.5 (the
-# default-namespace EPUB3 synthesis): on an older module --apply refuses
-# files the current code handles silently, which is the version-skew
-# symptom of issue #20. The version that counts is the imported module's
-# own __version__ (the try/except above decided which copy runs, pip's or
-# the checkout fallback's), never the distribution metadata, which can lag
-# the checkout. Unreadable refuses too (fail-closed).
-_CQUARRY_CLI_FLOOR = (3, 63, 5)
+# default-namespace EPUB3 synthesis) and the NCX dtb:uid sync plus the
+# well-formedness scar scan moved in 3.75.0 (issue #37): on an older
+# module --apply refuses files the current code handles silently, or
+# cannot import these names at all, which is the version-skew symptom of
+# issue #20. The version that counts is the imported module's own
+# __version__ (the try/except above decided which copy runs, pip's or the
+# checkout fallback's), never the distribution metadata, which can lag the
+# checkout. Unreadable refuses too (fail-closed).
+_CQUARRY_CLI_FLOOR = (3, 75, 0)
 _CQUARRY_CLI_VERSION = imported_version("cquarry_cli")
 
 USE_COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
@@ -915,9 +955,11 @@ def main() -> int:
         _CQUARRY_CLI_VERSION,
         _CQUARRY_CLI_FLOOR,
         what="the cquarry_cli module this script imported",
-        why="the EPUB identifier normalizer that handles default-namespace "
-        "packages; on an older module --apply refuses files the current "
-        "code handles silently",
+        why="the EPUB passes that close the embed writer's scars (the NCX "
+        "dtb:uid sync and the well-formedness scan; the identifier "
+        "normalizer's default-namespace handling moved in 3.63.5); on an "
+        "older module --apply refuses files the current code handles "
+        "silently",
         fix="Fix with: pip install --user --upgrade calibrequarry",
     )
     if refusal:
@@ -1092,6 +1134,19 @@ def main() -> int:
                         "identifier normalization failed"
                     )
                     normalization_failed.append((rec, fpath, line))
+            # The NCX cleanup rides the same seam (issue #37): the embed
+            # writes the database identifier into the OPF's
+            # unique-identifier element while the EPUB2 NCX's dtb:uid meta
+            # keeps the producer's old value, and every such file fails
+            # epubcheck NCX-001 from that day on (1,133 books on the
+            # 2026-10-25 structural apply). The pass reads the freshly
+            # normalized OPF's unique-identifier element and rewrites every
+            # NCX dtb:uid to it; refusals join the same arbitration.
+            print(f"  syncing NCX dtb:uid in {len(epubs)} EPUB file(s)...")
+            for rec, fpath in epubs:
+                if not normalize_epub_ncx(fpath):
+                    line = f"#{rec['id']} [EPUB] {fpath.name}: NCX dtb:uid sync failed"
+                    normalization_failed.append((rec, fpath, line))
     if drifted_pdf:
         via = "exiftool, qpdf-repairing broken ones" if args.repair_pdf else "exiftool"
         print(f"  embedding {len(drifted_pdf)} PDF(s) via {via}...")
@@ -1121,6 +1176,21 @@ def main() -> int:
             ok = False
         else:
             normalization_notes.append(f"{line} (already in sync)")
+    # The well-formedness scan (issue #37): a file can converge the
+    # metadata diff and still be structurally scarred -- the embed writer's
+    # unbound ns0 attribute / dc:date element prefixes make the OPF
+    # unparseable while the fields inside still compare clean -- and no
+    # field diff ever reads the NCX. Parse each embedded EPUB's OPF and
+    # NCX strictly and report every refusal; unlike a normalization
+    # refusal, a scar is never arbitrated away by an in-sync read-back
+    # (the damage is structural, not drift).
+    scars: list[tuple[dict, Path, list[tuple[str, str]]]] = []
+    for rec, fpath, fmt in verify_rows:
+        if fmt != "EPUB":
+            continue
+        rows = epub_parse_errors(fpath)
+        if rows:
+            scars.append((rec, fpath, rows))
     if residuals:
         ok = False
         print(
@@ -1133,6 +1203,38 @@ def main() -> int:
             print(f"      still differs: {', '.join(drift)}")
         if args.quiet and len(residuals) > len(shown):
             print(f"  ... and {len(residuals) - len(shown)} more")
+
+    if scars:
+        ok = False
+        n_scarred_docs = sum(len(rows) for _rec, _fpath, rows in scars)
+        print(
+            f"\n{RED}{BOLD}SCARS ({len(scars)} file(s), {n_scarred_docs} "
+            f"document(s)){RESET}: the embed left XML no parser accepts "
+            "(the field read-back cannot see this damage):"
+        )
+        shown = scars if not args.quiet else scars[:40]
+        for rec, fpath, rows in shown:
+            print(f"  {CYAN}#{rec['id']}{RESET} [EPUB] {fpath.name}")
+            for entry, err in rows:
+                print(f"      {entry}: {err}")
+        if args.quiet and len(scars) > len(shown):
+            print(f"  ... and {len(scars) - len(shown)} more")
+        scar_ids = ",".join(
+            str(i) for i in sorted({rec["id"] for rec, _fpath, _rows in scars})
+        )
+        print(
+            "\n  Follow-up (the pass that cleared the 2026-10-25 embed scars; "
+            "dry run as printed, add --apply --backup-inplace to write):"
+        )
+        print(
+            f"    bindery library {shlex.quote(str(library_root))} "
+            f"--id {scar_ids} --fix-unbound-prefix"
+        )
+        print(
+            "  (this script already synced the NCX dtb:uid; the flag binds an "
+            "unbound attribute prefix. An unbound dc:date ELEMENT prefix has no "
+            "bindery repair yet: bindery-cli#22.)"
+        )
 
     if failures:
         print(f"\n{RED}{BOLD}FAILURES ({len(failures)}){RESET}:")
@@ -1170,6 +1272,11 @@ def main() -> int:
         parts.append(f"{len(failures)} failed operation(s) (listed above)")
     if residuals:
         parts.append(f"{len(residuals)} file(s) still drifted on read-back")
+    if scars:
+        parts.append(
+            f"{len(scars)} file(s) structurally scarred (unparseable OPF/NCX, "
+            "follow-up above)"
+        )
     print(f"\n{RED}COMPLETED WITH ERRORS{RESET}: " + "; ".join(parts) + ".")
     return 1
 

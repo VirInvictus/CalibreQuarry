@@ -1,5 +1,63 @@
 # CalibreQuarry Patch Notes
 
+# 3.75.0 (2026-10-26)
+
+### reconcile: the embed's NCX scar is healed by a third pass and the scars it cannot heal are on the record (issue #37)
+
+The 2026-10-25 structural apply embedded database metadata into 1,266
+drifted files, and the embed itself damaged wiring at scale: 1,133 EPUBs
+took epubcheck NCX-001 (calibre's writer updates the OPF's
+unique-identifier element and never the EPUB2 NCX's `dtb:uid` meta, so
+every file whose NCX carries a producer uid -- an ISBN, an old uuid --
+fails from that day on), and 27 previously-clean books took
+unbound-XML-prefix fatals from the same writer (26 the `ns0` attribute
+class, 1 the `dc:date` element class; bindery-cli#9 and #22). The
+remediation that worked was a scoped bindery pass over the embedded ids,
+and it lived only in session memory. It is structural now:
+
+- **The NCX dtb:uid sync is a third post-embed pass.**
+  `normalize_epub_ncx` (in `cquarry_cli/epubdates.py`, the shared module)
+  reads the freshly normalized OPF's unique-identifier element and
+  rewrites every `dtb:uid` meta's content in the NCX the OPF's manifest
+  declares (the spine's `toc` attribute names THE one when several; the
+  href resolves against the OPF's directory, fragment-stripped and
+  percent-decoded). Like the two OPF passes it is regex surgery, not an
+  XML rewrite, precisely because a scarred OPF must stay rewriteable.
+  Already-synced files are byte-identical no-ops; the no-sync states (no
+  unique-identifier element, the dangling OPF-030 slot, no NCX declared
+  or present, no `dtb:uid` meta) are no-ops too, because none of them can
+  mismatch. reconcile --apply and `run flush` both run it, after the
+  identifier pass; a refusal joins reconcile's existing normalization
+  arbitration and fails the flush verb like the other two passes.
+- **The verify grew a structural half.** A file can converge the field
+  diff while staying unparseable -- the unbound-prefix fatals leave the
+  fields inside comparing clean -- and no field diff ever reads the NCX.
+  After the passes, reconcile parses each embedded EPUB's OPF and NCX
+  with a strict XML parser (`epub_parse_errors`, same module) and reports
+  every refusal as a SCARS row in its own block (order: RESIDUAL, SCARS,
+  FAILURES, NOTES, DONE). A scar is structural damage, not drift, so the
+  in-sync read-back never arbitrates it away: scars fail the run and
+  count in the summary ("N file(s) structurally scarred").
+- **The follow-up command prints itself.** Under the SCARS block goes the
+  exact scoped remediation, dry-run as printed: `bindery library <root>
+  --id <scarred ids> --fix-unbound-prefix` (add `--apply
+  --backup-inplace` to write). This script already synced the NCX half;
+  the flag covers the attribute-prefix scar, and the printed note says
+  plainly that the `dc:date` element-prefix class has no bindery repair
+  yet (bindery-cli#22). A strict parser stops at a document's first
+  well-formedness error, so a multiply-scarred document reports one row
+  here; the bindery probe enumerates the rest. A file that is not a
+  readable zip is never a scar row: the read-back's `<unreadable after
+  embed>` residual owns that class.
+- **The reconcile floor moves to 3.75.0** (the two new imported names;
+  the previous floor was 3.63.5's identifier synthesis). An imported
+  module older than that refuses at startup, exit 2, naming both
+  versions and the pip fix, as before.
+
+`run flush`'s report carries the new count (`epub_ncx_normalized` in the
+JSON shape, an "NCX dtb:uid normalized in N EPUB file(s)." text clause).
+The scar scan is reconcile-only.
+
 # 3.74.0 (2026-10-23)
 
 ### fetch_library_codes: fragment work queries, throttled responses never cached, --refresh bypasses the cache, append-only misses worklist (issue #36)

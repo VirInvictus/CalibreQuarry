@@ -1,12 +1,15 @@
-"""Tests for reconcile_file_metadata.py pure logic: normalisation, parsing,
-and the per-format field diff. No DB or subprocess; the script lives in
-scripts/, so it is imported by path."""
+"""Tests for reconcile_file_metadata.py: normalisation, parsing, the
+per-format field diff, the post-embed EPUB passes, and main()'s wiring.
+The script lives in scripts/, so it is imported by path; the one
+subprocess in the file isolates the stale-module import seam."""
 
 import contextlib
 import importlib.util
 import io
+import os
 import re
 import shutil
+import subprocess
 import sys
 import sqlite3
 import pathlib
@@ -411,7 +414,16 @@ class TestVerifyWiring(unittest.TestCase):
         (book_dir / f"The Hobbit.{fmt.lower()}").write_bytes(b"book")
         return root
 
-    def _run_main(self, tmp, read_backs, normalize_result=True, idents_result=True):
+    def _run_main(
+        self,
+        tmp,
+        read_backs,
+        normalize_result=True,
+        idents_result=True,
+        ncx_result=True,
+        scar_rows=None,
+        calls=None,
+    ):
         root = self._library(tmp)
         argv = [
             "reconcile_file_metadata.py",
@@ -420,17 +432,34 @@ class TestVerifyWiring(unittest.TestCase):
         ]
         out = io.StringIO()
         err = io.StringIO()
+
+        def _tracked(label, result):
+            def side_effect(*_args, **_kwargs):
+                if calls is not None:
+                    calls.append(label)
+                return result
+
+            return side_effect
+
         with (
             mock.patch.object(sys, "argv", argv),
             mock.patch.object(rfm, "shutil") as _sh,
             mock.patch.object(rfm, "file_metadata", side_effect=read_backs),
             mock.patch.object(rfm, "embed_calibredb", return_value=True) as embed,
             mock.patch.object(
-                rfm, "normalize_epub_dates", return_value=normalize_result
+                rfm,
+                "normalize_epub_dates",
+                side_effect=_tracked("dates", normalize_result),
             ) as norm,
             mock.patch.object(
-                rfm, "normalize_epub_identifiers", return_value=idents_result
+                rfm,
+                "normalize_epub_identifiers",
+                side_effect=_tracked("idents", idents_result),
             ) as idents,
+            mock.patch.object(
+                rfm, "normalize_epub_ncx", side_effect=_tracked("ncx", ncx_result)
+            ),
+            mock.patch.object(rfm, "epub_parse_errors", return_value=scar_rows or []),
             mock.patch.object(rfm, "calibre_running", return_value=False),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
@@ -554,6 +583,73 @@ class TestVerifyWiring(unittest.TestCase):
         self.assertIn("identifier normalization failed (already in sync)", out)
         self.assertNotIn("FAILURES", out)
 
+    def test_ncx_pass_rides_the_embed_seam_after_the_identifier_pass(self):
+        # Issue #37: every embedded EPUB gets the NCX dtb:uid sync, after
+        # both OPF passes (it reads the identifier pass's output).
+        drifted = file_meta(published="2010-10-25")
+        calls: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, _, err = self._run_main(
+                tmp, [drifted, file_meta()], calls=calls
+            )
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(calls, ["dates", "idents", "ncx"])
+        self.assertIn("syncing NCX dtb:uid in 1 EPUB file(s)", out)
+
+    def test_refused_ncx_sync_on_in_sync_file_is_a_note(self):
+        # The arbitration covers all three passes: an in-sync read-back
+        # demotes a refused NCX sync to a note.
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, _, err = self._run_main(
+                tmp, [drifted, file_meta()], ncx_result=False
+            )
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("NCX dtb:uid sync failed (already in sync)", out)
+        self.assertNotIn("FAILURES", out)
+
+    def test_refused_ncx_sync_on_residual_file_fails(self):
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, _, err = self._run_main(
+                tmp, [drifted, drifted], ncx_result=False
+            )
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("NCX dtb:uid sync failed", err)
+        self.assertIn("FAILURES (1)", out)
+        self.assertIn("#1 [EPUB] The Hobbit.epub: NCX dtb:uid sync failed", out)
+
+    def test_scarred_embed_is_reported_and_fails_with_the_followup_command(self):
+        # The structural half of the verify (issue #37): a file whose OPF
+        # no parser accepts -- the unbound-prefix embed scar, invisible to
+        # the field read-back -- is a SCARS row, fails the run, and prints
+        # the exact scoped bindery follow-up under the block.
+        drifted = file_meta(published="2010-10-25")
+        scar = [("OEBPS/content.opf", "unbound prefix: line 6, column 4")]
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, _, err = self._run_main(
+                tmp, [drifted, file_meta()], scar_rows=scar
+            )
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("SCARS (1 file(s), 1 document(s))", out)
+        self.assertIn("#1 [EPUB] The Hobbit.epub", out)
+        self.assertIn("OEBPS/content.opf: unbound prefix: line 6, column 4", out)
+        self.assertIn("Follow-up", out)
+        self.assertIn("--id 1 --fix-unbound-prefix", out)
+        self.assertIn("bindery-cli#22", out)
+        self.assertIn(
+            "1 file(s) structurally scarred (unparseable OPF/NCX, follow-up above)",
+            out,
+        )
+
+    def test_clean_scan_prints_no_scars_block(self):
+        drifted = file_meta(published="2010-10-25")
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _, _, _, err = self._run_main(tmp, [drifted, file_meta()])
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("SCARS", out)
+        self.assertNotIn("bindery", out)
+
     def test_pdf_failure_reaches_a_stdout_failures_block(self):
         # Issue #6 again, through the exiftool seam: a failed write must
         # reach the stdout FAILURES block with its book id, not only the
@@ -612,11 +708,13 @@ class TestVerifyWiring(unittest.TestCase):
 
 class TestVersionFloor(unittest.TestCase):
     """Issue #20's strong fix: main() refuses on an imported cquarry_cli
-    below the floor the identifier pass assumes (3.63.5, the
-    default-namespace synthesis), naming the version found, the floor, and
-    the fix -- before any tool probe or library resolution. The honest
-    version source is the imported module's own __version__ (the captured
-    module constant), never the dist metadata, which can lag a checkout."""
+    below the floor the script's EPUB passes assume (3.75.0, the NCX
+    dtb:uid sync and the well-formedness scar scan; the identifier
+    default-namespace synthesis moved the floor once before, 3.63.5),
+    naming the version found, the floor, and the fix -- before any tool
+    probe or library resolution. The honest version source is the imported
+    module's own __version__ (the captured module constant), never the
+    dist metadata, which can lag a checkout."""
 
     def _run(self, version=None):
         argv = ["reconcile_file_metadata.py", "/nonexistent-library"]
@@ -640,10 +738,10 @@ class TestVersionFloor(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
     def test_stale_module_refuses_naming_both_versions_and_the_fix(self):
-        rc, out, err = self._run("3.63.4")
+        rc, out, err = self._run("3.74.0")
         self.assertEqual(rc, 2, out + err)
-        self.assertIn("3.63.4", err)
-        self.assertIn("3.63.5+", err)
+        self.assertIn("3.74.0", err)
+        self.assertIn("3.75.0+", err)
         self.assertIn("pip install --user --upgrade calibrequarry", err)
 
     def test_unreadable_version_refuses_fail_closed(self):
@@ -651,13 +749,63 @@ class TestVersionFloor(unittest.TestCase):
         self.assertEqual(rc, 2, out + err)
         self.assertIn("unreadable", err)
 
+    def test_stale_module_with_repo_fallback_imports_the_checkout(self):
+        # The stale-module window this release widened (two new imported
+        # names): an installed cquarry_cli below the floor can SATISFY the
+        # first from-import yet lack the names, and the failure leaves the
+        # old module cached in sys.modules, so a bare retry returns the
+        # cached copy and fails identically -- a raw traceback instead of
+        # the floor refusal. The fallback evicts cquarry_cli* before
+        # retrying, so the checkout's src/ (inserted at sys.path[0])
+        # actually serves it. Proven in a subprocess over a stub package
+        # that carries the old five epubdates names and not the new two:
+        # the driver must print the checkout's VERSION, not crash.
+        with tempfile.TemporaryDirectory() as tmp:
+            stub_root = pathlib.Path(tmp)
+            pkg = stub_root / "cquarry_cli"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text('__version__ = "3.73.0"\n')
+            (pkg / "epubdates.py").write_text(
+                "FILE_ONLY_IDENTIFIERS = frozenset()\n"
+                "def canonical_date_target(v):\n    return v\n"
+                "def norm_date(v):\n    return v\n"
+                "def normalize_epub_dates(p, t):\n    return True\n"
+                "def normalize_epub_identifiers(p, i, u):\n    return True\n"
+            )
+            driver = stub_root / "driver.py"
+            repo = pathlib.Path(__file__).resolve().parent.parent
+            driver.write_text(
+                "import importlib.util, sys\n"
+                "from pathlib import Path\n"
+                "spec = importlib.util.spec_from_file_location(\n"
+                "    'rfm_stale',\n"
+                f"    str(Path({str(repo)!r}) / 'scripts' / "
+                "'reconcile_file_metadata.py'),\n"
+                ")\n"
+                "mod = importlib.util.module_from_spec(spec)\n"
+                "spec.loader.exec_module(mod)\n"
+                "import cquarry_cli\n"
+                "print(mod._CQUARRY_CLI_VERSION)\n"
+            )
+            env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+            res = subprocess.run(
+                [sys.executable, str(driver)],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                env=env,
+                timeout=60,
+            )
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertEqual(res.stdout.strip(), (repo / "VERSION").read_text().strip())
+
     def test_passing_version_reaches_the_library_check(self):
         # A version at/above the floor gets past the gate and stops on the
         # missing library instead (exit 2, different refusal).
         rc, out, err = self._run()
         self.assertEqual(rc, 2, out + err)
         self.assertIn("no metadata.db found", err)
-        self.assertNotIn("needs 3.63.5+", err)
+        self.assertNotIn("needs 3.75.0+", err)
 
     def test_main_announces_the_toolchain(self):
         # Direction 1 of issue #20: every run puts the toolchain split the
@@ -729,6 +877,8 @@ class TestEpubDateNormalization(unittest.TestCase):
         self.assertIs(rfm.canonical_date_target, epd.canonical_date_target)
         self.assertIs(rfm.normalize_epub_dates, epd.normalize_epub_dates)
         self.assertIs(rfm.normalize_epub_identifiers, epd.normalize_epub_identifiers)
+        self.assertIs(rfm.normalize_epub_ncx, epd.normalize_epub_ncx)
+        self.assertIs(rfm.epub_parse_errors, epd.epub_parse_errors)
         # The two-directional diff and the identifier pass must exempt the
         # same file-side types, or one of them lies.
         self.assertIs(rfm.FILE_ONLY_IDENTIFIERS, epd.FILE_ONLY_IDENTIFIERS)
@@ -1553,6 +1703,366 @@ class TestEpubIdentifierNormalization(unittest.TestCase):
                 epd.normalize_epub_identifiers(path, self.DB_IDS, self.UUID)
             )
             self.assertEqual(path.read_bytes(), raw)
+
+
+class TestEpubNcxNormalization(unittest.TestCase):
+    """The post-embed NCX dtb:uid pass (issue #37). Calibre's embed writer
+    updates the OPF's unique-identifier element and never the EPUB2 NCX's
+    dtb:uid meta, so every embedded EPUB with a producer uid there (an
+    ISBN, an old uuid) fails epubcheck NCX-001 from that day on; 1,133
+    books took that scar on one structural apply. The pass reads the OPF's
+    unique-identifier element and rewrites every dtb:uid meta to it.
+    Fixtures model the live embed-scar specimen (bindery-cli
+    testing_facility/error-surgery-2026-10-24/embed-scar/): a prefixed
+    ncx:meta element set and an OPF whose slot carries the calibre uuid."""
+
+    UID = "0ec9a2d6-9fff-4a2a-9f6c-66f98a2b7d3e"
+
+    NCX_OPF = (
+        "<?xml version='1.0' encoding='utf-8'?>\n"
+        '<package version="2.0" xmlns="http://www.idpf.org/2007/opf" '
+        'unique-identifier="BookId">\n'
+        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:opf="http://www.idpf.org/2007/opf">\n'
+        "    <dc:title>The Great Change</dc:title>\n"
+        "    <dc:publisher>Subterranean Press</dc:publisher>\n"
+        '    <dc:identifier id="BookId" opf:scheme="calibre">'
+        + UID
+        + "</dc:identifier>\n"
+        '    <meta name="cover" content="cover-image"/>\n'
+        "  </metadata>\n"
+        "  <manifest>\n"
+        '    <item id="cover-image" href="cover.jpg" media-type="image/jpeg"/>\n'
+        '    <item id="ncx" href="toc.ncx" '
+        'media-type="application/x-dtbncx+xml"/>\n'
+        "  </manifest>\n"
+        '  <spine toc="ncx">\n'
+        '    <itemref idref="cover-image"/>\n'
+        "  </spine>\n"
+        "</package>\n"
+    )
+
+    NCX_TEXT = (
+        '<?xml version="1.0" encoding="utf-8" standalone="no"?>\n'
+        '<ncx:ncx xmlns:ncx="http://www.daisy.org/z3986/2005/ncx/" '
+        'version="2005-1">\n'
+        "  <ncx:head>\n"
+        '    <ncx:meta name="cover" content="cover"/>\n'
+        '    <ncx:meta name="dtb:uid" content="isbn:9781449388386"/>\n'
+        '    <ncx:meta name="dtb:depth" content="-1"/>\n'
+        "  </ncx:head>\n"
+        "  <ncx:docTitle>\n"
+        "    <ncx:text>The Great Change</ncx:text>\n"
+        "  </ncx:docTitle>\n"
+        "  <ncx:navMap>\n"
+        '    <ncx:navPoint id="n1" playOrder="1">\n'
+        "      <ncx:navLabel><ncx:text>One</ncx:text></ncx:navLabel>\n"
+        '      <ncx:content src="c01.html"/>\n'
+        "    </ncx:navPoint>\n"
+        "  </ncx:navMap>\n"
+        "</ncx:ncx>\n"
+    )
+
+    CONTAINER_XML = (
+        '<?xml version="1.0"?>\n'
+        '<container version="1.0" '
+        'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+        "  <rootfiles>\n"
+        '    <rootfile full-path="OEBPS/content.opf" '
+        'media-type="application/oebps-package+xml"/>\n'
+        "  </rootfiles>\n"
+        "</container>\n"
+    )
+
+    def _build_epub(self, root, opf_text, ncx_text=..., ncx_name="OEBPS/toc.ncx"):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            z.writestr("META-INF/container.xml", self.CONTAINER_XML)
+            z.writestr("OEBPS/content.opf", opf_text)
+            if ncx_text is not ...:
+                z.writestr(ncx_name, ncx_text)
+            z.writestr("OEBPS/c01.html", "<html><body>x</body></html>")
+        path = pathlib.Path(root) / "book.epub"
+        path.write_bytes(buf.getvalue())
+        return path
+
+    def dtb_uid(self, ncx_bytes):
+        return re.search(
+            r"name=\"dtb:uid\" content=\"([^\"]*)\"", ncx_bytes.decode()
+        ).group(1)
+
+    def test_stale_dtb_uid_syncs_to_the_opf_identifier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.NCX_OPF, self.NCX_TEXT)
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            with zipfile.ZipFile(path) as z:
+                self.assertEqual(self.dtb_uid(z.read("OEBPS/toc.ncx")), self.UID)
+
+    def test_sibling_meta_elements_and_other_entries_are_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.NCX_OPF, self.NCX_TEXT)
+            before = zipfile.ZipFile(path)
+            other = {
+                n: before.read(n) for n in before.namelist() if n != "OEBPS/toc.ncx"
+            }
+            before.close()
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            after = zipfile.ZipFile(path)
+            ncx = after.read("OEBPS/toc.ncx").decode()
+            self.assertIn('name="cover" content="cover"/>', ncx)
+            self.assertIn('name="dtb:depth" content="-1"/>', ncx)
+            for name, payload in other.items():
+                self.assertEqual(after.read(name), payload)
+            after.close()
+
+    def test_already_synced_file_is_byte_identical(self):
+        synced = self.NCX_TEXT.replace(
+            'content="isbn:9781449388386"', f'content="{self.UID}"'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.NCX_OPF, synced)
+            raw = path.read_bytes()
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_attr_order_swap_and_bare_meta_name_still_sync(self):
+        swapped = self.NCX_TEXT.replace(
+            '<ncx:meta name="dtb:uid" content="isbn:9781449388386"/>',
+            "<ncx:meta content='isbn:9781449388386' name='dtb:uid'/>",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.NCX_OPF, swapped)
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            with zipfile.ZipFile(path) as z:
+                # only the content VALUE is rewritten; the element's own
+                # attribute order and quote spellings survive it
+                ncx = z.read("OEBPS/toc.ncx").decode()
+        self.assertIn(f'content="{self.UID}"', ncx)
+        self.assertIn("name='dtb:uid'", ncx)
+
+    def test_entity_in_the_identifier_round_trips(self):
+        opf = self.NCX_OPF.replace(self.UID, "editions a&amp;b")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, opf, self.NCX_TEXT)
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            with zipfile.ZipFile(path) as z:
+                # the attribute carries the escaped form, so it parses back
+                # to the same string the OPF element parses to
+                self.assertEqual(
+                    self.dtb_uid(z.read("OEBPS/toc.ncx")), "editions a&amp;b"
+                )
+
+    def test_spine_toc_attribute_picks_the_ncx(self):
+        opf = self.NCX_OPF.replace(
+            '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
+            '<item id="old" href="old.ncx" '
+            'media-type="application/x-dtbncx+xml"/>\n'
+            '    <item id="ncx" href="toc.ncx" '
+            'media-type="application/x-dtbncx+xml"/>',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, opf, self.NCX_TEXT, ncx_name="OEBPS/toc.ncx")
+            with zipfile.ZipFile(path, "a") as z:
+                z.writestr("OEBPS/old.ncx", self.NCX_TEXT)
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            with zipfile.ZipFile(path) as z:
+                self.assertEqual(self.dtb_uid(z.read("OEBPS/toc.ncx")), self.UID)
+                # the non-spine NCX keeps the producer uid
+                self.assertEqual(
+                    self.dtb_uid(z.read("OEBPS/old.ncx")), "isbn:9781449388386"
+                )
+
+    def test_no_ncx_in_the_manifest_is_a_noop(self):
+        # An EPUB3 nav-only package: nothing can mismatch.
+        opf = re.sub(r"\n *<item id=\"ncx\"[^>]*/>", "", self.NCX_OPF)
+        opf = opf.replace('<spine toc="ncx">', "<spine>")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, opf, self.NCX_TEXT)
+            raw = path.read_bytes()
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_ncx_declared_but_absent_is_a_noop(self):
+        # The manifest names an entry the archive does not carry: a
+        # producer defect the pass leaves alone (nothing to sync).
+        opf = self.NCX_OPF.replace('href="toc.ncx"', 'href="absent.ncx"')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, opf, self.NCX_TEXT)
+            raw = path.read_bytes()
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_ncx_without_a_dtb_uid_meta_is_a_noop(self):
+        ncx = self.NCX_TEXT.replace(
+            '    <ncx:meta name="dtb:uid" content="isbn:9781449388386"/>\n', ""
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.NCX_OPF, ncx)
+            raw = path.read_bytes()
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_dtb_uid_without_a_content_attribute_is_left_standing(self):
+        # A bare dtb:uid cannot mismatch epubcheck's comparison, and
+        # splicing a fresh attribute into an opening tag the regex may
+        # have misread is the one splice the surgery cannot name safely:
+        # it is skipped, and a lone bare meta makes the whole pass a
+        # byte-identical no-op.
+        bare = self.NCX_TEXT.replace(
+            '    <ncx:meta name="dtb:uid" content="isbn:9781449388386"/>\n',
+            '    <ncx:meta name="dtb:uid"/>\n',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.NCX_OPF, bare)
+            raw = path.read_bytes()
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_bare_dtb_uid_stands_while_a_content_bearing_one_syncs(self):
+        mixed = self.NCX_TEXT.replace(
+            '    <ncx:meta name="dtb:uid" content="isbn:9781449388386"/>\n',
+            '    <ncx:meta name="dtb:uid"/>\n'
+            '    <ncx:meta name="dtb:uid" content="isbn:9781449388386"/>\n',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, self.NCX_OPF, mixed)
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            with zipfile.ZipFile(path) as z:
+                ncx = z.read("OEBPS/toc.ncx").decode()
+        self.assertIn('content="' + self.UID + '"', ncx)
+        self.assertIn('<ncx:meta name="dtb:uid"/>', ncx)
+
+    def test_dangling_unique_identifier_is_a_noop(self):
+        # The OPF-030 shape: unique-identifier names an id no element
+        # carries. The scar is the OPF's own (producer-borne; the embed
+        # preserves the slot verbatim), and there is no value to sync to.
+        opf = self.NCX_OPF.replace(
+            f'<dc:identifier id="BookId" opf:scheme="calibre">{self.UID}'
+            "</dc:identifier>\n",
+            "",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, opf, self.NCX_TEXT)
+            raw = path.read_bytes()
+            self.assertTrue(epd.normalize_epub_ncx(path))
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_unopenable_file_and_no_container_fail_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "book.epub"
+            path.write_bytes(b"epub")
+            self.assertFalse(epd.normalize_epub_ncx(path))
+            path2 = pathlib.Path(tmp) / "book2.epub"
+            with zipfile.ZipFile(path2, "w") as z:
+                z.writestr("mimetype", "application/epub+zip")
+            self.assertFalse(epd.normalize_epub_ncx(path2))
+
+
+class TestEpubParseScars(unittest.TestCase):
+    """The structural half of the post-embed verify (issue #37): a file can
+    converge the field diff while staying unparseable (calibre 9.7.0's
+    writer scarred 27 previously-clean books with unbound ns0/dc:date XML
+    prefixes), and no field diff ever reads the NCX. The scanner parses the
+    OPF and the NCX strictly and rows every refusal."""
+
+    def _build_epub(self, root, entries):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for name, payload in entries.items():
+                z.writestr(name, payload)
+        path = pathlib.Path(root) / "book.epub"
+        path.write_bytes(buf.getvalue())
+        return path
+
+    def test_unbound_attribute_prefix_on_the_opf_is_reported(self):
+        # The live ns0 shape (bindery-cli#9): the package slot carries
+        # ns0:scheme with no binding anywhere, exactly what a strict parser
+        # refuses and what the metadata diff never sees.
+        opf = TestEpubNcxNormalization.NCX_OPF.replace(
+            'opf:scheme="calibre"', 'ns0:scheme="calibre"'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(
+                tmp,
+                {
+                    "META-INF/container.xml": (TestEpubNcxNormalization.CONTAINER_XML),
+                    "OEBPS/content.opf": opf,
+                },
+            )
+            errors = epd.epub_parse_errors(path)
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0][0], "OEBPS/content.opf")
+        self.assertIn("unbound prefix", errors[0][1])
+
+    def test_unbound_prefix_on_the_ncx_is_reported(self):
+        ncx = TestEpubNcxNormalization.NCX_TEXT.replace(
+            'xmlns:ncx="http://www.daisy.org/z3986/2005/ncx/" ', ""
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(
+                tmp,
+                {
+                    "META-INF/container.xml": (TestEpubNcxNormalization.CONTAINER_XML),
+                    "OEBPS/content.opf": TestEpubNcxNormalization.NCX_OPF,
+                    "OEBPS/toc.ncx": ncx,
+                },
+            )
+            errors = epd.epub_parse_errors(path)
+        self.assertEqual([e[0] for e in errors], ["OEBPS/toc.ncx"])
+        self.assertIn("unbound prefix", errors[0][1])
+
+    def test_clean_book_scans_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(
+                tmp,
+                {
+                    "META-INF/container.xml": (TestEpubNcxNormalization.CONTAINER_XML),
+                    "OEBPS/content.opf": TestEpubNcxNormalization.NCX_OPF,
+                    "OEBPS/toc.ncx": TestEpubNcxNormalization.NCX_TEXT,
+                },
+            )
+            self.assertEqual(epd.epub_parse_errors(path), [])
+
+    def test_not_a_zip_scans_empty(self):
+        # An unreadable file is the read-back's residual, not a scar row:
+        # the scanner never double-reports.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "book.epub"
+            path.write_bytes(b"epub")
+            self.assertEqual(epd.epub_parse_errors(path), [])
+
+    def test_container_without_a_rootfile_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(
+                tmp,
+                {"META-INF/container.xml": "<?xml version='1.0'?>\n<container/>"},
+            )
+            errors = epd.epub_parse_errors(path)
+        self.assertEqual(errors, [("META-INF/container.xml", "no rootfile entry")])
+
+    def test_container_absent_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(tmp, {"OEBPS/content.opf": "<package/>"})
+            errors = epd.epub_parse_errors(path)
+        self.assertEqual(
+            errors, [("META-INF/container.xml", "absent from the archive")]
+        )
+
+    def test_opf_entry_absent_from_the_archive_is_reported(self):
+        container = TestEpubNcxNormalization.CONTAINER_XML.replace(
+            "OEBPS/content.opf", "OEBPS/gone.opf"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._build_epub(
+                tmp,
+                {
+                    "META-INF/container.xml": container,
+                    "OEBPS/content.opf": TestEpubNcxNormalization.NCX_OPF,
+                },
+            )
+            errors = epd.epub_parse_errors(path)
+        self.assertEqual(errors, [("OEBPS/gone.opf", "absent from the archive")])
 
 
 class TestCanonicalDateTarget(unittest.TestCase):

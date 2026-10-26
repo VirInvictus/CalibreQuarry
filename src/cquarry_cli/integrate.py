@@ -37,6 +37,7 @@ from cquarry_cli.epubdates import (
     canonical_date_target,
     normalize_epub_dates,
     normalize_epub_identifiers,
+    normalize_epub_ncx,
 )
 
 _PGREP_TIMEOUT = 10
@@ -561,6 +562,7 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
     # shared module.
     normalized = 0
     idents_normalized = 0
+    ncx_normalized = 0
     for bid in ids:
         entry = db.get_formats(bid).get("EPUB")
         if entry is None:
@@ -585,6 +587,20 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
                 file=sys.stderr,
             )
             return 1
+        # The NCX dtb:uid sync rides the same seam (issue #37): the embed
+        # updates the OPF's unique-identifier element and never the EPUB2
+        # NCX's dtb:uid meta, so a flushed EPUB with a producer uid there
+        # fails epubcheck NCX-001 from that day on. The pass syncs the NCX
+        # to the freshly normalized OPF identifier, the same one reconcile
+        # writes.
+        if normalize_epub_ncx(fpath):
+            ncx_normalized += 1
+        else:
+            print(
+                f"ERROR: NCX dtb:uid normalization failed on {fpath}",
+                file=sys.stderr,
+            )
+            return 1
     # Post-apply honesty: re-read the queue so a calibredb run that exited 0
     # without draining it (or dirtied work that raced the run) is reported,
     # not silent.
@@ -597,6 +613,7 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
                         "flushed": done,
                         "epub_dates_normalized": normalized,
                         "epub_identifiers_normalized": idents_normalized,
+                        "epub_ncx_normalized": ncx_normalized,
                         "queue_remaining": len(remaining),
                     }
                 },
@@ -609,6 +626,8 @@ def run_flush(db, args, *, apply: bool, take_backup=None) -> int:
             line += f" dc:date normalized in {normalized} EPUB file(s)."
         if idents_normalized:
             line += f" identifiers normalized in {idents_normalized} EPUB file(s)."
+        if ncx_normalized:
+            line += f" NCX dtb:uid normalized in {ncx_normalized} EPUB file(s)."
         print(line)
         if remaining:
             print(

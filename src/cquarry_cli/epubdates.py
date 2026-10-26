@@ -1,8 +1,8 @@
-"""EPUB OPF post-embed normalization, shared by
+"""EPUB post-embed normalization, shared by
 scripts/reconcile_file_metadata.py and the `run flush` verb (every path that
-embeds EPUB metadata via calibredb). Two passes share the same machinery
-(locate the OPF through container.xml, surgery confined to the <metadata>
-block, whole-archive rewrite through a temp file + os.replace):
+embeds EPUB metadata via calibredb). Three passes share the same machinery
+(locate the OPF through container.xml, whole-archive rewrite through a temp
+file + os.replace):
 
 * dc:date canonicalization (normalize_epub_dates): calibredb's EPUB2 writer
   (the path any version="2.0" package takes) rewrites only the EARLIEST
@@ -41,14 +41,38 @@ block, whole-archive rewrite through a temp file + os.replace):
   too, no OPF-prefix binding anywhere — is handled in place: when the
   surgery must name the OPF namespace it synthesizes the binding as a
   declaration on the <metadata> opening tag (issue #16's live class)
-  instead of refusing the pass."""
+  instead of refusing the pass.
+
+* NCX dtb:uid sync (normalize_epub_ncx): calibre's embed writer updates the
+  OPF's unique-identifier element but never the EPUB2 NCX's dtb:uid meta,
+  so every embedded EPUB whose NCX carries a producer uid (an ISBN, an
+  old uuid) fails epubcheck NCX-001 from that day on ("dtb:uid" content
+  does not match the OPF unique-identifier; 1,133 books on the
+  2026-10-25 structural apply, issue #37). This pass reads the freshly
+  embedded (and freshly normalized) OPF's unique-identifier element and
+  rewrites every NCX dtb:uid meta to that value, so the two artifacts
+  can no longer disagree. Like the two OPF passes it is regex surgery,
+  not an XML rewrite: a scarred OPF (an unbound ns0 attribute prefix,
+  the same embed's other product) must stay rewriteable, and the
+  well-formedness of the result is the scar scan's job, not this pass's.
+
+and the scar scan (epub_parse_errors) closes the loop: the OPF and the
+NCX of one EPUB are parsed strictly and every well-formedness refusal
+comes back as an (entry, error) row, because an embed can converge the
+metadata diff while leaving the file structurally unparseable (the
+unbound ns0/dc:date prefix fatals calibre 9.7.0's writer produced on 27
+books that entered the day clean) and no field diff ever reads the NCX.
+The passes are deliberately tolerant of exactly what the scan reports."""
 
 import os
+import posixpath
 import re
 import tempfile
 import zipfile
+import xml.etree.ElementTree as ET
 from html import unescape
 from pathlib import Path
+from urllib.parse import unquote
 from xml.sax.saxutils import escape as xml_escape
 
 # File-side identifier types that are not drift when the database lacks
@@ -110,6 +134,23 @@ _OPF_PREFIX = re.compile(
     r"xmlns:([A-Za-z_][\w.-]*)\s*=\s*[\"']http://www\.idpf\.org/2007/opf[\"']"
 )
 _URN_ISBN_PREFIX = "urn:isbn:"
+
+# NCX (dtb:uid sync) patterns. The NCX element names may carry any prefix
+# (the house specimen binds `ncx:` on its root), so the meta pattern is
+# prefix-tolerant, and `\b` keeps `<metadata` from matching `<meta`.
+_META_SPAN = re.compile(
+    r"<(?:[A-Za-z_][\w.-]*:)?meta\b[^>]*/>"
+    r"|<(?:[A-Za-z_][\w.-]*:)?meta\b[^>]*>.*?</(?:[A-Za-z_][\w.-]*:)?meta\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+_NAME_ATTR = re.compile(r"\bname\s*=\s*(\"[^\"]*\"|'[^']*')", re.IGNORECASE)
+_CONTENT_ATTR = re.compile(r"(\bcontent\s*=\s*)(\"[^\"]*\"|'[^']*')", re.IGNORECASE)
+_MANIFEST_ITEM_TAG = re.compile(r"<item\b[^>]*>", re.IGNORECASE)
+_HREF_ATTR = re.compile(r"\bhref\s*=\s*(\"[^\"]*\"|'[^']*')", re.IGNORECASE)
+_MEDIA_TYPE_ATTR = re.compile(r"\bmedia-type\s*=\s*(\"[^\"]*\"|'[^']*')", re.IGNORECASE)
+_SPINE_TAG = re.compile(r"<spine\b[^>]*>", re.IGNORECASE)
+_TOC_ATTR = re.compile(r"\btoc\s*=\s*(\"[^\"]*\"|'[^']*')", re.IGNORECASE)
+_NCX_MEDIA_TYPE = "application/x-dtbncx+xml"
 
 
 def norm_date(value: str | None) -> str:
@@ -509,6 +550,28 @@ def _opf_entry_name(zf: zipfile.ZipFile) -> str | None:
     return m.group(1) if m else None
 
 
+def _rewrite_archive(path: Path, infos, payloads) -> bool:
+    """Write the whole archive back through a temp file + os.replace, entry
+    order and per-entry zip metadata preserved, so a crash never leaves a
+    half-written EPUB behind. The tail both pass rewrites share."""
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with (
+            os.fdopen(fd, "wb") as tf,
+            zipfile.ZipFile(tf, "w", strict_timestamps=False) as zout,
+        ):
+            for info in infos:
+                zout.writestr(info, payloads[info])
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    return True
+
+
 def _rewrite_opf(path: Path, surgery) -> bool:
     """Run one OPF surgery over an EPUB and rewrite the archive when it
     changes anything. True when the file ends canonical (including when it
@@ -534,22 +597,7 @@ def _rewrite_opf(path: Path, surgery) -> bool:
         if new_text == opf_text:
             return True
         payloads[opf_info] = new_text.encode("utf-8")
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-        try:
-            with (
-                os.fdopen(fd, "wb") as tf,
-                zipfile.ZipFile(tf, "w", strict_timestamps=False) as zout,
-            ):
-                for info in infos:
-                    zout.writestr(info, payloads[info])
-            os.replace(tmp_name, path)
-        except BaseException:
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
-            raise
-        return True
+        return _rewrite_archive(path, infos, payloads)
     except Exception:
         return False
 
@@ -578,3 +626,218 @@ def normalize_epub_identifiers(
     return _rewrite_opf(
         path, lambda text: canonical_dc_identifiers(text, identifiers, uuid)
     )
+
+
+def _quoted_attr(text: str, pattern: re.Pattern) -> str | None:
+    """The unquoted value of the first attribute `pattern` matches, or None.
+    The read every new pattern above runs through."""
+    m = pattern.search(text)
+    return m.group(1)[1:-1] if m else None
+
+
+def _resolve_href_entry(href: str, opf_name: str, entry_names) -> str | None:
+    """An OPF manifest href as an archive entry name: fragment-stripped,
+    percent-decoded, resolved against the OPF's directory inside the zip
+    (the house resolver coverfind uses). None when the entry does not
+    exist — a manifest the archive does not back is a producer defect the
+    passes leave alone."""
+    rel = unquote(href.split("#")[0].strip())
+    if not rel:
+        return None
+    name = posixpath.normpath(posixpath.join(posixpath.dirname(opf_name), rel))
+    name = name.lstrip("/")
+    return name if name in entry_names else None
+
+
+def _ncx_entry_name(opf_text: str, opf_name: str, entry_names) -> str | None:
+    """The NCX entry the OPF declares: the manifest item(s) typed
+    application/x-dtbncx+xml, the spine's toc attribute naming THE one when
+    it does, the first candidate otherwise. None when the package declares
+    no NCX (an EPUB3 nav-only package: nothing to sync)."""
+    candidates: list[tuple[str, str]] = []
+    for m in _MANIFEST_ITEM_TAG.finditer(opf_text):
+        tag = m.group(0)
+        media = (_quoted_attr(tag, _MEDIA_TYPE_ATTR) or "").strip().lower()
+        if media != _NCX_MEDIA_TYPE:
+            continue
+        candidates.append(
+            (
+                _quoted_attr(tag, _ID_ATTR) or "",
+                _quoted_attr(tag, _HREF_ATTR) or "",
+            )
+        )
+    if not candidates:
+        return None
+    spine = _SPINE_TAG.search(opf_text)
+    toc_id = _quoted_attr(spine.group(0), _TOC_ATTR) if spine else None
+    chosen = next((c for c in candidates if toc_id and c[0] == toc_id), candidates[0])
+    if not chosen[1]:
+        return None
+    return _resolve_href_entry(chosen[1], opf_name, entry_names)
+
+
+def _opf_unique_identifier_value(opf_text: str) -> str | None:
+    """The package unique-identifier element's text, entity-decoded and
+    stripped: the value epubcheck's NCX-001 compares the NCX dtb:uid
+    against, and the only honest sync target (the embed and the identifier
+    pass may both have rewritten the slot moments before). None when the
+    package names no unique-identifier, the named element is absent (the
+    dangling OPF-030 shape, a producer defect), or its text is empty."""
+    unique_m = _UNIQUE_IDENTIFIER.search(opf_text)
+    if unique_m is None:
+        return None
+    unique_id = unique_m.group(1)[1:-1]
+    for m in _DC_IDENTIFIER_SPAN.finditer(opf_text):
+        span_id = _quoted_attr(_opening_tag(m.group(0)), _ID_ATTR)
+        if span_id is None or span_id != unique_id:
+            continue
+        body = re.fullmatch(
+            r"<dc:identifier\b[^>]*>(.*)</dc:identifier\s*>", m.group(0), re.DOTALL
+        )
+        if body:
+            value = unescape(body.group(1)).strip()
+            return value or None
+    return None
+
+
+def _ncx_with_synced_uid(ncx_text: str, uid: str) -> str | None:
+    """Every dtb:uid meta's content rewritten to `uid`, element and sibling
+    markup otherwise byte-identical. None when the NCX carries no dtb:uid
+    meta at all (nothing can mismatch); byte-identical text back when every
+    dtb:uid already carries `uid` (the no-rewrite contract). A dtb:uid
+    meta without a content attribute is left standing: there is nothing to
+    compare, and splicing a fresh attribute into an opening tag the
+    prefix-tolerant regex may have misread (`>` inside an attribute value)
+    is the one splice this surgery cannot name safely — only an attribute
+    whose exact span _CONTENT_ATTR matched is ever rewritten."""
+    out: list[str] = []
+    pos = 0
+    found = False
+    changed = False
+    escaped = xml_escape(uid, {'"': "&quot;"})
+    for m in _META_SPAN.finditer(ncx_text):
+        span = m.group(0)
+        opening = _opening_tag(span)
+        name = _quoted_attr(opening, _NAME_ATTR)
+        if name is None or name.strip().lower() != "dtb:uid":
+            continue
+        found = True
+        content_m = _CONTENT_ATTR.search(opening)
+        if content_m is None or content_m.group(2)[1:-1] == uid:
+            continue
+        new_opening = (
+            opening[: content_m.start(2)]
+            + '"'
+            + escaped
+            + '"'
+            + opening[content_m.end(2) :]
+        )
+        out.append(ncx_text[pos : m.start()])
+        out.append(new_opening + span[len(opening) :])
+        pos = m.end()
+        changed = True
+    if not changed:
+        return ncx_text if found else None
+    return "".join(out) + ncx_text[pos:]
+
+
+def normalize_epub_ncx(path: Path) -> bool:
+    """Sync one EPUB's NCX dtb:uid meta(s) to the OPF's unique-identifier
+    element (the NCX half of the module docstring; issue #37: the embed
+    writer updates the OPF slot and never the NCX, so every embedded EPUB
+    with a producer dtb:uid floods epubcheck NCX-001). True when the file
+    ends with the two artifacts agreeing, including when they already did
+    (no rewrite then) and when there is nothing to sync to (no
+    unique-identifier element, no NCX declared or present, no dtb:uid
+    meta, a dtb:uid with no content attribute): none of those states can
+    mismatch. False on any failure — a file that cannot be opened, an OPF
+    this cannot locate, a zip that cannot be rebuilt — the same refusal
+    surface as the two OPF passes."""
+    try:
+        with zipfile.ZipFile(path, "r", strict_timestamps=False) as zin:
+            opf_name = _opf_entry_name(zin)
+            if opf_name is None:
+                return False
+            infos = zin.infolist()
+            payloads = {info: zin.read(info) for info in infos}
+        opf_info = next((i for i in reversed(infos) if i.filename == opf_name), None)
+        if opf_info is None:
+            return False
+        opf_text = payloads[opf_info].decode("utf-8-sig")
+        uid = _opf_unique_identifier_value(opf_text)
+        if uid is None:
+            return True
+        ncx_name = _ncx_entry_name(opf_text, opf_name, {i.filename for i in infos})
+        if ncx_name is None:
+            return True
+        ncx_info = next((i for i in reversed(infos) if i.filename == ncx_name), None)
+        if ncx_info is None:
+            return True
+        ncx_text = payloads[ncx_info].decode("utf-8-sig")
+        new_ncx = _ncx_with_synced_uid(ncx_text, uid)
+        if new_ncx is None or new_ncx == ncx_text:
+            return True
+        payloads[ncx_info] = new_ncx.encode("utf-8")
+        return _rewrite_archive(path, infos, payloads)
+    except Exception:
+        return False
+
+
+def epub_parse_errors(path: Path) -> list[tuple[str, str]]:
+    """Strict well-formedness scan of one EPUB's embed-writable XML
+    surfaces: the OPF and the NCX the embed writer (and the passes above)
+    touch. One (entry, error) row per document a strict XML parser refuses
+    — the unbound-prefix embed scars calibre's OPF writer leaves (an
+    ns0:scheme attribute or a dc:date element whose prefix nothing binds),
+    which no field diff ever sees because the metadata inside still
+    compares clean. Empty when every document parses. A file that is not a
+    readable zip comes back empty too: the read-back re-diff already owns
+    that class (its `<unreadable after embed>` residual), and the scanner
+    never double-reports. Only the three entries it judges are read
+    (container, OPF, NCX), never the whole archive decompressed. A strict
+    parser stops at a document's first well-formedness error, so a
+    multiply-scarred document reports one row here; the follow-up bindery
+    probe enumerates the rest."""
+    opf_name = opf_bytes = ncx_name = ncx_bytes = None
+    try:
+        with zipfile.ZipFile(path, "r", strict_timestamps=False) as zin:
+            names = {info.filename for info in zin.infolist()}
+            try:
+                container = zin.read("META-INF/container.xml").decode("utf-8-sig")
+            except KeyError:
+                return [("META-INF/container.xml", "absent from the archive")]
+            except UnicodeDecodeError:
+                return [("META-INF/container.xml", "is not valid UTF-8 text")]
+            m = re.search(r'full-path\s*=\s*"([^"]+)"', container)
+            if m is None:
+                return [("META-INF/container.xml", "no rootfile entry")]
+            opf_name = m.group(1)
+            try:
+                opf_bytes = zin.read(opf_name)
+            except KeyError:
+                return [(opf_name, "absent from the archive")]
+            # The decode only feeds the NCX locator; the parser reads the
+            # bytes and honors the XML declaration itself, so a non-UTF-8
+            # OPF is still scanned, it just names no NCX.
+            try:
+                opf_text = opf_bytes.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                opf_text = None
+            if opf_text is not None:
+                ncx_name = _ncx_entry_name(opf_text, opf_name, names)
+            if ncx_name is not None:
+                try:
+                    ncx_bytes = zin.read(ncx_name)
+                except KeyError:
+                    ncx_bytes = None  # declared, absent: nothing to parse
+    except Exception:
+        return []
+    errors: list[tuple[str, str]] = []
+    for name, payload in ((opf_name, opf_bytes), (ncx_name, ncx_bytes)):
+        if payload is None:
+            continue
+        try:
+            ET.fromstring(payload)
+        except (ET.ParseError, LookupError, ValueError) as e:
+            errors.append((name, str(e)))
+    return errors
