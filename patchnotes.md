@@ -1,6 +1,6 @@
 # CalibreQuarry Patch Notes
 
-# 3.75.0 (2026-10-26)
+# 3.75.0 (2026-10-25)
 
 ### reconcile: the embed's NCX scar is healed by a third pass and the scars it cannot heal are on the record (issue #37)
 
