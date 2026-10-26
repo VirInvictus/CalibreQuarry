@@ -49,8 +49,16 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   heals, reconcile verifies.
 - **The reconcile floor is (3, 75, 0)** (the two new imported names,
   `normalize_epub_ncx` and `epub_parse_errors`; the 3.63.5
-  identifier-synthesis floor is superseded). `run flush` needs no floor:
-  integrate.py ships inside the package it imports.
+  identifier-synthesis floor is superseded). The import fallback EVICTS
+  any cached `cquarry_cli*` from `sys.modules` before its retry: a
+  stale installed copy satisfies the first import yet lacks the new
+  names, and the failed from-import leaves it cached where a bare
+  retry would find it again (a raw traceback instead of the polite
+  floor refusal). A second failure (a lone deployed script over a
+  stale package, no checkout beside it) leaves the names unbound;
+  `imported_version()` then reads None and the floor refusal fires
+  fail-closed. `run flush` needs no floor: integrate.py ships inside
+  the package it imports.
 
 
 ## Programmer-facing contract notes (3.74.0 onward, the LoC-fallback batch, issue #36)

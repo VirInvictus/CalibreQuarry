@@ -52,7 +52,12 @@ and it lived only in session memory. It is structural now:
 - **The reconcile floor moves to 3.75.0** (the two new imported names;
   the previous floor was 3.63.5's identifier synthesis). An imported
   module older than that refuses at startup, exit 2, naming both
-  versions and the pip fix, as before.
+  versions and the pip fix, as before -- and the import fallback now
+  evicts a stale cached `cquarry_cli` from `sys.modules` before
+  retrying, so the skew window actually reaches that refusal instead of
+  dying in a raw traceback (a stale installed copy satisfies the first
+  import yet lacks the new names, and the failed from-import leaves it
+  cached where a bare retry finds it again).
 
 `run flush`'s report carries the new count (`epub_ncx_normalized` in the
 JSON shape, an "NCX dtb:uid normalized in N EPUB file(s)." text clause).
