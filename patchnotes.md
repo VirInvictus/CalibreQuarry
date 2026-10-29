@@ -1,5 +1,47 @@
 # CalibreQuarry Patch Notes
 
+# 3.77.0 (2026-10-29)
+
+### the cquarry 1.28.2 floor: the format-row setters refuse extension-carrying names (issue #42)
+
+Adoption release, the #35/#14 precedent: the fix lives upstream and the
+floor bump is how the guard reaches this workflow.
+
+- **The floor is `cquarry >= 1.28.2`.** 1.28.2 closes cquarry issue #9:
+  its `add_format`/`set_format` accepted a `name` argument carrying the
+  format's own extension and stored it verbatim into `data.name`, so
+  every consumer that resolves a format file as `<name>.<fmt>` built a
+  double-extended path. That was the live 11305 case from the
+  2026-10-28 supersede swap: reconcile's embed built `<stem>.epub.epub`,
+  failed `fpath.exists()`, and reported "1 unreadable/missing" while
+  `ebook-meta` on the real path succeeded -- a debug cycle spent before
+  a row diff named it. Both upstream setters now raise `ValueError`
+  before any SQL, naming the stem to pass; legitimate dotted stems
+  (`Anon.2023`) pass, and `ORIGINAL_<FMT>` rows refuse their own
+  `.original_<ext>` spelling.
+- **This frontend's doors fail loudly instead of propagating.** The
+  free-text paths that can feed an extension-suffixed name are
+  `--add-format` (writeops `action_add_format`) and the TUI Add Format
+  prompt: on the new floor a mistaken filename exits 1 with
+  `ERROR: name must be the filename stem, not the filename: ...`
+  (`run_write`'s `ValueError` mapping), nothing written -- desired
+  behavior, no code change. The `integrate.py` sites stay legal on
+  healthy libraries; on a library still carrying a pre-1.28.2
+  double-extended row, `run_polish`/`run_merge` now raise where they
+  previously re-registered the corrupt spelling, which surfaces the
+  corruption. The remedy is the incident's own: fix the row stem first.
+- **The stale lock relocked, and both seams are pinned.** The local
+  `uv.lock` (untracked by the 3.21.0 always-latest policy, but the
+  state `uv sync` resolves from) still pinned cquarry 1.23.2 against a
+  leftover `>=1.22.0` specifier while pyproject said `>=1.28.1` -- the
+  floor line had moved twice since the last relock; `uv lock` rode
+  this same pass and now pins 1.28.2 from PyPI.
+  `TestAddFormatExtensionRefusal` (version-gated, skipped below
+  1.28.2) pins both seams: the API refuses the extension and names the
+  stem to pass while a dotted stem stores verbatim, and the
+  `--add-format` verb fails with the ERROR line, exit 1, and an empty
+  `data` table.
+
 # 3.76.0 (2026-10-29)
 
 ### screen + evidence extractor: the parenthetical series annotation joins the strip list, and the copyright page's tail reaches the evidence row (issues #40, #41)

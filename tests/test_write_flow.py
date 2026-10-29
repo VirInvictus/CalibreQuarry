@@ -890,5 +890,69 @@ class TestSetColumnNbspParity(_TempDBCase):
         self.assertEqual(stored, "Poems\u00a0of\u2007W.\u202fB. Yeats")
 
 
+@unittest.skipUnless(
+    _cquarry_at_least(1, 28, 2),
+    "needs cquarry >= 1.28.2 (the format-row extension refusal)",
+)
+class TestAddFormatExtensionRefusal(_TempDBCase):
+    """Issue #42, the cquarry 1.28.2 adoption: the format-row setters
+    refuse an extension-carrying `name` before any SQL (cquarry issue #9:
+    a verbatim `.epub` name stored into data.name made every
+    `<name>.<fmt>` consumer build a double-extended path -- the live 11305
+    case where reconcile reported "1 unreadable/missing" off a
+    `<stem>.epub.epub` row while ebook-meta on the real path succeeded).
+    This frontend's free-text doors (`--add-format` here, the TUI Add
+    Format prompt) fail loudly on the new floor: run_write catches the
+    ValueError, prints the ERROR line naming the stem to pass, exits 1,
+    and writes nothing. Pins both seams so a library regression cannot
+    come back through the floor."""
+
+    def test_api_refuses_extension_and_allows_a_dotted_stem(self):
+        from cquarry.write import WritableCalibreDB
+
+        with WritableCalibreDB(self.db_path) as wdb:
+            with self.assertRaises(ValueError) as ctx:
+                wdb.add_format(1, "EPUB", "Old Title.epub", 123)
+            # The message names the stem to pass.
+            self.assertIn("Old Title", str(ctx.exception))
+            # A legitimate dotted stem passes and stores verbatim.
+            with wdb.batch():
+                wdb.add_format(1, "EPUB", "Anon.2023", 123)
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute(
+                    "SELECT book, format, name, uncompressed_size FROM data"
+                ).fetchall(),
+                [(1, "EPUB", "Anon.2023", 123)],
+            )
+        finally:
+            con.close()
+
+    def test_verb_fails_loudly_and_writes_nothing(self):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                [
+                    "--add-format",
+                    "1",
+                    "EPUB",
+                    "Old Title.epub",
+                    "555",
+                    "--db",
+                    self.db_path,
+                ]
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("ERROR:", err.getvalue())
+        self.assertIn("filename stem", err.getvalue())
+        self.assertNotIn("Old Title.epub", out.getvalue())
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM data").fetchone()[0], 0)
+        finally:
+            con.close()
+
+
 if __name__ == "__main__":
     unittest.main()

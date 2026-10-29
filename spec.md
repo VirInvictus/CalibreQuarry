@@ -1,8 +1,8 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.76.0  
+**Version:** 3.77.0  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry` (>= 1.28.1), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.28.2), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -22,7 +22,9 @@ The CLI/TUI frontend is decoupled from the database and search logic:
 
 **`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package.
 
-The floor is `cquarry >= 1.28.1`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
+The floor is `cquarry >= 1.28.2`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
+
+- **1.28.2**: the format-row setters (`add_format`/`set_format`) refuse an extension-carrying `name` before any SQL, naming the stem to pass (cquarry issue #9: a verbatim `.epub` name stored into `data.name` made every `<name>.<fmt>` consumer build a double-extended path -- the live 11305 case where reconcile reported "1 unreadable/missing" off a `<stem>.epub.epub` row while `ebook-meta` on the real path succeeded). This frontend's free-text doors (`--add-format`, the TUI Add Format prompt) fail loudly on the new floor (`run_write` maps the `ValueError` to `ERROR: ...`, exit 1, nothing written); `run_polish`/`run_merge` on a library still carrying a pre-1.28.2 double-extended row raise instead of re-registering the corrupt spelling (the remedy is the incident's own: fix the row stem first). `TestAddFormatExtensionRefusal` pins both seams.
 
 - **1.28.1**: the text-family custom-column writes normalize through the NBSP-preserving whitespace collapse (upstream `normalize_whitespace`, Calibre 9.17's own adapter): interior breaking-whitespace runs still collapse to one space and ends still strip, but the three non-breaking spaces (U+00A0, U+2007, U+202F) that Python's `str.split()` destroys survive, so a `--set-column` value stores what the 9.17 GUI would store (issue #35; the version-gated seam test pins the round-trip). `add_data_file`'s atomic temp-file write is in the same release with no consumer here.
 

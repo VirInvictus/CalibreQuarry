@@ -5,6 +5,33 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.77.0 onward, the cquarry 1.28.2 floor, issue #42)
+
+- **The floor is `>=1.28.2`, and the format-row extension guard is
+  upstream behavior this repo only pins.** cquarry issue #9: a
+  `name` ending case-insensitively with `.<fmt.lower()>` raises
+  `ValueError` before any SQL in both `add_format` and `set_format`,
+  naming the stem to pass; legitimate dotted stems pass, and an
+  `ORIGINAL_<FMT>` row refuses its own `.original_<ext>` spelling.
+  This frontend's only paths that can feed such a name are the
+  free-text ones (`--add-format`, the TUI Add Format prompt), and
+  `run_write` maps the raise to `ERROR: name must be the filename
+  stem, not the filename: ...`, exit 1, nothing written -- desired,
+  no code change. `run_polish`/`run_merge` take data-row-derived
+  paths and stay legal on healthy libraries; on a library still
+  carrying a pre-1.28.2 double-extended row they now raise where
+  they previously re-registered the corrupt spelling (surfacing it;
+  the remedy is fixing the row stem). `TestAddFormatExtensionRefusal`
+  (version-gated, skipped below 1.28.2) pins both seams: the API
+  refusal + dotted-stem pass, and the verb's ERROR/exit-1/nothing-
+  written surface. The local `uv.lock` relock rode this same pass
+  (the lock is untracked by the 3.21.0 always-latest policy, but it
+  is the state `uv sync` resolves from): it had pinned cquarry 1.23.2
+  against a leftover `>=1.22.0` specifier while pyproject said
+  `>=1.28.1`, so the floor line and the lock had drifted two bumps
+  apart -- after any future floor bump, `uv lock` runs in the same
+  pass.
+
 ## Programmer-facing contract notes (3.76.0 onward, the screening-and-evidence batch, issues #40-#41)
 
 - **The title judge strips ONE trailing parenthetical, and a
