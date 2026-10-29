@@ -2,7 +2,8 @@
 """extract_stamp_evidence: the stamp-research pass's evidence feeder.
 
 One JSON row per wave file (field set fixed 2026-10-14, issue #24, after
-four waves hand-rolled the same extractor and the copies diverged):
+four waves hand-rolled the same extractor and the copies diverged;
+isbn_snips widened and copyright_snips added 3.76.0, issue #41):
 
   file, path, fmt        -- what was scanned
   seed                   -- the embedded-metadata seed via `ebook-meta`
@@ -13,7 +14,12 @@ four waves hand-rolled the same extractor and the copies diverged):
   front                  -- the first pages' text: the first 4 spine
                             documents for an EPUB, `pdftotext` pages 1-4
                             for a PDF; other formats carry no front
-  isbn_snips             -- ISBN-shaped snippets from the front (<= 6)
+  isbn_snips             -- ISBN-shaped snippets, labeled AND bare,
+                            from the FULL text of those front documents
+                            (<= 6); `front` stays the size-capped sample
+  copyright_snips        -- the copyright page's edition lines and LCCN
+                            from the same full text (<= 6); since 3.76.0
+                            (issue #41)
   provenance             -- the filename marker's #source seed (the same
                             seeder phase 1 uses; since the standing
                             2026-10-12 ruling a bare name seeds Z-Lib)
@@ -121,6 +127,39 @@ _ISBN_SNIP_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: The label-free ISBN-13 shape (issue #41): Vellum builds print the
+#: number block with NO "ISBN" label at all ("978-1-63893-180-5
+#: (ebook)"), which the labeled regex above can never see. Exactly 13
+#: digits in a 978/979 prefix, separators optional and single-character,
+#: so the match ends at the check digit instead of eating a trailing
+#: hyphen run.
+_ISBN_BARE_RE = re.compile(r"97[89](?:[ -]?[0-9]){10}")
+
+#: The copyright page's edition line ("First Edition: June 2024") with
+#: the month/year tail when one rides the line.
+_EDITION_SNIP_RE = re.compile(
+    r"first editions?\b\s*[:;,]?\s*(?:[a-z]+\s+\d{4})?", re.IGNORECASE
+)
+
+#: The LCCN, in both of its printed spellings: the "LCCN" abbreviation
+#: and the words the trade copyright pages actually spell out ("Library
+#: of Congress Control Number: 2023948985").
+_LCCN_SNIP_RE = re.compile(
+    r"(?:lccn|library of congress control number)\s*:?\s*[0-9][0-9-]*",
+    re.IGNORECASE,
+)
+
+#: Snippets per field: the display cap of the evidence row, not a
+#: completeness claim (the research pass reads `front` too).
+_SNIP_CAP = 6
+
+
+def _snip_digits(value: str) -> str:
+    """The digit form an ISBN snippet dedups through (issue #41: one
+    number printed in two spellings lists once; the X check digit folds
+    case so the X/x spellings merge too)."""
+    return re.sub(r"[^0-9Xx]", "", value).upper()
+
 
 def _run_ebook_meta(path: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -146,12 +185,16 @@ def _local_name(el: ET.Element) -> str:
     return el.tag.split("}")[-1]
 
 
-def _epub_front(path: Path) -> tuple[str, list[str]]:
-    """(front text, opf identifier values). The OPF manifest and spine are
-    parsed with ElementTree: id and href are read as separate attributes
-    of each <item> element, so attribute ORDER never matters (the
-    2026-10-14 bug this script retires was an id-first regex that emptied
-    the manifest for href-first OPFs)."""
+def _epub_front(path: Path) -> tuple[str, list[str], str]:
+    """(front sample, opf identifier values, full front text). The OPF
+    manifest and spine are parsed with ElementTree: id and href are read
+    as separate attributes of each <item> element, so attribute ORDER
+    never matters (the 2026-10-14 bug this script retires was an
+    id-first regex that emptied the manifest for href-first OPFs). The
+    sample is the size-capped display shape; the third element is the
+    SAME documents uncapped, the text the snip scans run over (issue
+    #41: a copyright page's ISBN block can ride the tail its sample
+    truncates)."""
     with zipfile.ZipFile(path) as z:
         container = z.read("META-INF/container.xml").decode("utf-8", "replace")
         m = re.search(r'full-path="([^"]+)"', container)
@@ -178,6 +221,7 @@ def _epub_front(path: Path) -> tuple[str, list[str]]:
                 opf_ids.append(el.text.strip())
         base = posixpath.dirname(opf_name)
         texts: list[str] = []
+        full: list[str] = []
         for ref in spine[:_FRONT_DOC_COUNT]:
             href = manifest.get(ref)
             if not href:
@@ -190,17 +234,25 @@ def _epub_front(path: Path) -> tuple[str, list[str]]:
             except KeyError:
                 continue
             text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", doc))
+            full.append(text)
             texts.append(text[:_FRONT_DOC_CHARS])
-    return " | ".join(texts)[:_EPUB_FRONT_CHARS], opf_ids[:8]
+    return (
+        " | ".join(texts)[:_EPUB_FRONT_CHARS],
+        opf_ids[:8],
+        " | ".join(full),
+    )
 
 
 def _pdf_front(path: Path) -> str:
+    """The full whitespace-collapsed text of pages 1-4, uncapped; the
+    row builder takes the display sample from its head (issue #41: the
+    snip scans run over the whole thing)."""
     proc = _run_pdftotext(path)
     if proc.returncode != 0:
         raise RuntimeError(
             f"pdftotext exited {proc.returncode}: {(proc.stderr or '').strip()[:120]}"
         )
-    return re.sub(r"\s+", " ", proc.stdout)[:_PDF_FRONT_CHARS]
+    return re.sub(r"\s+", " ", proc.stdout)
 
 
 def _seed(path: Path) -> tuple[dict | None, str | None]:
@@ -226,11 +278,26 @@ def _seed(path: Path) -> tuple[dict | None, str | None]:
     return seed, None
 
 
-def _isbn_snips(front: str) -> list[str]:
-    # The whole front (it is size-capped at extraction time), so an EPUB
-    # row's fourth spine document is snip-scanned like the first.
-    snips = {m.group(1).strip() for m in _ISBN_SNIP_RE.finditer(front)}
-    return sorted(snips)[:6]
+def _isbn_snips(text: str) -> list[str]:
+    """Labeled and bare ISBN shapes from the full front text (issue #41).
+    One number printed in two spellings lists once (the digit-form dedup,
+    the lexicographically first spelling winning); snippets, not
+    verdicts: every candidate is checksum-validated by the research pass
+    before it becomes a stamp."""
+    per_key: dict[str, set[str]] = {}
+    for regex, group in ((_ISBN_SNIP_RE, 1), (_ISBN_BARE_RE, 0)):
+        for m in regex.finditer(text):
+            value = m.group(group).strip()
+            per_key.setdefault(_snip_digits(value), set()).add(value)
+    return sorted(min(values) for values in per_key.values())[:_SNIP_CAP]
+
+
+def _copyright_snips(text: str) -> list[str]:
+    """The copyright page's edition lines and LCCNs from the full front
+    text (issue #41). Snippets, not verdicts, like the ISBN shapes."""
+    found = {m.group(0).strip(" :;,") for m in _EDITION_SNIP_RE.finditer(text)}
+    found.update(m.group(0) for m in _LCCN_SNIP_RE.finditer(text))
+    return sorted(found)[:_SNIP_CAP]
 
 
 def _row(path: Path) -> dict:
@@ -243,20 +310,25 @@ def _row(path: Path) -> dict:
         "opf_ids": [],
         "front": "",
         "isbn_snips": [],
+        "copyright_snips": [],
         "provenance": _provenance_from_filename(str(path)),
         "error": None,
     }
     seed, error = _seed(path)
     row["seed"] = seed
     row["error"] = error
+    full_front = ""
     try:
         if fmt == "epub":
-            row["front"], row["opf_ids"] = _epub_front(path)
+            row["front"], row["opf_ids"], full_front = _epub_front(path)
         elif fmt == "pdf":
-            row["front"] = _pdf_front(path)
+            full_front = _pdf_front(path)
+            row["front"] = full_front[:_PDF_FRONT_CHARS]
     except Exception as e:  # one unreadable file never kills the run
         row["error"] = (row["error"] + "; " if row["error"] else "") + f"front: {e}"
-    row["isbn_snips"] = _isbn_snips(row["front"])
+    scan = full_front
+    row["isbn_snips"] = _isbn_snips(scan)
+    row["copyright_snips"] = _copyright_snips(scan)
     return row
 
 

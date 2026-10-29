@@ -969,9 +969,14 @@ class TestScreenDuplicateClassify(unittest.TestCase):
         self._check(
             "Wuthering Heights [Wordsworth Classics]", "Wuthering Heights", "duplicate"
         )
-        # An unknown parenthetical compares as title text, as before.
+        # A trailing parenthetical qualifier (a translator credit, issue
+        # #40) is store-front noise on the bare-held comparison: one side
+        # carrying it strips and the pair binds, exactly like the
+        # imprint tags above.
         self._check(
-            "The Mabinogion (Translated by Sioned Davies)", "The Mabinogion", None
+            "The Mabinogion (Translated by Sioned Davies)",
+            "The Mabinogion",
+            "duplicate",
         )
         # A known imprint named in prose is not a bracketed tag.
         self._check("The Penguin Classics Book", "The Penguin Classics", None)
@@ -1043,6 +1048,62 @@ class TestScreenDuplicateClassify(unittest.TestCase):
             "The Wandering Inn: Book 8",
             None,
         )
+
+    def test_trailing_series_annotation_binds_the_bare_held_copy(self):
+        # Issue #40's live miss (2026-10-28): a z-lib rip titled
+        # "A Court of Splintered Harmony (A Court of Thorns and Roses)"
+        # passed the screen with zero candidates against the held
+        # bare-form title (book 6.0 of the held ACOTAR row). The trailing
+        # parenthetical is store-front noise like the imprint tags: one
+        # side carrying it strips, and the pair binds as the refusal the
+        # hand-check then rules on.
+        self._check(
+            "A Court of Splintered Harmony (A Court of Thorns and Roses)",
+            "A Court of Splintered Harmony",
+            "duplicate",
+        )
+        # Identical annotations on both sides strip identically.
+        self._check(
+            "A Court of Wings and Ruin (A Court of Thorns and Roses)",
+            "A Court of Wings and Ruin (A Court of Thorns and Roses)",
+            "duplicate",
+        )
+        # A bracket-form annotation strips the same way.
+        self._check(
+            "Name of the Wind [The Kingkiller Chronicle]",
+            "Name of the Wind",
+            "duplicate",
+        )
+
+    def test_differing_trailing_parentheticals_are_distinct(self):
+        # The Plantz rule in its parenthetical form (issue #40's guard):
+        # two DIFFERENT trailing qualifiers are work identity, never
+        # stripped into a match. The colon form of the same rule stays
+        # covered by test_differing_real_subtitles_are_distinct_works.
+        self._check(
+            "Computer Organization (ARM)",
+            "Computer Organization (x86-64)",
+            "distinct",
+        )
+        self._check("Foo: Subtitle (ARM)", "Foo: Subtitle (x86-64)", "distinct")
+        # "Part One"/"Part Two" declare no volume the annotation gate can
+        # see (the roman parser reads neither word), so the paren rule
+        # owns the pair.
+        self._check("Foo (Part One)", "Foo (Part Two)", "distinct")
+        # Declared volumes in parens keep the volume rules, which read
+        # the RAW title: a disagreement is volume_sibling, and a
+        # one-sided arabic declaration stays a silent gap-fill.
+        self._check("Foo (Book 8)", "Foo (Book 9)", "volume_sibling")
+        self._check("Foo (Book 8)", "Foo", None)
+        self._check("Foo (Volume II)", "Foo (Volume III)", "volume_sibling")
+        # A non-trailing bracket is title text, as before: only the END
+        # of the title strips.
+        self._check("Foo (Series): Subtitle", "Foo: Subtitle", None)
+        # Deliberate widening the strip carries: with the qualifier gone,
+        # a paren-annotated title against a colon-subtitled edition of
+        # the same base is bare-base containment (an advisory candidate,
+        # not a silent pass).
+        self._check("Foo (Bar)", "Foo: Bar", "related")
 
     def test_arabic_asymmetric_volume_stays_silent(self):
         # The 3.25.0 gate unchanged: one side declaring an arabic volume the
@@ -5227,6 +5288,7 @@ class TestExtractStampEvidence(unittest.TestCase):
                 "opf_ids",
                 "front",
                 "isbn_snips",
+                "copyright_snips",
                 "provenance",
                 "error",
             },
@@ -5291,6 +5353,101 @@ class TestExtractStampEvidence(unittest.TestCase):
             ),
             [],
         )
+
+    def test_isbn_snips_read_the_label_free_shape_and_dedup(self):
+        # Issue #41's live mechanism (the Zando/Slowburn Weaver trilogy,
+        # 2026-10-29): Vellum copyright pages print the number block with
+        # NO "ISBN" label, which the labeled shape can never see.
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips("978-1-63893-180-5 (ebook)"),
+            ["978-1-63893-180-5"],
+        )
+        # Separator-free and space-separated spellings match, and the
+        # match ends at the check digit (no trailing-hyphen eat).
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips("9781638931805"),
+            ["9781638931805"],
+        )
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips("978 1 63893 180 5"),
+            ["978 1 63893 180 5"],
+        )
+        # One number in two spellings lists once; the hyphenated form
+        # sorts first and wins.
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips(
+                "ISBN 9780306406157 and 978-0-306-40615-7"
+            ),
+            ["978-0-306-40615-7"],
+        )
+        # A 978-prefixed number that is too short is not an ISBN shape.
+        self.assertEqual(extract_stamp_evidence._isbn_snips("ref 97812345 filed"), [])
+        # The X check digit folds case through the dedup key.
+        self.assertEqual(
+            extract_stamp_evidence._isbn_snips("ISBN 0-306-40615-X, isbn 030640615x"),
+            ["0-306-40615-X"],
+        )
+
+    def test_copyright_snips_read_edition_and_lccn_lines(self):
+        # Issue #41's evidence classes, in the live spellings: the
+        # edition month line and BOTH LCCN label forms.
+        self.assertEqual(
+            extract_stamp_evidence._copyright_snips(
+                "First Edition: June 2024 Text design by someone"
+            ),
+            ["First Edition: June 2024"],
+        )
+        self.assertEqual(
+            extract_stamp_evidence._copyright_snips(
+                "Library of Congress Control Number: 2023948985"
+            ),
+            ["Library of Congress Control Number: 2023948985"],
+        )
+        self.assertEqual(
+            extract_stamp_evidence._copyright_snips("LCCN 2024949155"),
+            ["LCCN 2024949155"],
+        )
+        self.assertEqual(extract_stamp_evidence._copyright_snips("no signals"), [])
+
+    def test_snips_scan_the_full_front_doc_past_the_sample_cap(self):
+        # Issue #41's truncation class: the ISBN block rides the TAIL of
+        # a copyright doc longer than the per-document sample cap. The
+        # row's front still truncates (the display shape), the snips do
+        # not (they scan the full text).
+        tail = "filler prose. " * 260 + (
+            "First Edition: June 2024. 978-1-63893-180-5 (ebook). "
+            "Library of Congress Control Number: 2023948985"
+        )
+        self._make_epub(self.wave / "Long Tail Book.epub", [("copyright", tail)])
+        rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        self.assertLess(len(row["front"]), len(tail), "the sample still caps")
+        self.assertNotIn("978-1-63893-180-5", row["front"])
+        self.assertEqual(row["isbn_snips"], ["978-1-63893-180-5"])
+        self.assertEqual(
+            row["copyright_snips"],
+            [
+                "First Edition: June 2024",
+                "Library of Congress Control Number: 2023948985",
+            ],
+        )
+
+    def test_pdf_snips_scan_past_the_page_sample_cap(self):
+        (self.wave / "Long Tail.pdf").write_bytes(b"%PDF-1.4 stub")
+        stdout = "page text " * 500 + "978-1-63893-174-4 (ebook)"
+        proc = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=stdout, stderr=""
+        )
+        with mock.patch.object(
+            extract_stamp_evidence, "_run_pdftotext", return_value=proc
+        ):
+            rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        self.assertLessEqual(len(row["front"]), extract_stamp_evidence._PDF_FRONT_CHARS)
+        self.assertNotIn("978-1-63893-174-4", row["front"])
+        self.assertEqual(row["isbn_snips"], ["978-1-63893-174-4"])
 
     def test_stale_module_seeder_falls_back_to_the_vendored_copy(self):
         # The issue-#20 skew shape: an installed cquarry_cli below the

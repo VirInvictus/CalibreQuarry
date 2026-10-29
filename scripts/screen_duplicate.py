@@ -40,12 +40,15 @@ The 2026-09-21 waves added three verdict classes to that equality:
   silently because the author brackets sat inside the compared stems in
   different orders; one side with real metadata never takes this path.
 
-The 3.63.7 imprint batch and issue #17's edition batch both widen what
-the judge treats as annotation noise rather than work identity: the
-curated imprint tags ("(Oxford World's Classics)") and the ordinal
-edition tags (", 3rd Edition", ": 2nd Edition", "4th ed.") strip from
-every compared string, while the volume annotations the series rules
-read stay on the RAW title.
+The 3.63.7 imprint batch, issue #17's edition batch, and issue #40's
+parenthetical batch all widen what the judge treats as annotation noise
+rather than work identity: the curated imprint tags ("(Oxford World's
+Classics)"), the ordinal edition tags (", 3rd Edition", ": 2nd Edition",
+"4th ed."), and a TRAILING parenthetical qualifier ("(A Court of Thorns
+and Roses)", a translator credit) strip from every compared string, while
+the volume annotations the series rules read stay on the RAW title and two
+DIFFERENT trailing qualifiers stay work identity (distinct), never
+stripped into a match.
 
 Issue #28 (3.68.0) gates every identifier binding by SHAPE: the
 2026-10-15 wave refused Poem of the Cid as a duplicate of Return to
@@ -436,9 +439,42 @@ def _strip_noise(text: str) -> str:
     return _strip_edition(_strip_imprint(text))
 
 
+# The trailing parenthetical qualifier rips bake into titles (issue #40:
+# the series annotation "A Court of Splintered Harmony (A Court of Thorns
+# and Roses)" defeated the judge on the held bare-form title). One group,
+# anchored at the end; nested or mid-title brackets are title text. The
+# content is judged, not blindly dropped: two DIFFERENT qualifiers are
+# work identity (the Plantz ARM-vs-x86 rule) and stay distinct.
+_TRAILING_PAREN = re.compile(r"\s*[\(\[]([^\(\)\[\]]*)[\)\]]\s*$")
+
+
+def _trailing_paren(text: str) -> str:
+    """The trailing parenthetical group's content ("Foo (Series)" ->
+    "series"), or "" when the title does not end in one. Feed it the
+    noise-stripped title, so a known imprint/edition tag's bracket never
+    counts as content."""
+    m = _TRAILING_PAREN.search(text or "")
+    return m.group(1) if m else ""
+
+
+def _strip_trailing_paren(text: str) -> str:
+    """The trailing parenthetical annotation removed, wherever the judge
+    compares (issue #40)."""
+    return _TRAILING_PAREN.sub(" ", text or "", count=1)
+
+
+def _judge_form(text: str) -> str:
+    """The string every title comparison starts from: imprint and edition
+    tags, then the trailing parenthetical, stripped (issues #13/#17/#40).
+    Imprint and edition first, so a known tag's bracket strips with its
+    set and never reads as parenthetical content."""
+    return _strip_trailing_paren(_strip_noise(text))
+
+
 def normalize_title(title: str) -> str:
     """Fold, drop the subtitle (anything before a colon), edition tokens,
-    known imprint tags, edition annotations, article.
+    known imprint tags, edition annotations, trailing parenthetical,
+    article.
 
     "Capital: Volume I" and "Capital: A Critique of Political Economy" both
     normalize to "capital"; "The Left Hand of Darkness" loses its article;
@@ -448,10 +484,13 @@ def normalize_title(title: str) -> str:
     "The Rust Programming Language, 3rd Edition" loses the edition
     annotation and normalizes next to the bare title (issue #17: the stamp
     strips the tag from new arrivals, so a held edition-tagged title
-    defeated the judge on a same-edition pair). A tag outside the known
-    sets compares as title text, as before.
+    defeated the judge on a same-edition pair); "A Court of Splintered
+    Harmony (A Court of Thorns and Roses)" loses the series annotation and
+    normalizes next to the held bare-form title (issue #40). Noise outside
+    the known sets and a non-trailing bracket compare as title text, as
+    before.
     """
-    text = _fold(_strip_noise(title))
+    text = _fold(_judge_form(title))
     text = text.split(":", 1)[0]
     text = _EDITION_TOKEN.sub(" ", text)
     return _scrub_tail(text)
@@ -460,12 +499,12 @@ def normalize_title(title: str) -> str:
 def _full_title(title: str) -> str:
     """The whole title, folded and scrubbed, subtitles and volume tokens
     kept — the string the containment check compares."""
-    return _scrub_tail(_fold(_strip_noise(title)))
+    return _scrub_tail(_fold(_judge_form(title)))
 
 
 def _subtitle(title: str) -> str:
     """The post-colon segment, folded and scrubbed ("" when no colon)."""
-    text = _fold(_strip_noise(title))
+    text = _fold(_judge_form(title))
     if ":" not in text:
         return ""
     return _scrub_tail(text.split(":", 1)[1])
@@ -493,7 +532,8 @@ def classify_titles(a: str, b: str) -> str | None:
     - "volume_sibling": distinct declared volumes of one series root
       (Moral Letters 1 vs 2; "Monster Vault" vs "Monster Vault 2").
     - "distinct": shared base, differing real subtitles (the ARM vs
-      x86-64 sibling editions).
+      x86-64 sibling editions), or differing trailing parentheticals
+      (the same rule in its parenthetical form, issue #40).
     - None: no opinion (the caller treats it as no match).
 
     The arabic-signature gate is today's 3.25.0 rule unchanged: one side
@@ -501,7 +541,11 @@ def classify_titles(a: str, b: str) -> str | None:
     (a Wandering Inn "Book 8" next to the bare series title is a gap-fill;
     surfacing every sibling flooded the 2026-08-30 screen). Roman-only
     declarations carry no signature and ride the annotation rules instead,
-    which is what keeps the Capital fixture matching.
+    which is what keeps the Capital fixture matching. The trailing-
+    parenthetical strip is symmetrical and judged (issue #40): one side
+    carrying a qualifier (a series annotation, a translator credit) strips
+    and the pair binds the bare held copy, but two DIFFERENT qualifiers
+    are work identity, never stripped into a match.
     """
     base_a, base_b = normalize_title(a), normalize_title(b)
     if not base_a or not base_b:
@@ -514,6 +558,14 @@ def classify_titles(a: str, b: str) -> str | None:
         return "volume_sibling" if base_a == base_b else None
     if (sig_a or sig_b) and sig_a != sig_b:
         return None
+    paren_a = _scrub_tail(_fold(_trailing_paren(_strip_noise(a))))
+    paren_b = _scrub_tail(_fold(_trailing_paren(_strip_noise(b))))
+    if paren_a and paren_b and paren_a != paren_b and base_a == base_b:
+        # Both sides carry a trailing qualifier and they disagree: real
+        # content, not storefront noise (the parenthetical Plantz rule).
+        # A disagreement over DIFFERENT bases is the bases' own business
+        # and falls through to the containment check unchanged.
+        return "distinct"
     if base_a != base_b:
         full_a, full_b = _full_title(a), _full_title(b)
         sub_a, sub_b = _subtitle(a), _subtitle(b)

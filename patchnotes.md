@@ -1,5 +1,60 @@
 # CalibreQuarry Patch Notes
 
+# 3.76.0 (2026-10-29)
+
+### screen + evidence extractor: the parenthetical series annotation joins the strip list, and the copyright page's tail reaches the evidence row (issues #40, #41)
+
+Two vetting-session misses, one per tool, the same family: the evidence
+was on the page and the reader refused to see it.
+
+- **The title judge strips a trailing parenthetical qualifier**
+  (screen_duplicate.py, issue #40: the 2026-10-28 wave's z-lib rip
+  "A Court of Splintered Harmony (A Court of Thorns and Roses)" passed
+  the screen with zero candidates against the held bare-form title --
+  book 6.0 of the held ACOTAR row, no shared ISBN or ASIN). The
+  judge's normalization pass now runs imprint tags, edition tags, then
+  ONE trailing `(...)`/`[...]` group off every compared string (base,
+  full, subtitle, core), so a qualifier on one side strips and the pair
+  binds the bare held copy as a duplicate: the refusal the phase-1
+  hand-check then rules on, where before it read clean. The strip is
+  judged, not blind. When BOTH sides carry a trailing qualifier and
+  they disagree over an equal base, the pair is `distinct` (the Plantz
+  ARM-vs-x86 rule in its parenthetical form). The volume rules keep
+  reading the RAW title, so a paren-wrapped "(Book 8)" still declares
+  its volume: disagreeing declarations stay volume_sibling and a
+  one-sided arabic declaration stays the silent gap-fill. A bracket
+  that is not at the end of the title stays title text, and the known
+  imprint and edition tags strip FIRST, so "(Oxford World's Classics)"
+  never counts as parenthetical content and the two-imprints-collide
+  pin stands. One pinned behavior retires on purpose: an unknown
+  trailing parenthetical against the bare held title ("The Mabinogion
+  (Translated by Sioned Davies)") was no-opinion, now binds. The
+  strip's one widening beyond the issue is pinned too: "Foo (Bar)"
+  against "Foo: Bar" is now a related candidate, was silent.
+- **The evidence row reads the label-free ISBN and the full front
+  text, and gains a `copyright_snips` field** (extract_stamp_evidence.py,
+  issue #41: the Zando/Slowburn Weaver trilogy's rows all came back
+  `isbn_snips: []` while the books' own copyright pages printed
+  everything, and the stamps were nearly settled NONE). Two gaps, both
+  closed, and the live books' mechanism was the first one: the labeled
+  snip shape requires an "ISBN" label, and Vellum builds print the
+  number block bare ("978-1-63893-180-5 (ebook)") -- the three pages
+  were never actually truncated, they were unlabeled. A second shape
+  now matches exactly 13 digits on a 978/979 prefix, separators
+  optional and single-character, so the match ends at the check digit.
+  The truncation class the issue names is closed too: the snips
+  scanned the size-capped front sample, so evidence riding a long
+  copyright doc's tail was lost; the scan now runs over the full text
+  of the same front documents, and `front` itself stays the capped
+  display shape, byte for byte. `copyright_snips` carries the edition
+  lines ("First Edition: June 2024", month and year included) and the
+  LCCN in both printed spellings ("LCCN ..." and the words the trade
+  pages actually spell out). One number printed in two spellings lists
+  once (digit-form dedup, X/x folded). Snippets stay snippets: the
+  research pass still checksum-validates before anything becomes a
+  stamp. Live-verified on the three library books the issue names
+  (11452/11455/11457): every corrected stamp value reaches its row.
+
 # 3.75.0 (2026-10-25)
 
 ### reconcile: the embed's NCX scar is healed by a third pass and the scars it cannot heal are on the record (issue #37)

@@ -5,6 +5,50 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.76.0 onward, the screening-and-evidence batch, issues #40-#41)
+
+- **The title judge strips ONE trailing parenthetical, and a
+  disagreement over it is work identity.** `_judge_form()` (imprint
+  tags, edition tags, then `_strip_trailing_paren`: one
+  `(...)`/`[...]` group anchored at the end of the title, content free
+  of nested brackets) is the string every compared form starts from
+  (`normalize_title`, `_full_title`, `_subtitle`, and so `_core_title`).
+  `classify_titles` judges the content: both sides' trailing-paren
+  content reads from the NOISE-STRIPPED title (so a known imprint or
+  edition tag's bracket never counts as content), a one-sided or equal
+  qualifier strips silently and the pair binds (the issue-#40 ACOTAR
+  duplicate), while both present, differing, over an equal base is
+  `distinct` -- the check sits after the annotation/signature gates,
+  which still read the RAW title, so a paren-wrapped "(Book 8)" keeps
+  its volume rules (disagreement -> volume_sibling, one-sided arabic ->
+  the None gap-fill). A non-trailing bracket is title text; differing
+  qualifiers over DIFFERING bases fall through to the containment
+  check. Retired pin: "The Mabinogion (Translated by Sioned Davies)"
+  vs the bare held title was None, now duplicate; the strip's one
+  widening beyond the issue is pinned too ("Foo (Bar)" vs "Foo: Bar" is
+  now bare-base related, was None).
+- **The evidence row's snips scan the FULL front text, and
+  `copyright_snips` joins the field set.** `_epub_front` returns a
+  third element: the same first-4-spine-docs text uncapped (`front`
+  keeps its exact capped-sample shape: per-doc 1500, total 4000), and
+  `_pdf_front` returns its pages-1-4 text uncapped with the row taking
+  the 3000-char sample from its head. Both snip scans run over that
+  full text (`scan = full_front`; an extraction failure leaves it
+  empty, so the failed row snips empty as before). `isbn_snips` gains
+  the label-free shape `_ISBN_BARE_RE` (`97[89](?:[ -]?[0-9]){10}`:
+  exactly 13 digits on a 978/979 prefix, single-character separators,
+  ends at the check digit -- no trailing-hyphen eat) beside the labeled
+  shape, deduped through `_snip_digits` (digits plus an uppercased X;
+  the lexicographically first spelling of each number wins the
+  listing), cap still 6. `_copyright_snips` harvests the "First
+  Edition" lines (`_EDITION_SNIP_RE`, optional month-word + year tail,
+  edge punctuation stripped) and the LCCN in both printed spellings
+  (`_LCCN_SNIP_RE`: the `LCCN` abbreviation OR the spelled-out "Library
+  of Congress Control Number" the trade pages actually print), sorted,
+  cap 6. Both stay snippet classes: the research pass checksum-validates
+  before anything becomes a stamp. The row-shape pin test carries the
+  new field.
+
 ## Programmer-facing contract notes (3.75.0 onward, the embed-scar batch, issue #37)
 
 - **The embed's NCX half is healed by a third post-embed pass.**
