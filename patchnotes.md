@@ -1,5 +1,54 @@
 # CalibreQuarry Patch Notes
 
+# 3.78.0 (2026-10-30)
+
+### the printed-ISBN scan batch: bare numbers, typographic dashes, and the mid-book copyright page (issue #43)
+
+The audit lost confirmations three ways at once, all on real 2026-batch
+books, and all three are fixed. Verified live against the 24-book sample
+the 2026-10-25 through 2026-10-30 imports contributed: the 14 false
+NO_ISBN_PRINTED rows became 13 CONFIRMED and one honest AMBIGUOUS, and
+nothing else in the sample changed verdict.
+
+- **The scanner reads the label-free and typographic-dash shapes now**
+  (scripts/audit_isbns.py). A new bare pattern matches exactly 13 digits
+  on a 978/979 prefix, separators optional and single-character so the
+  match ends at the check digit, with digit-run boundaries on both ends
+  so a longer numeric token cannot donate a checksum-valid phantom: the
+  audit-side twin of extract_stamp_evidence.py's issue #41 fix. A bare
+  run counts only with copyright furniture nearby (the SELF_ID window),
+  so unlabelled numbers are still dates, phone numbers, and part numbers
+  everywhere else and the citation protections stand unchanged. The
+  labelled pattern's separator class widened to the typographic dashes
+  publishers actually set between digits: the Pushkin Press copyright
+  pages print the whole number in en dashes
+  ("ISBN 13: 978–1–78227–833–7"), which [-\s] never crossed
+  (live 11421 The Mill House Murders, whose stored eISBN sat two lines
+  from its print twin).
+- **A window that yields nothing self-identified is rescanned whole
+  before the verdict.** The default read is a head/tail window, and the
+  copyright page can sort mid-book: the issue's live specimen (11468
+  Sorrow and Starlight) files it at position 87 of 94, after forty
+  lowercase chapter-*.xhtml docs. EPUB and PDF now take one full-file
+  second pass whenever the window's finds are all uncorroborated
+  (citations included), not just when it comes back empty; verdicts the
+  window already settled stand untouched, the full text is a strict
+  superset of the window so the second pass only ever adds evidence, and
+  djvu (already front-matter-bounded) stays out of the rescan.
+- **The one verdict that changed shape is honest.** 11419 The Fourth
+  Door reads AMBIGUOUS now instead of NO_ISBN_PRINTED: the rescan found
+  its file prints two ISBNs, neither of them the stored one. That is the
+  exact "several printed, none stored: a human picks" case the tool
+  exists to surface, not a regression.
+- **Tests carry the real lines.** The issue's verbatim
+  "ISBN-13 - 978-1-914425-59-2" line, the Pushkin en-dash page, the
+  Macmillan space-set block, the NYRB mixed form, the Vellum label-free
+  shape beside its furniture, a 15-doc fixture whose copyright doc sorts
+  outside the window (unit and end-to-end), the pdf fallback through a
+  mocked pdftotext, and the no-ISBN-anywhere true negative (11419's
+  original verdict, pinned so the rescan never becomes a confirmatory
+  bias).
+
 # 3.77.0 (2026-10-29)
 
 ### the cquarry 1.28.2 floor: the format-row setters refuse extension-carrying names (issue #42)

@@ -76,7 +76,10 @@ a human to judge.
 Text comes from EPUB spine documents (stdlib zipfile), PDF via pdftotext, and
 DJVU via djvutxt; the external binaries are optional and their absence is
 reported, not fatal. MOBI/AZW3 are skipped: extracting their text needs more
-machinery than a check like this earns.
+machinery than a check like this earns. The first read is a front/back window;
+a book whose window yields nothing self-identified is rescanned whole before
+the verdict, because the copyright page can sort mid-book and a false
+NO_ISBN_PRINTED is a lost confirmation (issue #43).
 
 Run from the library directory:
     python3 audit_isbns.py                        # every book with an ISBN
@@ -134,10 +137,27 @@ from vir_tui import core as ui
 
 # A number only counts when the book introduces it as an ISBN. Bare 10-13 digit
 # runs are everywhere in printed matter (dates, part numbers, phone numbers).
+# Separators are the ASCII hyphen and whitespace this pattern always knew plus
+# the typographic dashes publishers' ebooks actually set between the digits:
+# the Pushkin Press copyright pages print the whole number in EN DASHES
+# ("ISBN 13: 978-1-78227-833-7"), which [-\s] could never cross (issue #43).
+SEP = r"[-\s\u2010-\u2015]"
 ISBN_LABELLED_RE = re.compile(
-    r"ISBN(?:[-\s]?1[03])?[^0-9]{0,24}((?:97[89][-\s]?)?(?:\d[-\s]?){9}[\dXx])",
+    rf"ISBN(?:{SEP}?1[03])?[^0-9]{{0,24}}"
+    rf"((?:97[89]{SEP}?)?(?:\d{SEP}?){{9}}[\dXx])",
     re.IGNORECASE,
 )
+# The label-free shape (issue #43, the audit-side twin of
+# extract_stamp_evidence.py's issue #41 fix): Vellum-style copyright pages
+# print the number with no "ISBN" label at all ("978-1-63893-180-5 (ebook)"),
+# which a labelled pattern can never see. Exactly 13 digits on a 978/979
+# prefix, separators optional and single-character, so the match ends at the
+# check digit instead of eating a trailing hyphen run, and digit-run
+# boundaries on both ends keep a longer numeric token from donating a
+# checksum-valid phantom. A bare run only counts with copyright furniture
+# nearby (the SELF_ID window below): unlabelled 13-digit numbers are still
+# dates, part numbers, and phone numbers everywhere else in a book.
+ISBN_BARE_RE = re.compile(rf"(?<![0-9])97[89](?:{SEP}?[0-9]){{10}}(?![0-9])")
 # An ISBN counts as the book's own only when one of these sits near it. They
 # are the furniture of a copyright page (or a CIP block) and are exactly what a
 # citation, an advertisement, or a joke list lacks.
@@ -174,6 +194,10 @@ EPUB_TAIL_DOCS = 3
 PDF_HEAD_PAGES = 14
 PDF_TAIL_PAGES = 3
 DJVU_PAGES = 12
+# Formats whose default read is a subset of the file, and so are owed the
+# full-file rescan when that subset finds no printed ISBN (issue #43). djvu
+# is already front-matter-bounded and stays out.
+PARTIAL_WINDOW_FORMATS = ("epub", "pdf")
 
 MAX_TEXT_BYTES = 4 * 1024 * 1024
 SUBPROCESS_TIMEOUT = 90
@@ -233,11 +257,14 @@ def printed_isbns(text: str) -> list[str]:
     self-referential joke titles, and C++ Primer Plus advertises six other Sams
     books on its back matter.
 
-    What separates them is corroboration. A copyright page never carries a bare
-    number: it sits with a copyright line, a rights reservation, a binding, a
-    printing statement, or a CIP block. A citation carries none of that. So an
-    ISBN counts only when such a marker appears near it, which is positive
-    evidence rather than an attempt to enumerate every way a citation can look.
+    What separates them is corroboration. A copyright-page number sits with a
+    copyright line, a rights reservation, a binding, a printing statement, or a
+    CIP block; a citation carries none of that. Labelled ISBNs always count
+    (the positive direction needs no corroboration: a citation coinciding with
+    our own value does not happen). A BARE number counts only when such a
+    marker appears near it: on the copyright page itself an unlabelled
+    13-digit run is the book's own (the Vellum builds), anywhere else it is a
+    date, a phone number, or a part number.
     """
     return sorted(_scan(text)[0])
 
@@ -248,7 +275,12 @@ def self_identified_isbns(text: str) -> list[str]:
 
 
 def _scan(text: str) -> tuple[set[str], set[str]]:
-    """Every labelled, checksum-valid ISBN, and the self-identifying subset."""
+    """Every labelled, checksum-valid ISBN, and the self-identifying subset.
+
+    Bare 978/979 runs join both sets only under corroboration; labelled
+    finds take the original two-tier path (everything counts as printed,
+    only corroborated ones as self-identification).
+    """
     text = text or ""
     every: set[str] = set()
     mine: set[str] = set()
@@ -262,20 +294,35 @@ def _scan(text: str) -> tuple[set[str], set[str]]:
         ]
         if SELF_ID_RE.search(window):
             mine.add(isbn)
+    for match in ISBN_BARE_RE.finditer(text):
+        if not checksum_ok(match.group()):
+            continue
+        isbn = to_isbn13(match.group())
+        window = text[
+            max(0, match.start() - SELF_ID_WINDOW) : match.end() + SELF_ID_WINDOW
+        ]
+        if SELF_ID_RE.search(window):
+            every.add(isbn)
+            mine.add(isbn)
     return every, mine
 
 
 # --------------------------------------------------------------------------- #
 # text extraction (body text only -- never embedded metadata)
 # --------------------------------------------------------------------------- #
-def epub_text(path: str) -> str | None:
+def epub_text(path: str, full: bool = False) -> str | None:
     try:
         with zipfile.ZipFile(path) as z:
             names = [n for n in z.namelist() if n.lower().endswith(XHTML_SUFFIXES)]
             if not names:
                 return None
             names.sort()
-            chosen = names[:EPUB_HEAD_DOCS] + names[-EPUB_TAIL_DOCS:]
+            # full=True (issue #43): the copyright page can sort mid-book
+            # (a 94-doc Vellum build files it after forty lowercase
+            # chapter-*.xhtml docs), outside any head/tail window. The
+            # window stays the default; the fallback scan asks for the
+            # whole spine explicitly, same byte cap.
+            chosen = names if full else names[:EPUB_HEAD_DOCS] + names[-EPUB_TAIL_DOCS:]
             out: list[str] = []
             size = 0
             for name in dict.fromkeys(chosen):
@@ -313,7 +360,9 @@ def pdf_page_count(path: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def pdf_text(path: str) -> str | None:
+def pdf_text(path: str, full: bool = False) -> str | None:
+    if full:
+        return _run(["pdftotext", path, "-"])
     chunks = []
     head = _run(["pdftotext", "-f", "1", "-l", str(PDF_HEAD_PAGES), path, "-"])
     if head:
@@ -327,14 +376,16 @@ def pdf_text(path: str) -> str | None:
     return "\n".join(chunks) if chunks else None
 
 
-def djvu_text(path: str) -> str | None:
+def djvu_text(path: str, full: bool = False) -> str | None:
+    # No full mode: the 12-page read is already front-matter-bounded, and an
+    # unbounded djvutxt pass over an OCR-heavy scan is cost without a case.
     return _run(["djvutxt", f"--page=1-{DJVU_PAGES}", path])
 
 
 EXTRACTORS = {".epub": epub_text, ".pdf": pdf_text, ".djvu": djvu_text}
 
 
-def book_text(book_dir: str) -> tuple[str | None, str | None]:
+def book_text(book_dir: str, full: bool = False) -> tuple[str | None, str | None]:
     """Body text of the first readable file, with the format that supplied it.
 
     The returned format distinguishes two failures that look alike in a report
@@ -353,7 +404,7 @@ def book_text(book_dir: str) -> tuple[str | None, str | None]:
         if not extractor:
             continue
         attempted = ext.lstrip(".")
-        text = extractor(os.path.join(book_dir, entry))
+        text = extractor(os.path.join(book_dir, entry), full)
         if text:
             return text, attempted
     return None, attempted
@@ -668,6 +719,20 @@ def main() -> int:
         else:
             printed = printed_isbns(text)
             claimed = self_identified_isbns(text)
+            if not claimed and fmt in PARTIAL_WINDOW_FORMATS:
+                # A window that produced no self-identified ISBN is the one
+                # verdict the whole-file rescan can fix (issue #43): the
+                # copyright page can sort mid-book, and a window whose only
+                # finds are uncorroborated citations reads the same as an
+                # empty one. The full text is a strict superset of the
+                # window, so the second pass only ever adds evidence.
+                full_text, _ = book_text(
+                    os.path.join(library_root, target["path"]), full=True
+                )
+                if full_text:
+                    text = full_text
+                    printed = printed_isbns(text)
+                    claimed = self_identified_isbns(text)
             verdict = classify(target["isbn"], printed, args.max_printed, claimed)
             years = _copyright_years(text)
         pub_year = None

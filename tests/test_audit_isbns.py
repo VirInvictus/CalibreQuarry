@@ -69,15 +69,69 @@ class TestIsbnArithmetic(unittest.TestCase):
 
 
 class TestPrintedIsbnExtraction(unittest.TestCase):
-    def test_requires_the_isbn_label(self):
-        """Bare digit runs are everywhere in books; only labelled ones count."""
-        self.assertEqual(
-            isbns.printed_isbns("call 9780201183993 today. All rights reserved."), []
-        )
+    def test_labelled_isbn_counts_and_bare_runs_without_furniture_stay_noise(self):
+        """A bare 13-digit run in running text is still a date, a phone
+        number, a part number: without copyright furniture nearby it stays
+        noise even on a 978/979 prefix. (The old rule was stricter -- only
+        labelled numbers counted at all; issue #43 relaxed exactly that.)"""
+        self.assertEqual(isbns.printed_isbns("call 9780201183993 today."), [])
         self.assertEqual(
             isbns.printed_isbns("All rights reserved. ISBN: 978-0-201-18399-3"),
             ["9780201183993"],
         )
+
+    def test_counts_a_bare_978_run_beside_copyright_furniture(self):
+        """The Vellum shape (issues #41/#43): a copyright page printing the
+        number with no ISBN label at all. Corroboration, not the label, is
+        what separates it from the phone numbers."""
+        text = "All rights reserved. 978-1-63893-180-5 (ebook)"
+        self.assertEqual(isbns.printed_isbns(text), ["9781638931805"])
+        self.assertEqual(isbns.self_identified_isbns(text), ["9781638931805"])
+
+    def test_bare_match_never_carves_a_longer_digit_run(self):
+        """Boundary guards: a 14-digit token does not donate a checksum-valid
+        13-digit phantom (9780140445688 out of 978014044568899)."""
+        self.assertEqual(
+            isbns.printed_isbns("All rights reserved. 978014044568899 (ebook)"), []
+        )
+
+    def test_typographic_dash_separators(self):
+        """Pushkin Press sets the whole number in EN DASHES, which [-\s]
+        never crossed (issue #43, live 11421 The Mill House Murders: the
+        stored eISBN 9781782278344 sits two lines from its print twin)."""
+        text = (
+            "First published by Pushkin Press in 2023 1 3 5 7 9 8 6 4 2 "
+            "ISBN 13: 978\u20131\u201378227\u2013833\u20137 "
+            "eISBN: 978\u20131\u201378227\u2013834\u20134 All rights reserved."
+        )
+        self.assertEqual(isbns.printed_isbns(text), ["9781782278337", "9781782278344"])
+        self.assertEqual(
+            isbns.self_identified_isbns(text), ["9781782278337", "9781782278344"]
+        )
+
+    def test_the_issue_verbatim_dashed_label_line(self):
+        """11468 Sorrow and Starlight, verbatim: the label joined to the
+        number by a spaced dash, 'ISBN-13 - 978-1-914425-59-2'."""
+        text = (
+            "Sorrow and Starlight/Caroline Peckham & Susanne Valenti - 1st ed. "
+            "ISBN-13 - 978-1-914425-59-2"
+        )
+        self.assertIn("9781914425592", isbns.printed_isbns(text))
+
+    def test_space_separated_and_mixed_separator_forms(self):
+        """More real 2026-batch lines: Macmillan sets spaces, NYRB mixes
+        dashes into an otherwise bare run."""
+        macmillan = (
+            "ISBN (HB) 978 0 85705 309 1 ISBN (TPB) 978 0 85705 310 7 "
+            "ISBN (Ebook) 978 1 84866 325 1"
+        )
+        self.assertIn("9781848663251", isbns.printed_isbns(macmillan))
+        nyrb = "ISBN 978-1-59017-9079 \u2014 ISBN 978-1-59017-906-2 (paperback)"
+        self.assertIn("9781590179079", isbns.printed_isbns(nyrb))
+
+    def test_a_number_printed_twice_labelled_and_bare_lists_once(self):
+        text = "ISBN 978-0-201-18399-3 and again 978-0-201-18399-3 (ebook)"
+        self.assertEqual(isbns.printed_isbns(text), ["9780201183993"])
 
     def test_tolerates_label_variants_and_separators(self):
         for text in (
@@ -399,6 +453,140 @@ class TestEpubExtraction(unittest.TestCase):
             path = pathlib.Path(tmp) / "broken.epub"
             path.write_bytes(b"not a zip")
             self.assertIsNone(isbns.epub_text(str(path)))
+
+
+class TestMidBookCopyrightPage(unittest.TestCase):
+    """Issue #43's dominant mechanism: the copyright doc sorts mid-book, so
+    the head/tail window never sees it (live 11468: position 87 of 94, after
+    forty lowercase chapter-*.xhtml docs). A window that finds nothing is
+    the one verdict the full-file rescan can fix, and it must not disturb
+    verdicts the window already settled."""
+
+    def _epub(self, tmp, docs):
+        path = pathlib.Path(tmp) / "b.epub"
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            for doc_name, body in docs.items():
+                z.writestr(doc_name, body)
+        return str(path)
+
+    @staticmethod
+    def _filler(n):
+        return f"<p>filler {n} with no digits or labels</p>"
+
+    def _docs(self, copyright_body=None):
+        docs = {f"doc-{n:02d}.xhtml": self._filler(n) for n in range(1, 15)}
+        # doc-09 sorts outside the head-8/tail-3 window on purpose
+        if copyright_body:
+            docs["doc-09.xhtml"] = copyright_body
+        return docs
+
+    def test_window_misses_a_mid_book_copyright_doc_full_read_sees_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._epub(
+                tmp,
+                self._docs("<p>All rights reserved.</p><p>ISBN: 978-0-201-18399-3</p>"),
+            )
+            window_text = isbns.epub_text(path)
+            self.assertIsNotNone(window_text)
+            self.assertEqual(isbns.printed_isbns(window_text), [])
+            full_text = isbns.epub_text(path, full=True)
+            self.assertEqual(isbns.printed_isbns(full_text), ["9780201183993"])
+
+    def _library(self, tmp, copyright_body, extra_docs=None):
+        root = pathlib.Path(tmp)
+        db = root / "metadata.db"
+        con = sqlite3.connect(db)
+        con.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT,
+                path TEXT, pubdate TEXT);
+            CREATE TABLE identifiers (book INTEGER, type TEXT, val TEXT);
+            CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_tags_link (book INTEGER, tag INTEGER);
+            INSERT INTO books VALUES (1, 'Tech Book', 'A/Tech Book (1)', '2019-01-01');
+            INSERT INTO identifiers VALUES (1, 'isbn', '0201183994');
+            """
+        )
+        con.commit()
+        con.close()
+        book_dir = root / "A" / "Tech Book (1)"
+        book_dir.mkdir(parents=True)
+        docs = self._docs(copyright_body)
+        if extra_docs:
+            docs.update(extra_docs)
+        with zipfile.ZipFile(book_dir / "book.epub", "w") as z:
+            z.writestr("mimetype", "application/epub+zip")
+            for name, body in docs.items():
+                z.writestr(name, body)
+        return str(db)
+
+    def _run_json(self, db):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.argv", ["audit_isbns.py", "--db", db, "--format", "json"]):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = isbns.main()
+        return rc, json.loads(out.getvalue())
+
+    def test_main_confirms_through_the_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._library(
+                tmp, "<p>All rights reserved.</p><p>ISBN: 978-0-201-18399-3</p>"
+            )
+            rc, rows = self._run_json(db)
+            self.assertEqual(rc, 0)
+            self.assertEqual(rows[0]["verdict"], "CONFIRMED")
+            self.assertEqual(rows[0]["printed"], ["9780201183993"])
+
+    def test_no_printed_isbn_anywhere_stays_no_isbn_printed(self):
+        """The fallback is a second look, not a confirmatory bias: a book
+        that prints no ISBN at all (live 11419 The Fourth Door) still reads
+        NO_ISBN_PRINTED, which is not a finding and exits 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._library(tmp, None)
+            rc, rows = self._run_json(db)
+            self.assertEqual(rc, 0)
+            self.assertEqual(rows[0]["verdict"], "NO_ISBN_PRINTED")
+
+    def test_rescan_fires_on_a_citation_only_window(self):
+        """The gate is 'nothing self-identified', not 'empty window': a
+        back-matter ad citing another book's ISBN (labelled, no furniture)
+        reads the same as an empty window, and must not stop the rescan
+        that would find the mid-book copyright page."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._library(
+                tmp,
+                "<p>All rights reserved.</p><p>ISBN: 978-0-201-18399-3</p>",
+                extra_docs={
+                    "doc-13.xhtml": "<p>More from the author. "
+                    "ISBN 978-1-54201-562-2</p>"
+                },
+            )
+            rc, rows = self._run_json(db)
+            self.assertEqual(rc, 0)
+            self.assertEqual(rows[0]["verdict"], "CONFIRMED")
+
+    def test_pdf_fallback_reads_the_whole_document(self):
+        """The pdf window can also miss a mid-book copyright page; the
+        rescan there is one unwindowed pdftotext pass."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._library(tmp, None)
+            book_dir = pathlib.Path(tmp) / "A" / "Tech Book (1)"
+            (book_dir / "book.epub").unlink()
+            (book_dir / "book.pdf").write_bytes(b"%PDF-1.4 fake")
+
+            def fake_run(cmd):
+                if cmd[0] == "pdfinfo":
+                    return "Pages: 30\n"
+                if "-f" in cmd:  # windowed head/tail calls: front matter only
+                    return "A title page, no numbers\n"
+                return "All rights reserved. ISBN 978-0-201-18399-3\n"
+
+            with mock.patch.object(isbns, "_run", side_effect=fake_run):
+                rc, rows = self._run_json(db)
+            self.assertEqual(rc, 0)
+            self.assertEqual(rows[0]["verdict"], "CONFIRMED")
+            self.assertEqual(rows[0]["format"], "pdf")
 
 
 class TestSkippedVsUnreadable(unittest.TestCase):
