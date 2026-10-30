@@ -5,6 +5,44 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.78.0 onward, the printed-ISBN scan batch, issue #43)
+
+- **audit_isbns.py's scan doctrine, restated for the record.** A
+  labelled ISBN (the `ISBN_LABELLED_RE` shape) always counts as printed;
+  corroboration (a `SELF_ID_RE` marker within `SELF_ID_WINDOW`, 260
+  chars) decides self-identification, and only self-identified numbers
+  count against the stored one. The separator class is now
+  `[-\s\u2010-\u2015]`: whitespace plus the typographic dashes
+  publishers actually set between digits (the Pushkin Press pages are
+  all en dashes), shared by the labelled and bare patterns alike.
+  cquarry's `isbn_normalize` strips those dashes, so the checksum gate
+  accepts the separated forms unchanged.
+- **The new `ISBN_BARE_RE` is corroborated-only.** It matches exactly
+  13 digits on a 978/979 prefix, separators optional and
+  single-character so the match ends at the check digit, with
+  digit-run boundaries (`(?<![0-9])` / `(?![0-9])`) so a longer numeric
+  token cannot donate a checksum-valid phantom; a bare run joins both
+  sets only when copyright furniture sits in its window, so unlabelled
+  numbers stay noise everywhere else in a book. This is the audit-side
+  twin of `extract_stamp_evidence.py`'s issue #41 shape -- there the
+  finds are snippets a research pass judges, here they are corroboration-
+  gated verdict evidence.
+- **The window is not the verdict.** The default read stays the
+  head/tail window, but a book whose window yields nothing
+  self-identified (`claimed` empty; a window of uncorroborated
+  citations reads the same as an empty one) is rescanned whole:
+  `epub_text(..., full=True)` reads the entire spine and
+  `pdf_text(..., full=True)` one unwindowed pdftotext pass, both still
+  `MAX_TEXT_BYTES`-capped; djvu has no full mode by design. The full
+  text is a strict superset of the window, so the rescan only ever adds
+  evidence; a verdict the window already settled never rescans.
+- **`TestMidBookCopyrightPage` is the fixture contract**: a 15-doc EPUB
+  whose copyright doc sorts at doc-09, outside the head-8/tail-3
+  window, driven unit-side and end-to-end; beside it the pdf fallback
+  through a mocked pdftotext, the citation-only-window rescan pin, and
+  the no-ISBN-anywhere true negative (the rescan must never become a
+  confirmatory bias).
+
 ## Programmer-facing contract notes (3.77.0 onward, the cquarry 1.28.2 floor, issue #42)
 
 - **The floor is `>=1.28.2`, and the format-row extension guard is
