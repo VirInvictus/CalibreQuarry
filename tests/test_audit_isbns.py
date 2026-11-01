@@ -118,6 +118,28 @@ class TestPrintedIsbnExtraction(unittest.TestCase):
         )
         self.assertIn("9781914425592", isbns.printed_isbns(text))
 
+    def test_the_issue_verbatim_ebook_isbn_block(self):
+        """11536 A Christmas of Chaos, the live copyright block: the label
+        'Ebook ISBN:' and per-binding tags ('(Kindle)', '(Epub)') are the
+        page's only corroboration -- the classic rights lines sit ~500
+        characters above, past the SELF_ID window. The second number rides
+        no label of its own (the label is the preceding line's) and both
+        single-digit hyphen groups after the 978-1 prefix."""
+        text = (
+            "No part of this book may be reproduced in any form or any "
+            "electronic or mechanical means (including use or reproduction in "
+            "any manner for the purpose of training artificial intelligence "
+            "technologies or systems).  "
+            "Ebook ISBN:  "
+            "978-1-7374559-3-6 (Kindle)  "
+            "978-1-7374559-4-3 (Epub)  "
+            "v1.1"
+        )
+        self.assertEqual(isbns.printed_isbns(text), ["9781737455936", "9781737455943"])
+        self.assertEqual(
+            isbns.self_identified_isbns(text), ["9781737455936", "9781737455943"]
+        )
+
     def test_space_separated_and_mixed_separator_forms(self):
         """More real 2026-batch lines: Macmillan sets spaces, NYRB mixes
         dashes into an otherwise bare run."""
@@ -493,19 +515,19 @@ class TestMidBookCopyrightPage(unittest.TestCase):
             full_text = isbns.epub_text(path, full=True)
             self.assertEqual(isbns.printed_isbns(full_text), ["9780201183993"])
 
-    def _library(self, tmp, copyright_body, extra_docs=None):
+    def _library(self, tmp, copyright_body, extra_docs=None, isbn="0201183994"):
         root = pathlib.Path(tmp)
         db = root / "metadata.db"
         con = sqlite3.connect(db)
         con.executescript(
-            """
+            f"""
             CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT,
                 path TEXT, pubdate TEXT);
             CREATE TABLE identifiers (book INTEGER, type TEXT, val TEXT);
             CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT);
             CREATE TABLE books_tags_link (book INTEGER, tag INTEGER);
             INSERT INTO books VALUES (1, 'Tech Book', 'A/Tech Book (1)', '2019-01-01');
-            INSERT INTO identifiers VALUES (1, 'isbn', '0201183994');
+            INSERT INTO identifiers VALUES (1, 'isbn', '{isbn}');
             """
         )
         con.commit()
@@ -537,6 +559,44 @@ class TestMidBookCopyrightPage(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(rows[0]["verdict"], "CONFIRMED")
             self.assertEqual(rows[0]["printed"], ["9780201183993"])
+
+    def test_main_confirms_the_ebook_block_shape(self):
+        """Issue #47 end to end (live 11536 A Christmas of Chaos): the
+        copyright doc sorts outside the window, and the page corroborates its
+        numbers only with the 'Ebook ISBN:' label and the '(Kindle)'/'(Epub)'
+        binding tags -- the rights lines ride ~500 characters above, past the
+        SELF_ID horizon. The stored ISBN is the EPUB binding printed bare on
+        the second line; before the binding vocabulary landed this read
+        NO_ISBN_PRINTED with both numbers already in hand."""
+        body = (
+            "<p>Copyright © 2019 by the author</p>"
+            "<p>All rights reserved.</p>"
+            "<p>The characters and events portrayed in this book are fictitious "
+            "or are used fictitiously. Any similarity to real persons, living "
+            "or dead, is purely coincidental and not intended by the author.</p>"
+            "<p>No part of this book may be reproduced in any form or any "
+            "electronic or mechanical means (including use or reproduction in "
+            "any manner for the purpose of training artificial intelligence "
+            "technologies or systems).</p>"
+            "<p>Ebook ISBN:</p>"
+            "<p>978-1-7374559-3-6 (Kindle)</p>"
+            "<p>978-1-7374559-4-3 (Epub)</p>"
+            "<p>v1.1</p>"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            db = self._library(
+                tmp,
+                body,
+                isbn="9781737455943",
+            )
+            window_text = isbns.epub_text(
+                str(pathlib.Path(tmp) / "A" / "Tech Book (1)" / "book.epub")
+            )
+            self.assertEqual(isbns.self_identified_isbns(window_text), [])
+            rc, rows = self._run_json(db)
+            self.assertEqual(rc, 0)
+            self.assertEqual(rows[0]["verdict"], "CONFIRMED")
+            self.assertEqual(rows[0]["printed"], ["9781737455936", "9781737455943"])
 
     def test_no_printed_isbn_anywhere_stays_no_isbn_printed(self):
         """The fallback is a second look, not a confirmatory bias: a book

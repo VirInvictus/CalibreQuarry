@@ -160,15 +160,22 @@ ISBN_LABELLED_RE = re.compile(
 ISBN_BARE_RE = re.compile(rf"(?<![0-9])97[89](?:{SEP}?[0-9]){{10}}(?![0-9])")
 # An ISBN counts as the book's own only when one of these sits near it. They
 # are the furniture of a copyright page (or a CIP block) and are exactly what a
-# citation, an advertisement, or a joke list lacks.
+# citation, an advertisement, or a joke list lacks. The binding vocabulary is
+# curated and grows as rips surface new shapes; the ebook-block forms (issue
+# #47, live 11536 A Christmas of Chaos) are the modern self-contained page:
+# the classic rights lines sit hundreds of characters above the numbers, past
+# the window, and the page corroborates instead with the label "Ebook ISBN:"
+# and per-binding tags ("978-1-7374559-3-6 (Kindle)"), so the binding words
+# count on BOTH shapes -- as a parenthetical after the number and as a label
+# before it.
 SELF_ID_RE = re.compile(
     r"copyright\s*(?:©|\(c\)|\d{4})"
     r"|all\s+rights\s+reserved"
     r"|cataloging[- ]in[- ]publication|cataloguing[- ]in[- ]publication"
     r"|first\s+(?:published|printing|edition)"
     r"|printed\s+(?:and\s+bound\s+)?in\b"
-    r"|\(\s*(?:pbk|paperback|hardback|hardcover|cloth|e-?book|ebook|alk)"
-    r"|\b(?:paperback|hardcover|hardback)\s+(?:edition|isbn)"
+    r"|\(\s*(?:pbk|paperback|hardback|hardcover|cloth|e-?book|ebook|alk|epub|kindle)\)"
+    r"|\b(?:paperback|hardcover|hardback|e-?book|epub|kindle)\s+(?:edition|isbn)"
     r"|in\s+(?:\w+\s+){1,3}format"  # "in Adobe Digital Editions format"
     r"|written\s+permission",
     re.IGNORECASE,

@@ -5,6 +5,43 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.82.0 onward, the ebook-block corroboration, issue #47)
+
+- **SELF_ID_RE's binding vocabulary is two-shaped, and both halves
+  grew.** The parenthetical group knows `epub|kindle` beside the ebook
+  spellings it already carried, and the binding-label group
+  (`<binding> isbn/edition`) knows `e-?book|epub|kindle` beside
+  paperback/hardcover/hardback. The live shape (11536 A Christmas of
+  Chaos) corroborates exclusively this way: "Ebook ISBN:" labels the
+  Kindle number, "(Epub)" tags the bare EPUB number on the next line,
+  and the page's rights lines sit 472-718 characters above the
+  numbers, past the 260-char window. The window stays 260
+  deliberately: the doctrine is furniture NEAR the number, and the
+  vocabulary, not the horizon, is what grows.
+- **The misdiagnosis is on the record because the issue carried it.**
+  The issue's three suspects (an unlabeled continuation line,
+  single-digit hyphen groups, the parenthetical tags as match
+  blockers) were all already handled by the 3.78.0 patterns: both
+  numbers matched, the first was already in `printed` as a labelled
+  find. The failure was the claimed set staying empty (a labelled find
+  never corroborated), which classifies NO_ISBN_PRINTED even with the
+  stored ISBN's sibling in hand. The diagnostic shape worth keeping:
+  `_scan(full_text)` returning `every` non-empty with `mine` empty
+  names corroboration vocabulary, never the number patterns.
+- **The blast radius was measured, not assumed.** A seeded 150-book
+  sample over the live library (seed 47) moved exactly one row beyond
+  the specimen: 561 Wings of the Storm, the same mechanism (its own
+  bare-printed ISBN corroborated by a nearby binding tag),
+  NO_ISBN_PRINTED -> CONFIRMED. Nothing moved toward a finding, and
+  the issue's honest-NO contrast (11537) stays NO_ISBN_PRINTED.
+- **Tests** (tests/test_audit_isbns.py):
+  `test_the_issue_verbatim_ebook_isbn_block` pins the verbatim page
+  text, both numbers printed AND self-identified on label+tags alone;
+  `test_main_confirms_the_ebook_block_shape` drives the end-to-end
+  rescan path through main() over a mid-book copyright doc the window
+  misses, corroborated only by the label and the binding tags
+  (`_library` takes the stored isbn now).
+
 ## Programmer-facing contract notes (3.81.0 onward, the cover.jpg-only contract, issue #46)
 
 - **The floor is `>=1.28.3`, and the cover naming is upstream behavior

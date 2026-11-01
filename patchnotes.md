@@ -1,5 +1,62 @@
 # CalibreQuarry Patch Notes
 
+# 3.82.0 (2026-11-01)
+
+### The audit's corroboration reads the ebook block (issue #47)
+
+audit_isbns.py read NO_ISBN_PRINTED on 11536 A Christmas of Chaos
+(Scarlett St. Clair, self-pub 2025) although the book's copyright page
+prints both of its ISBNs and the 3.78.0 full-file rescan had the first
+one in hand:
+
+```
+Ebook ISBN: 978-1-7374559-3-6 (Kindle)
+978-1-7374559-4-3 (Epub)
+```
+
+The issue's three suspects were each already handled by the 3.78.0
+patterns: the separators cross the single-digit hyphen groups after the
+978-1 prefix (both numbers matched), and a continuation line carrying
+no label of its own is exactly what the bare 978/979 shape reads. The
+blocker was corroboration. The page's classic furniture ("Copyright
+© 2025", "All rights reserved") sits 472-718 characters above the
+numbers, past the 260-character SELF_ID window, and this page
+corroborates instead the modern way: the "Ebook ISBN:" label and
+per-binding tags ("(Kindle)", "(Epub)") against the numbers
+themselves. SELF_ID_RE knew neither: the parenthetical binding group
+knew (pbk|paperback|hardback|hardcover|cloth|e-book|ebook|alk) but not
+epub or kindle, and the binding-label group
+("paperback|hardcover|hardback isbn/edition") knew no ebook bindings
+at all. A labelled find with no corroboration counts as printed but
+never self-identified, so the claimed set stayed empty and classify
+fell through to NO_ISBN_PRINTED with the numbers already extracted.
+
+- **The binding vocabulary grows on both shapes, the curated-set
+  precedent.** `epub|kindle` join the parenthetical group beside the
+  ebook spellings it already carried, and `e-?book|epub|kindle` join
+  the binding-label group beside paperback/hardcover/hardback. The
+  window stays 260: the doctrine is furniture NEAR the number, this
+  page's rights lines stay outside it on purpose, and the vocabulary,
+  not the horizon, is what grows.
+- **Verified live on the issue's own books.** 11536 reads CONFIRMED
+  (the stored 9781737455943 is the EPUB binding printed bare on the
+  second line; the Kindle twin sits directly above it), and the
+  honest-NO contrast 11537 still reads NO_ISBN_PRINTED with nothing
+  printed anywhere. A seeded 150-book sample over the live library
+  moved exactly one other row (561 Wings of the Storm), the same
+  mechanism: its own ISBN prints bare with a binding tag nearby and
+  was already being extracted but never corroborated, so
+  NO_ISBN_PRINTED became CONFIRMED. No verdict in the sample moved in
+  the other direction.
+- **Tests.** The verbatim block test pins both numbers printed AND
+  self-identified on the label-plus-tags evidence alone
+  (`test_the_issue_verbatim_ebook_isbn_block`), and the end-to-end
+  test drives the real rescan path through main(): a mid-book
+  copyright doc the window misses, corroborated only by the label and
+  the binding tags (`test_main_confirms_the_ebook_block_shape`;
+  `_library` now takes the stored isbn). The phase-3 skill's
+  audit_isbns paragraph gains the same note in the same release.
+
 # 3.81.0 (2026-11-01)
 
 ### The cquarry 1.28.3 floor: covers are cover.jpg-only (issue #46)
