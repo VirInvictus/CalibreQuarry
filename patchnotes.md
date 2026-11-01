@@ -31,7 +31,8 @@ IS "everything coverless" does not demand a target list).
   grid): a page whose modal quantized color covers 95% of the samples
   is an empty or near-empty sheet (or a sparse half-title), not cover
   art; a fully typeset title page still passes, the gate's named
-  residual, and the dry run is where a human sees it before --apply. The wrapper gate runs
+  residual, and the dry run is where a human sees it before --apply.
+  The wrapper gate runs
   `pdftotext` over page 1 and declines on a curated document-mill host
   list (ilide, pdfcoffee, vdoc.pub, dokumen.pub, and siblings; the list
   grows as rips surface shapes, the `_IMPRINT_TAG` precedent). A
