@@ -66,7 +66,7 @@ IS "everything coverless" does not demand a target list).
 
 `coversource.py` owns the ladder (the news.py precedent: a verb with
 enough surface owns its module; integrate.py dispatches it and shares
-`resolve_targets`). Tests: 37 in `tests/test_coversource.py` -- mocked
+`resolve_targets`). Tests: 42 in `tests/test_coversource.py` -- mocked
 seams for the rungs and rails, real cquarry writes read back through
 `get_cover_bytes`, and a live class driving real pdftoppm/pdftotext
 over crafted PDFs (busy, blank, wrapper-banner; skipped when poppler is
