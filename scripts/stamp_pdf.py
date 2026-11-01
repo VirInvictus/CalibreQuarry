@@ -32,14 +32,19 @@ stamp had landed, only the reader was blind), recorded as verified. Only
 a field exiftool ALSO fails to hold is the stubborn-XMP class: STAMP_FAILED,
 exit nonzero, do not keep fighting; phase 3 fixes the field in SQL instead.
 
-Two rc != 0 write-failure shapes recover mechanically, each exactly once
+Three rc != 0 write-failure shapes recover mechanically, each exactly once
 (shared recovery: a `qpdf --replace-input` rebuild whose page count must
 be preserved — a changed count restores the backup copy — then ONE stamp
 retry): exiftool cannot PARSE the file at all (a Perl-space error;
 2026-09-26: "Can't find Root object" off a malformed catalog Names array,
-on a file `qpdf --check` passes), and exiftool refuses the WRITE over a
+on a file `qpdf --check` passes), exiftool refuses the WRITE over a
 damaged xref (2026-10-14, issue #21: "Error: Invalid xref table" on a file
-qpdf documents as "xref not found ... attempting to reconstruct"). A retry
+qpdf documents as "xref not found ... attempting to reconstruct"), and the
+write's object capture hits a FlateDecode stream predictor exiftool cannot
+decode (2026-10-31, issue #44: "Error: FlateDecode Predictor 2 currently
+not supported" — PDF.pm supports exactly predictors 1 and 12, and an
+undecodable ObjStm holding the Root sinks the capture; qpdf re-encodes the
+streams, the live file's predictor read 2 before and 12 after). A retry
 that still fails, and every other rc != 0 shape, stays STAMP_FAILED
 immediately.
 
@@ -175,6 +180,34 @@ def _is_xref_failure(proc: subprocess.CompletedProcess) -> bool:
     """exiftool rc != 0 with an error naming a bad xref: the write-refusal
     class the parse-crash regex deliberately does not match."""
     return proc.returncode != 0 and bool(_xref_detail(proc))
+
+
+#: exiftool WRITE-refusal signatures naming a stream predictor it cannot
+#: decode (2026-10-31, issue #44: "Error: FlateDecode Predictor 2 currently
+#: not supported" on an Acrobat 6 scan whose object stream holds the Root).
+#: PDF.pm supports exactly predictors 1 and 12 and refuses the rest while
+#: fetching objects for the write capture, so the number is matched
+#: generically; qpdf re-encodes the streams either way.
+_PREDICTOR_FAIL_RE = re.compile(
+    r"\bFlateDecode Predictor \d+ currently not supported\b", re.IGNORECASE
+)
+
+
+def _predictor_detail(proc: subprocess.CompletedProcess) -> str:
+    """The first refused-predictor error line (trimmed), for the recovery
+    notice."""
+    for stream in (proc.stderr, proc.stdout):
+        for line in (stream or "").splitlines():
+            if _PREDICTOR_FAIL_RE.search(line):
+                return line.strip()[:120]
+    return ""
+
+
+def _is_predictor_failure(proc: subprocess.CompletedProcess) -> bool:
+    """exiftool rc != 0 with an error naming a refused FlateDecode
+    predictor: the write-refusal class the other two regexes deliberately
+    do not match."""
+    return proc.returncode != 0 and bool(_predictor_detail(proc))
 
 
 def _pdf_page_count(path: Path) -> int | None:
@@ -546,13 +579,22 @@ def main() -> int:
         )
         exif_args.append(str(f))
         proc = _run_exiftool(exif_args)
-        if proc.returncode != 0 and (_is_parse_crash(proc) or _is_xref_failure(proc)):
+        if proc.returncode != 0 and (
+            _is_parse_crash(proc)
+            or _is_xref_failure(proc)
+            or _is_predictor_failure(proc)
+        ):
             # The recoverable write-failure classes (one shot each):
             # parse-crash, exiftool cannot even read the file (2026-09-26);
             # bad-xref, the write refused over a damaged xref table
-            # (2026-10-14). Same mechanical cure: a qpdf rebuild and
-            # exactly one retry; anything less clean stays a failure.
-            detail = _crash_detail(proc) or _xref_detail(proc)
+            # (2026-10-14); refused-predictor, the write's object capture
+            # hit a FlateDecode stream predictor PDF.pm cannot decode
+            # (2026-10-31, issue #44). Same mechanical cure: a qpdf
+            # rebuild and exactly one retry; anything less clean stays a
+            # failure.
+            detail = (
+                _crash_detail(proc) or _xref_detail(proc) or _predictor_detail(proc)
+            )
             print(
                 f"  {DIM}exiftool failed on the file ({detail}); "
                 f"attempting one qpdf rebuild{RESET}"

@@ -1,5 +1,56 @@
 # CalibreQuarry Patch Notes
 
+# 3.79.0 (2026-10-31)
+
+### stamp_pdf self-heals the refused-predictor write class (issue #44)
+
+The third member of the recovery family. `RuneQuest - King of Sartar.pdf`
+(25 MB Chaosium 1992 scan, the 2026-10-31 wave) died STAMP_FAILED with
+`Error: FlateDecode Predictor 2 currently not supported` while `qpdf
+--check` called the file clean: exiftool's PDF.pm supports exactly
+FlateDecode predictors 1 and 12, and the write path's object capture must
+decode the ObjStm holding the Root, so an undecodable object stream
+escalates the captured Warning into a write refusal (WritePDF.pl names
+the warning when Main/Root/xref fails to capture). The manual cure that
+worked live -- one `qpdf --replace-input`, delete the `.~qpdf-orig`,
+retry the identical command -- is exactly the one-shot rebuild the
+bad-xref class (issue #21) already gets, so the script runs it itself
+now.
+
+- **`_PREDICTOR_FAIL_RE` matches the refused-predictor family
+  generically.** `FlateDecode Predictor <N> currently not supported`,
+  any N, case-insensitive, stderr or stdout: PDF.pm refuses every
+  predictor except 1 and 12, and the cure is identical whatever the
+  number (qpdf re-encodes the streams; the live file's ObjStm read
+  predictor 2 before the heal and 12 after). `_predictor_detail` and
+  `_is_predictor_failure` mirror the xref pair, and the recovery block
+  is now the three-predicate disjunction with the same shape as before:
+  exactly one rebuild, page count verified preserved (a changed count
+  restores the backup and keeps the failure), ONE stamp retry, the
+  sort-erase detection re-read after the rebuild, and a failed retry is
+  never rebuilt again. The LZWDecode predictor twin (PDF.pm's other
+  refusal, line 1330) is deliberately not matched: no live case, and a
+  different filter family.
+- **Pinned by `TestStampPdfGuards` at the same three seams as the xref
+  class**: refusal -> rebuild (page count preserved) -> retry stamps and
+  verifies; retry still failing -> STAMP_FAILED with no second rebuild;
+  and the predicate shapes (any refused number matches; rc 0, the
+  parse-crash class, the xref class, and plain tool errors never do).
+- **Live-verified end to end.** The issue's originals were all healed in
+  place by the manual recipe (the issue's /tmp pointer is post-qpdf now
+  and no longer exhibits the failure, which is the point), so the
+  specimen is crafted: a 1-page PDF 1.5 whose catalog lives in a
+  Predictor-2 ObjStm over a proper xref stream. It reproduces the exact
+  fatal (`Error: FlateDecode Predictor 2 currently not supported`, rc 1)
+  on the pre-fix recovery block, and the fixed script self-heals through
+  the real qpdf 12.3.2 / exiftool 13.50 / calibre 9.17 binaries:
+  rebuild verified (1 page preserved), retry lands, stamped and
+  verified.
+- **The phase-1 skill's stamp-recovery paragraph is swept to THREE
+  shapes** in the same release, naming this class and its live case;
+  the manual-recipe knowledge it retired is now the STAMP_FAILED
+  residual's diagnosis path (rebuild refused or retry failed too).
+
 # 3.78.0 (2026-10-30)
 
 ### the printed-ISBN scan batch: bare numbers, typographic dashes, and the mid-book copyright page (issue #43)

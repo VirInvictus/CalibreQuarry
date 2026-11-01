@@ -5,6 +5,32 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.79.0 onward, the refused-predictor self-heal, issue #44)
+
+- **stamp_pdf's recovery family has a third predicate.**
+  `_PREDICTOR_FAIL_RE` (`\bFlateDecode Predictor \d+ currently not
+  supported\b`, IGNORECASE, stderr or stdout via `_predictor_detail`) is
+  matched GENERICALLY over the predictor number: exiftool's PDF.pm
+  supports exactly predictors 1 and 12 and refuses the rest, and the
+  cure (a qpdf re-encode) is identical whatever the number. The
+  recovery block is the three-predicate disjunction
+  (`_is_parse_crash or _is_xref_failure or _is_predictor_failure`) over
+  the SAME one-shot shape: one `qpdf --replace-input`, page count
+  verified preserved (a changed count restores the backup), ONE retry,
+  the sort-erase detection re-read after the rebuild, a failed retry
+  never rebuilt. The LZWDecode predictor twin (PDF.pm:1330, which
+  refuses ANY predictor) is deliberately unmatched: no live case,
+  different filter family; add it to the same block if one ever
+  arrives. Mechanism worth having on the record: the fatal is
+  WritePDF.pl escalating the captured UnFilter warning to `Error:` when
+  the pre-write capture loses Main/Root/xref -- in the live King of
+  Sartar file that was a Predictor-2 ObjStm holding the Root, which is
+  why a plain image- or XMP-stream predictor (warn-only shapes) never
+  fails a stamp and cannot be used as a fixture. The live originals are
+  all post-qpdf (healed in place by the manual recipe), so the pinned
+  live shape is the crafted specimen: catalog in a Predictor-2 ObjStm
+  over an xref stream, repro rc 1 pre-fix, self-healed rc 0 post-fix.
+
 ## Programmer-facing contract notes (3.78.0 onward, the printed-ISBN scan batch, issue #43)
 
 - **audit_isbns.py's scan doctrine, restated for the record.** A

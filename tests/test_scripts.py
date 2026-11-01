@@ -2979,6 +2979,131 @@ class TestStampPdfGuards(unittest.TestCase):
             stamp_pdf._is_xref_failure(self._crash(stderr="Error: Unknown file type\n"))
         )
 
+    # --- the refused-predictor write-failure class (2026-10-31, issue
+    # #44): exiftool rc != 0 naming a FlateDecode stream predictor it
+    # cannot decode gets the same one-shot qpdf rebuild + retry as the
+    # parse-crash and bad-xref classes.
+
+    def _predictor_refusal(self, predictor=2):
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stderr=f"Error: FlateDecode Predictor {predictor} currently not supported"
+            " - /tmp/wave/scan.pdf\n",
+            stdout="",
+        )
+
+    def test_predictor_write_failure_rebuilds_and_retries_once(self):
+        # The King of Sartar live shape: the write's object capture hits a
+        # Predictor-2 ObjStm, the rebuild preserves the page count, the
+        # retry stamps and verifies.
+        backup = Path(self.tmp.name + "-backups")
+        counts = iter(["25", "25"])
+
+        def qpdf(args):
+            if "--show-npages" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=next(counts), stderr=""
+                )
+            return self._ok()
+
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf,
+                "_run_exiftool",
+                side_effect=[self._predictor_refusal(), self._ok()],
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf", side_effect=qpdf) as q,
+            mock.patch.object(
+                stamp_pdf,
+                "_read_ebook_meta",
+                return_value={"title": "Wonderland"},
+            ),
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("FlateDecode Predictor 2 currently not supported", out)
+        self.assertIn("attempting one qpdf rebuild", out)
+        self.assertIn("25 pages preserved", out)
+        self.assertIn("stamped and verified", out)
+        self.assertEqual(
+            len(self._write_calls(run)), 2, "the failed write plus one retry"
+        )
+        self.assertEqual(
+            self._qpdf_flags(q),
+            ["--show-npages", "--replace-input", "--show-npages"],
+        )
+
+    def test_predictor_retry_still_failing_is_stamp_failed(self):
+        # Exactly one recovery, shared with the other two classes: the
+        # retried write dies too, so STAMP_FAILED with no second rebuild.
+        backup = Path(self.tmp.name + "-backups")
+        counts = iter(["3", "3"])
+
+        def qpdf(args):
+            if "--show-npages" in args:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=next(counts), stderr=""
+                )
+            return self._ok()
+
+        with (
+            mock.patch.object(stamp_pdf.shutil, "which", return_value="/usr/bin/x"),
+            mock.patch.object(
+                stamp_pdf,
+                "_run_exiftool",
+                side_effect=[self._predictor_refusal(), self._predictor_refusal()],
+            ) as run,
+            mock.patch.object(stamp_pdf, "_run_qpdf", side_effect=qpdf) as q,
+        ):
+            rc, out = self._run_main(
+                "--apply", "--backup-dir", str(backup), "--title", "Wonderland"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("STAMP_FAILED", out)
+        self.assertEqual(len(self._write_calls(run)), 2, "one retry, not three")
+        self.assertEqual(
+            self._qpdf_flags(q),
+            ["--show-npages", "--replace-input", "--show-npages"],
+            "no second rebuild after a failed retry",
+        )
+
+    def test_is_predictor_failure_shapes(self):
+        # The live refusal matches at any refused predictor number (PDF.pm
+        # supports exactly 1 and 12); rc 0, the parse-crash class, the
+        # xref class, and plain tool errors never do.
+        self.assertTrue(stamp_pdf._is_predictor_failure(self._predictor_refusal()))
+        self.assertTrue(
+            stamp_pdf._is_predictor_failure(self._predictor_refusal(predictor=15))
+        )
+        self.assertFalse(
+            stamp_pdf._is_predictor_failure(
+                subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stderr="",
+                    stdout=self._predictor_refusal().stderr,
+                )
+            ),
+            "rc 0 is a warning-only refusal, never a write failure",
+        )
+        self.assertFalse(
+            stamp_pdf._is_predictor_failure(self._crash()),
+            "the parse-crash class has its own recovery",
+        )
+        self.assertFalse(
+            stamp_pdf._is_predictor_failure(self._xref_refusal()),
+            "the xref class has its own recovery",
+        )
+        self.assertFalse(
+            stamp_pdf._is_predictor_failure(
+                self._crash(stderr="Error: Unknown file type\n")
+            )
+        )
+
     # --- the read-back arbitration (2026-10-14, issue #22): a verify
     # mismatch is re-read through exiftool; only fields it also fails to
     # hold are the stubborn-XMP class.
