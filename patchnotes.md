@@ -1,5 +1,52 @@
 # CalibreQuarry Patch Notes
 
+# 3.81.0 (2026-11-01)
+
+### The cquarry 1.28.3 floor: covers are cover.jpg-only (issue #46)
+
+Upstream aligned both sides of its cover surface with Calibre itself,
+which reads ONLY `cover.jpg` (`calibre/db/constants.py`
+`COVER_FILE_NAME`; zero cover-filename references in
+`calibre/db/backend.py`). The trigger was this repo's own 3.80.0
+pipeline: the 2026-11-01 CofD batch's nine PDF books carried page-1
+renders that passed every programmatic check yet showed nothing in the
+GUI, because 1.28.2's `set_cover` filed a PNG payload as `cover.png`
+(cquarry issue #10). cquarry 1.28.3 writes `cover.jpg` always, PNG
+payloads included, bytes verbatim (no transcode), and sweeps a stale
+`cover.png`; the reads (`get_cover_path`/`get_cover_bytes`/
+`get_cover_last_modified`) resolve `cover.jpg` only, so a legacy
+png-only row answers None, the GUI's own answer.
+
+This frontend needed no code change: the release is the floor bump plus
+the pin, the issue-#42 precedent.
+
+- **`run cover-source` is fixed by the floor, not edited.** The
+  ladder's writes ride `wdb.set_cover` untouched, so rung-2 page-1
+  renders (PNG by construction) and rung-3 sibling donations land at
+  `cover.jpg` and become GUI-visible. The read-side drop shifts rung 3
+  gracefully: a png-only sibling now yields None from
+  `get_cover_bytes` and the target declines with the existing
+  "has no cover file" note. `scripts/audit_cover_aspect.py` moves
+  png-only books into its skip bucket the same way; the cure for those
+  books is the healing one-call below, not an audit change.
+- **`TestCoverJpgNaming` (version-gated, skipped below 1.28.3) pins
+  both sides at this repo's seam.** A PNG payload lands at `cover.jpg`
+  and round-trips through `get_cover_bytes`; a stale `cover.png` is
+  swept by the next write; a legacy png-only row (built by hand:
+  set_cover, then rename) reads None through both `get_cover_path` and
+  `get_cover_bytes`; and a png-only sibling stops donating, declined
+  through the ladder with its no-file note. The
+  `has_cover`-flag-without-a-file test's stale comment (it named
+  `cover.png` as what set_cover writes) is swept to the new naming.
+  Tests: 46 in `tests/test_coversource.py` (the 42 plus these four).
+- **Healing legacy png-only books** (anything a cquarry <= 1.28.2
+  write ever filed as `cover.png`): one `set_cover(book_id, png_bytes)`
+  call rewrites the same bytes at `cover.jpg`;
+  `cquarry.integrity.find_missing_cover_files` lists exactly the
+  affected ids. The phase-3 skill's "Cover renders must land as JPEG,
+  never PNG" workaround paragraph is retired by the same stroke and
+  was swept in this release.
+
 # 3.80.0 (2026-11-01)
 
 ### `run cover-source`: the coverless-import pipeline as a verb (issue #45)

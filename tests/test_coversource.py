@@ -291,6 +291,86 @@ class CoverSourceCase(unittest.TestCase):
         return rows
 
 
+# --- the cover.jpg naming contract (cquarry 1.28.3) --------------------
+
+
+def _cquarry_at_least(major: int, minor: int, patch: int) -> bool:
+    try:
+        from importlib.metadata import version
+
+        parts = tuple(int(p) for p in version("cquarry").split(".")[:3])
+    except Exception:
+        return False
+    return parts >= (major, minor, patch)
+
+
+@unittest.skipUnless(
+    _cquarry_at_least(1, 28, 3),
+    "needs cquarry >= 1.28.3 (covers are cover.jpg-only)",
+)
+class TestCoverJpgNaming(CoverSourceCase):
+    """Issue #46, the cquarry 1.28.3 adoption: upstream aligned both
+    sides of its cover surface with Calibre itself, which reads ONLY
+    `cover.jpg` (calibre/db/constants.py COVER_FILE_NAME; zero
+    cover.png references in calibre/db/backend.py). set_cover writes
+    cover.jpg ALWAYS -- PNG payloads included, bytes verbatim, no
+    transcode -- and sweeps a stale cover.png; the reads resolve
+    cover.jpg only, so a legacy png-only row answers None, the GUI's
+    own answer. The ladder rides this unchanged (rung-2 renders become
+    GUI-visible at cover.jpg; a png-only sibling stops donating, the
+    "has no cover file" decline). This repo only pins the contract --
+    the code is upstream's, and the floor keeps a stale library from
+    pairing the old write shape with the new expectations."""
+
+    _COVER_NAMES = "cover.*"
+
+    def _book_dir(self) -> Path:
+        return self.tmpdir / "H" / "Rules Volume (1)"
+
+    def _cover_files(self) -> set[str]:
+        return {p.name for p in self._book_dir().glob(self._COVER_NAMES)}
+
+    def _legacy_png_only(self, data: bytes) -> None:
+        """A pre-1.28.3 row by hand: the bytes on disk at cover.png
+        (the naming 1.28.2's set_cover chose for a PNG payload)."""
+        self.set_cover(1, data)
+        (self._book_dir() / "cover.jpg").rename(self._book_dir() / "cover.png")
+
+    def test_png_payload_lands_at_cover_jpg(self):
+        data = _busy_png(48)
+        self.set_cover(1, data)
+        self.assertEqual(self._cover_files(), {"cover.jpg"})
+        _has, stored = self.db_state(1)
+        self.assertEqual(stored, data)
+
+    def test_stale_cover_png_is_swept_on_the_next_write(self):
+        self._legacy_png_only(_busy_png(48))
+        fresh = _busy_png(64)
+        self.set_cover(1, fresh)
+        self.assertEqual(self._cover_files(), {"cover.jpg"})
+        _has, stored = self.db_state(1)
+        self.assertEqual(stored, fresh)
+
+    def test_reads_resolve_cover_jpg_only(self):
+        # The read-side drop: has_cover=1 and the bytes on disk, and
+        # every read answers None -- never a silent png fallback.
+        self._legacy_png_only(_busy_png(48))
+        with CalibreDB(str(self.db_path)) as db:
+            self.assertIsNone(db.get_cover_path(1))
+            self.assertIsNone(db.get_cover_bytes(1))
+
+    def test_png_only_sibling_stops_donating(self):
+        # The rung-3 shift: a png-only donor is declined through the
+        # ladder's existing no-file note, never a crash and never the
+        # byte-invisible donation 1.28.2 would have made.
+        self._legacy_png_only(_busy_png(48))
+        _code, out, _ = self.cover(
+            "run", "cover-source", "--ids", "2", "--db", str(self.db_path)
+        )
+        self.assertIn("declined", out)
+        self.assertIn("no cover file", out)
+
+
 # --- targets ----------------------------------------------------------
 
 
@@ -626,7 +706,8 @@ class TestSiblingRung(CoverSourceCase):
         # has_cover=1 but the file is gone: the donation is refused and
         # named, never a silent skip or a traceback.
         self.set_cover(1, _busy_png(48))
-        # set_cover wrote cover.png (a PNG payload); remove it.
+        # set_cover wrote cover.jpg (it always does, PNG payload
+        # included, as of cquarry 1.28.3); remove it.
         for p in (self.tmpdir / "H" / "Rules Volume (1)").iterdir():
             if p.name.startswith("cover."):
                 p.unlink()

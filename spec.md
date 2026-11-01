@@ -1,8 +1,8 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.80.0  
+**Version:** 3.81.0  
 **Language:** Python 3.14+  
-**Dependencies:** `cquarry` (>= 1.28.2), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
+**Dependencies:** `cquarry` (>= 1.28.3), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
 
 ---
@@ -22,7 +22,9 @@ The CLI/TUI frontend is decoupled from the database and search logic:
 
 **`cquarry` (External Dependency)**: The core database connection, schema mapping, Calibre lock handling (snapshots), and the search grammar AST parser are provided by the `cquarry` standalone package.
 
-The floor is `cquarry >= 1.28.2`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
+The floor is `cquarry >= 1.28.3`; this section names the floor plus a short per-bump list, so it stops accreting a sentence that rots (the floor line itself went stale at 1.7, 1.14, 1.21, and 1.24). A test pins the floor against `pyproject.toml`.
+
+- **1.28.3**: the cover surface aligned with Calibre's own reader, which reads ONLY `cover.jpg` (`calibre/db/constants.py` `COVER_FILE_NAME`; cquarry issue #10: a `cover.png` write was invisible in the GUI, on devices, and in every cover query). `set_cover`/`add_book(cover=...)` write the file as `cover.jpg` ALWAYS (PNG payloads land verbatim, no transcode) and sweep a stale `cover.png`; `get_cover_path`/`get_cover_bytes`/`get_cover_last_modified` resolve `cover.jpg` only, so a legacy png-only row answers None, the GUI's own answer. This frontend owns no cover-writing code beyond `run cover-source`, so the adoption here is the floor plus the pin (`TestCoverJpgNaming`: write-side naming and the sweep, read-side resolution, and the ladder's rung-3 decline for a png-only sibling); the issue-#45 renders become GUI-visible under it. Healing for pre-1.28.3 png-only rows: one `set_cover(book_id, png_bytes)` rewrites the same bytes at `cover.jpg`; `cquarry.integrity.find_missing_cover_files` lists exactly the affected ids.
 
 - **1.28.2**: the format-row setters (`add_format`/`set_format`) refuse an extension-carrying `name` before any SQL, naming the stem to pass (cquarry issue #9: a verbatim `.epub` name stored into `data.name` made every `<name>.<fmt>` consumer build a double-extended path -- the live 11305 case where reconcile reported "1 unreadable/missing" off a `<stem>.epub.epub` row while `ebook-meta` on the real path succeeded). This frontend's free-text doors (`--add-format`, the TUI Add Format prompt) fail loudly on the new floor (`run_write` maps the `ValueError` to `ERROR: ...`, exit 1, nothing written); `run_polish`/`run_merge` on a library still carrying a pre-1.28.2 double-extended row raise instead of re-registering the corrupt spelling (the remedy is the incident's own: fix the row stem first). `TestAddFormatExtensionRefusal` pins both seams.
 
