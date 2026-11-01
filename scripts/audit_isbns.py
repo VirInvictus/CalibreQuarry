@@ -174,7 +174,7 @@ SELF_ID_RE = re.compile(
     r"|cataloging[- ]in[- ]publication|cataloguing[- ]in[- ]publication"
     r"|first\s+(?:published|printing|edition)"
     r"|printed\s+(?:and\s+bound\s+)?in\b"
-    r"|\(\s*(?:pbk|paperback|hardback|hardcover|cloth|e-?book|ebook|alk|epub|kindle)\)"
+    r"|\(\s*(?:pbk|paperback|hardback|hardcover|cloth|e-?book|ebook|alk|epub|kindle)"
     r"|\b(?:paperback|hardcover|hardback|e-?book|epub|kindle)\s+(?:edition|isbn)"
     r"|in\s+(?:\w+\s+){1,3}format"  # "in Adobe Digital Editions format"
     r"|written\s+permission",

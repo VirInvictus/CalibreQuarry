@@ -205,7 +205,15 @@ class TestPrintedIsbnExtraction(unittest.TestCase):
         )
         norton = "Production manager: Julia Druskin ISBN 978-0-393-24482-3 (e-book)"
         pan = "www.panmacmillan.com ISBN 978-0-330-48053-6 in Adobe Reader format"
-        for text in (spelunky, cip, tsr, norton, pan):
+        # the LC compound parenthetical, open-shaped since 3.9.1: the group
+        # has never required the closing paren, and "(hardcover : alk.
+        # paper)" corroborates through its first binding word (pinned when
+        # the 3.82.0 vocabulary growth briefly added a terminator)
+        lc_cip = (
+            "Cataloging-in-Publication Data ISBN 978-0-201-18399-3 "
+            "(hardcover : alk. paper)"
+        )
+        for text in (spelunky, cip, tsr, norton, pan, lc_cip):
             self.assertTrue(isbns.self_identified_isbns(text), text[:48])
 
     def test_drops_bad_checksums_and_deduplicates(self):
