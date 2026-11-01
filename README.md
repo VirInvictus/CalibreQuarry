@@ -101,8 +101,9 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 ### The integration verbs (Phase 19 C)
 
 The integration verbs drive Calibre's own headless tools:
-`run convert`, `run polish`, `run cover`, `run export`, `run merge`,
-`run flush`, `run backfill`, and `run backup-metadata` shell out to
+`run convert`, `run polish`, `run cover`, `run cover-source`,
+`run export`, `run merge`, `run flush`, `run backfill`, and
+`run backup-metadata` shell out to
 `ebook-convert`, `ebook-polish`, `calibredb`, and
 `fetch-ebook-metadata` over a resolved set and register the outcome
 through cquarry's write module; `run restore-database` and
@@ -113,7 +114,13 @@ calibredb's plugins (the library is only read); and `run customize`,
 `run debug-tools`, `run device`, and `run news` need no library at all
 (`run trash`, below, is the pure filesystem lifecycle). Every verb is
 a dry run until `--apply`, which demands a closed Calibre and (for the
-metadata-mutating verbs) a `--backup-dir` outside the library. A
+metadata-mutating verbs) a `--backup-dir` outside the library.
+`run cover-source` walks every coverless book (the default target;
+`--search`/`--ids` narrow it) through the cover ladder -- declared EPUB
+cover, gated PDF page-1 render, unique covered sibling, explicit
+`--url ID=URL` -- and its dry run fully evaluates the offline rungs so
+the plan shows the cover each book would get; declined books are the
+report's worklist, never failures. A
 book that already has the requested conversion target is skipped at
 plan time ("already has TARGET"; the file stands untouched), the
 flush passes ids to `calibredb embed_metadata` space-separated (a

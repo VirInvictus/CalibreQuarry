@@ -5,6 +5,81 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.80.0 onward, the cover ladder, issue #45)
+
+- **`run cover-source` is the coverless-import pipeline, and its
+  default target IS the coverless set.** Like flush, it sits outside
+  `verbs_need_targets`: with no `--search`/`--ids` it walks every book
+  whose `has_cover` is falsy (NULL included); an explicit target set
+  NARROWS that (intersection). `--url ID=URL` entries (repeatable)
+  additionally pull their book into the target set even when covered --
+  an explicit URL is a direct order that overrides the ladder for that
+  book (news's explicit-over-curated rule), and the replaced ladder
+  outcome rides the row's `ladder` key. Unknown ids and malformed
+  entries (`--url wants ID=URL`) are usage refusals before anything
+  opens writable.
+- **The ladder runs in the issue's order; a rung with nothing
+  contributes a note and the ladder CONTINUES.** declared-epub
+  (`coverfind.declared_epub_cover`) -> page1-render (PDFs; the two
+  gates) -> sibling (exactly one covered same-author sibling donates
+  `get_cover_bytes`). First rung with bytes wins (`set_cover`); when
+  every rung missed, or none applied, the row is `declined [ladder]`
+  with the joined notes (there is no third action). A rescued row
+  keeps its earlier declines as "(after: ...)" in the detail, so the
+  gate skip that handed the book to its sibling stays visible.
+- **The gates, precisely.** Blank gate: a stdlib PNG walk
+  (`_png_samples`: zlib + full unfilter + a sampled grid, <=~64x64
+  samples); modal quantized color (>>3 per channel) over 95% of the
+  grid = blank (an empty or near-empty sheet or a sparse half-title,
+  not cover art; the code-review pass measured a dense text page at
+  ~0.87 and a 12-line typeset title page at ~0.985, so 0.95 declines
+  the sparse shapes; a fully typeset title page still PASSES -- the
+  gate's named residual, visible in the dry run, never silently
+  written without one). The walk
+  refuses 16-bit, interlaced, and non-RGB-family IHDRs (gate stands
+  down, returns None, never a crash); `_png_dimensions` (IHDR-only)
+  gates the geometry BEFORE the walk, so an unparseable render declines
+  outright. Wrapper gate: `pdftotext -f 1 -l 1` case-folded over
+  `_WRAPPER_MARKERS` (ilide, pdfcoffee, vdoc.pub, dokumen.pub, idoc.pub,
+  pdfslide, 123docz, kipdf, docplayer, studylib -- grows as shapes
+  surface, the `_IMPRINT_TAG` precedent); a hit declines the rung and
+  the cost of a false positive is one skipped auto-cover. Landscape
+  render (w > h): declined as a likely spread unless `--spread-crop`,
+  which re-renders with `-x W//2 -W W-W//2` -- offsets measured from
+  the render's own IHDR ("measure the render, not the points," the
+  manual pipeline's recorded lesson), never from the PDF's points.
+- **The render-first trade is a recorded acceptance, not an oversight.**
+  A busy art-volume page 1 that survives both gates beats the sibling
+  rung: the gates cannot tell a collage from cover art, and the target's
+  own page 1 is the strongest per-book evidence when it passes. The row
+  names its rung and source; when a unique covered sibling exists beside
+  a render candidate, the detail notes it ("sibling cover also
+  available: #id"); the escape hatches are `run cover --remove-cover`
+  and `run cover --cover FILE`. The dry run shows every candidate before
+  `--apply` writes anything.
+- **The url rung is the fourth network verb and the narrowest.** It
+  fetches ONLY the URLs the caller supplied: direct image bytes sniffed
+  via `cquarry.helpers.sniff_image_format`, an HTML page's
+  og:image/twitter:image extracted (both attribute orders) and fetched
+  as a second request, relative URLs urljoined against the page, 32 MB
+  body cap, browser UA (calibre's recipes carry one for the same
+  reason), timeout from the shared `--timeout` (default 60s; news keeps
+  1200s). Network at `--apply` only; the dry run plans the row and
+  touches nothing.
+- **Dry run EVALUATES, apply writes.** The offline ladder runs its
+  read-only spawns during the plan (the phase-1 ebook-meta precedent),
+  so the plan names the actual cover bytes' provenance, not a guess.
+  `--apply` is needs_backup class (closed Calibre, `--backup-dir`
+  outside the library, `WritableCalibreDB.set_cover` one book per
+  transaction, a failed fetch or write is a failed row and exit 1 but
+  never stops the pass; declines are never failures, exit 0).
+  The poppler spawns are module seams (`_run_pdftoppm`,
+  `_run_pdftotext`, both errors="replace" per the decode blanket) and
+  the live class drives the real binaries over crafted PDFs
+  (skipUnless: CI has no poppler). cquarry floor unchanged: every API
+  the verb touches (`set_cover`, `sniff_image_format`, `get_cover_bytes`)
+  predates 1.28.2.
+
 ## Programmer-facing contract notes (3.79.0 onward, the refused-predictor self-heal, issue #44)
 
 - **stamp_pdf's recovery family has a third predicate.**

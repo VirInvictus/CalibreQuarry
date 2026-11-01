@@ -1,5 +1,79 @@
 # CalibreQuarry Patch Notes
 
+# 3.80.0 (2026-11-01)
+
+### `run cover-source`: the coverless-import pipeline as a verb (issue #45)
+
+The 2026-10-31 TTRPG wave and the 2026-11-01 CofD wave arrived as PDFs
+with no catalogued cover (the #34 extractor is EPUB-only by design), 54
+books fixed by hand through an agent-side pipeline: page-1 renders for
+51 of 54, one front/back spread cropped by a second `pdftoppm` run
+measured from the render's own pixels (a points-based first crop landed
+on the wrong half), an indie two-volume pair whose art volume carries no
+cover anywhere in its own file, and a residue whose covers live on
+publisher product pages. The verb is that pipeline, in the issue's
+order, over every coverless book (the default target; `--search`/
+`--ids` narrow it, the flush precedent -- a verb whose interesting set
+IS "everything coverless" does not demand a target list).
+
+- **The ladder.** Rung one: the EPUB's own declared cover
+  (`coverfind.declared_epub_cover`, the #34 extractor; catches
+  pre-3.72.0 verb imports). Rung two: `pdftoppm -f 1 -l 1 -r 150 -png
+  -singlefile` behind two gates. Rung three: when exactly one other
+  book sharing a case-folded author has a catalogued cover, it donates
+  it -- the indie rules-volume/art-volume shape, where the art volume's
+  true cover lives on the sibling's page 1; two or more covered
+  siblings is a declined ambiguity, zero is a silent miss. Rung four:
+  an explicit `--url ID=URL` (repeatable), which overrides the ladder
+  for that book (news's explicit-over-curated rule).
+- **The gates fail toward skipping, never toward writing.** The blank
+  gate walks the render with the stdlib (zlib + unfilter + a sampled
+  grid): a page whose modal quantized color covers 95% of the samples
+  is an empty or near-empty sheet (or a sparse half-title), not cover
+  art; a fully typeset title page still passes, the gate's named
+  residual, and the dry run is where a human sees it before --apply. The wrapper gate runs
+  `pdftotext` over page 1 and declines on a curated document-mill host
+  list (ilide, pdfcoffee, vdoc.pub, dokumen.pub, and siblings; the list
+  grows as rips surface shapes, the `_IMPRINT_TAG` precedent). A
+  landscape render declines as a likely front/back spread unless
+  `--spread-crop` takes the right half -- cropped in RENDER pixels
+  measured from the PNG's IHDR (`-x`/`-W` on the second render), the
+  manual pipeline's recorded lesson, never from the PDF's points. A
+  declined book joins the report's worklist with the reason; it is
+  never a failure and never a guess.
+- **The url rung touches no search API.** Image URLs are used directly
+  and sniffed (cquarry's JPEG/PNG signature gate); an HTML product page
+  has its og:image/twitter:image extracted and fetched in a second
+  request (relative URLs resolved against the page). Nothing is scraped
+  beyond the URL the caller supplied; bodies over 32 MB are refused.
+  Network at `--apply` only; `--timeout SECONDS` bounds each fetch
+  (default 60, shared with news whose default stays 1200).
+- **The dry run fully evaluates the offline ladder.** The renders are
+  read-only spawns over the files (the phase-1 ebook-meta precedent),
+  so the plan shows the cover each book WOULD get -- rung, source,
+  size -- not what might happen. The url rung is planned only there.
+  `--apply` writes through `set_cover` behind the house rails (closed
+  Calibre, `--backup-dir` outside the library, one write per book, a
+  failed row never stops the pass). Exit 1 means failed rows only;
+  declines are the worklist the report names.
+- **The render-first trade, on the record.** A busy art-volume page 1
+  that survives both gates beats the sibling rung -- the target's own
+  page 1 is the strongest per-book evidence when it passes, and the
+  gates cannot tell a collage from cover art. Every row names its rung
+  and source, a unique covered sibling is noted beside a render
+  candidate ("sibling cover also available: #id"), and a wrong write is
+  visible in the report and one `run cover --remove-cover` away.
+
+`coversource.py` owns the ladder (the news.py precedent: a verb with
+enough surface owns its module; integrate.py dispatches it and shares
+`resolve_targets`). Tests: 37 in `tests/test_coversource.py` -- mocked
+seams for the rungs and rails, real cquarry writes read back through
+`get_cover_bytes`, and a live class driving real pdftoppm/pdftotext
+over crafted PDFs (busy, blank, wrapper-banner; skipped when poppler is
+absent, which is CI's shape). The `--help json` surface carries the
+verb (24 run verbs now); spec.md's verb row and the network-verb count
+(four, the url rung joining backfill/phase2/news) moved with it.
+
 # 3.79.0 (2026-10-31)
 
 ### stamp_pdf self-heals the refused-predictor write class (issue #44)

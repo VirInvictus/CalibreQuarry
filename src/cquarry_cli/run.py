@@ -1757,6 +1757,7 @@ INTEGRATE_PHASES = (
     "convert",
     "polish",
     "cover",
+    "cover-source",
     "export",
     "merge",
     "flush",

@@ -1,12 +1,16 @@
-"""The integration verbs: `cquarry run convert/polish/cover/export/merge/
-flush/backfill/trash` (Phase 19 C, plus the 3.45 trash lifecycle).
+"""The integration verbs: `cquarry run convert/polish/cover/cover-source/
+export/merge/flush/backfill/trash` (Phase 19 C, plus the 3.45 trash
+lifecycle and cover-source's issue-#45 ladder).
 
 Most verbs drive external programs (convert/polish: ebook-convert and
-ebook-polish; export/flush: calibredb; backfill: fetch-ebook-metadata)
-and register the outcome through cquarry's write module; cover, merge,
-and trash work purely through cquarry's write APIs and the filesystem.
-No new Python dependencies, by design. The house write discipline holds
-across all of them:
+ebook-polish; export/flush: calibredb; backfill: fetch-ebook-metadata;
+cover-source: pdftoppm/pdftotext plus, at --apply, the URLs the caller
+supplied) and register the outcome through cquarry's write module; cover,
+cover-source, merge, and trash work purely through cquarry's write APIs
+and the filesystem. cover-source's ladder lives in coversource.py (the
+news.py precedent: a verb with enough surface owns its module) and only
+dispatches from here. No new Python dependencies, by design. The house
+write discipline holds across all of them:
 
 - dry-run by default: the plan (per-book actions) prints, nothing runs;
 - `--apply` demands a closed Calibre (anchored pgrep guard) and, for
@@ -345,6 +349,15 @@ def run_cover(db, args, *, apply: bool, take_backup=None) -> int:
         # counting, not the old blanket +1).
         applied += 1 if changed else 0
     return _print_results(plans, args, applied, failed)
+
+
+def _run_cover_source(db, args, *, apply: bool, take_backup=None) -> int:
+    """`run cover-source` lives in coversource.py (the ladder is a module
+    of its own, the news precedent); the import is lazy because
+    coversource's plan half reuses this module's resolve_targets."""
+    from cquarry_cli.coversource import run_cover_source
+
+    return run_cover_source(db, args, apply=apply, take_backup=take_backup)
 
 
 def plan_export(db, args) -> list[dict]:
@@ -1719,10 +1732,14 @@ def dispatch_integrate(args) -> int:
     verbs_need_targets = {"convert", "polish", "cover", "export", "backfill"}
     # backfill mutates metadata.db at --apply too (matrix-C finding:
     # it was the one write verb escaping the backup requirement).
+    # cover-source is deliberately absent from verbs_need_targets: its
+    # default target IS the interesting set (every coverless book),
+    # --search/--ids narrow it (the flush precedent).
     needs_backup = {
         "convert",
         "polish",
         "cover",
+        "cover-source",
         "merge",
         "flush",
         "backfill",
@@ -1793,6 +1810,7 @@ def dispatch_integrate(args) -> int:
             "convert": run_convert,
             "polish": run_polish,
             "cover": run_cover,
+            "cover-source": _run_cover_source,
             "export": run_export,
             "flush": run_flush,
             "backfill": run_backfill,

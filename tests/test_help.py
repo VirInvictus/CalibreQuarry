@@ -278,6 +278,7 @@ class TestTruthedUpPages(unittest.TestCase):
                 "convert",
                 "polish",
                 "cover",
+                "cover-source",
                 "merge",
                 "flush",
                 "backfill",
@@ -307,7 +308,7 @@ class TestJsonTopic(unittest.TestCase):
 
         self.assertEqual(data["version"], VERSION)
         self.assertEqual(data["tool"], "cquarry")
-        self.assertEqual(len(data["run"]["verbs"]), 23)
+        self.assertEqual(len(data["run"]["verbs"]), 24)
 
     def test_json_covers_every_top_level_flag(self):
         import json as jsonlib

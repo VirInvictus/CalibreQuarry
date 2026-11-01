@@ -117,6 +117,7 @@ RUN_STAGES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ("convert", "ebook-convert targets to another format"),
             ("polish", "ebook-polish EPUBs (smarten, subset, jacket, ...)"),
             ("cover", "set or remove covers"),
+            ("cover-source", "source covers for coverless books (the ladder)"),
             ("export", "copy format files out with calibredb export"),
             ("merge", "fold a duplicate into a keeper book"),
             ("flush", "embed the OPF-dirty queue (calibredb embed_metadata)"),
@@ -156,6 +157,7 @@ APPLY_VERBS = frozenset(
         "convert",
         "polish",
         "cover",
+        "cover-source",
         "export",
         "merge",
         "flush",
@@ -196,6 +198,14 @@ VERB_FLAGS: dict[str, tuple[str, ...]] = {
     "convert": ("search", "ids", "to", "from_format", "backup_dir"),
     "polish": ("search", "ids", "polish_ops", "backup_dir"),
     "cover": ("search", "ids", "cover", "remove_cover", "backup_dir"),
+    "cover-source": (
+        "search",
+        "ids",
+        "url",
+        "spread_crop",
+        "timeout",
+        "backup_dir",
+    ),
     "export": ("search", "ids", "dest", "template"),
     "merge": ("keeper", "duplicate", "backup_dir"),
     "flush": ("search", "ids", "chunk", "backup_dir"),
@@ -295,6 +305,26 @@ VERB_PROSE: dict[str, str] = {
     "cover": (
         "Set --cover FILE on every targeted book, or remove covers with\n"
         "--remove-cover. --apply needs Calibre closed and --backup-dir."
+    ),
+    "cover-source": (
+        "Source covers for every coverless book (the default target;\n"
+        "--search/--ids narrow it) through one ladder, in order: the EPUB's\n"
+        "declared cover; a gated PDF page-1 render (150 DPI; declined when\n"
+        "blank, when a document-mill banner marker sits on page 1, or when\n"
+        "the render is landscape -- a likely cover spread -- unless\n"
+        "--spread-crop takes the right half, measured from the render's\n"
+        "own pixels); the cover of exactly one covered same-author sibling\n"
+        "(two or more is a declined ambiguity; none is a silent miss); and\n"
+        "an explicit --url ID=URL (repeatable), which overrides the ladder\n"
+        "for that book: image URLs are used directly, an HTML product page\n"
+        "has its og:image/twitter:image extracted and fetched (no search\n"
+        "API, nothing scraped beyond the URL supplied). The dry run fully\n"
+        "EVALUATES the offline ladder (the renders are read-only), so the\n"
+        "plan shows the cover each book would get; the url rung is planned\n"
+        "only there. Declined books are the report's worklist, never\n"
+        "failures: exit 1 means failed rows only.\n"
+        "Network at --apply only (--timeout SECONDS bounds each fetch,\n"
+        "default 60). --apply needs Calibre closed and --backup-dir."
     ),
     "export": (
         "Copy the targeted books' format files out with calibredb export into\n"

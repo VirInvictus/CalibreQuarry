@@ -938,6 +938,7 @@ def build_parser() -> argparse.ArgumentParser:
             "convert",
             "polish",
             "cover",
+            "cover-source",
             "export",
             "merge",
             "flush",
@@ -960,7 +961,9 @@ def build_parser() -> argparse.ArgumentParser:
         "propagation); phase2: import the signed manifest; phase3: curate + "
         "mechanical pass; the Phase 19 C verbs (dry-run by default, --apply "
         "executes): convert (ebook-convert), polish (ebook-polish), cover "
-        "(set/remove cover), export (calibredb), merge (duplicate into "
+        "(set/remove cover), cover-source (the cover ladder for coverless "
+        "books: declared EPUB cover, gated PDF page-1 render, unique "
+        "covered sibling, --url fetch), export (calibredb), merge (duplicate into "
         "keeper), flush (embed the OPF queue), backfill (metadata source), "
         "trash (list/empty/expire .caltrash), backup-metadata (regenerate "
         "sidecar OPFs over the dirtied queue), restore-database (rebuild a "
@@ -1013,7 +1016,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="SECONDS",
         help="news: per-recipe fetch ceiling (default 1200; image-heavy "
-        "editions are the norm)",
+        "editions are the norm); cover-source: per-URL fetch ceiling "
+        "(default 60)",
+    )
+    run_p.add_argument(
+        "--url",
+        dest="url",
+        action="append",
+        default=None,
+        metavar="ID=URL",
+        help="cover-source: fetch book ID's cover from URL (repeatable; "
+        "overrides the ladder for that book; an image URL is used "
+        "directly, an HTML page's og:image is extracted; network at "
+        "--apply only)",
+    )
+    run_p.add_argument(
+        "--spread-crop",
+        dest="spread_crop",
+        action="store_true",
+        help="cover-source: take the RIGHT HALF of a landscape page-1 "
+        "render (a front/back cover spread) instead of declining it; the "
+        "crop is measured from the render's own pixels",
     )
     run_p.add_argument(
         "--list-plugins",
