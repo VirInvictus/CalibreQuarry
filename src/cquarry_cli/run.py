@@ -335,7 +335,11 @@ def _screen_duplicates(
     When `notes` is given it receives the screen's advisory pairs per path
     (related containment candidates and multi-volume set siblings): these
     are never refusals, but the manifest records them so the review pass
-    sees what the screen saw. When `refusals` is given it receives the
+    sees what the screen saw. Related notes carry the screen's `basis`
+    when the descriptor or the report's `batch_related_basis` map named
+    one (issue #48's title-only lane), absent for the older author-gated
+    pairs, whose shape stays byte-identical. When `refusals` is given it
+    receives the
     screen's refusal evidence per path (the library_hits descriptors and
     the batch_duplicates paths), the split the duplicate decision's detail
     quotes (issue #18), plus the report's `batch_duplicate_basis` map as
@@ -370,13 +374,19 @@ def _screen_duplicates(
             entry: dict[str, list] = {}
             for hit in record.get("related_hits") or []:
                 if isinstance(hit, dict):
-                    entry.setdefault("related", []).append(
-                        {"with": f"#{hit.get('id')}", "title": hit.get("title") or ""}
-                    )
+                    note = {
+                        "with": f"#{hit.get('id')}",
+                        "title": hit.get("title") or "",
+                    }
+                    if hit.get("basis"):
+                        note["basis"] = hit["basis"]
+                    entry.setdefault("related", []).append(note)
+            rel_basis = record.get("batch_related_basis")
             for other in record.get("batch_related") or []:
-                entry.setdefault("related", []).append(
-                    {"with": other, "title": titles.get(other, "")}
-                )
+                note = {"with": other, "title": titles.get(other, "")}
+                if isinstance(rel_basis, dict) and other in rel_basis:
+                    note["basis"] = rel_basis[other]
+                entry.setdefault("related", []).append(note)
             for other in record.get("batch_volumes") or []:
                 entry.setdefault("volumes", []).append(
                     {"with": other, "title": titles.get(other, "")}

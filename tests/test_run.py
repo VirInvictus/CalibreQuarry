@@ -1385,6 +1385,79 @@ class TestPhase1Seams(RunCase):
             with self.assertRaisesRegex(RuntimeError, "unreadable"):
                 _screen_duplicates([self._make_file("x.epub")], self.db_path)
 
+    def test_screen_duplicates_notes_carry_the_related_basis(self):
+        # Issue #48: the title-only lane's evidence rides the advisory
+        # notes -- a library descriptor's `basis` and the report's
+        # `batch_related_basis` map -- while the older author-gated
+        # pairs, which carry no basis, keep their bare {"with", "title"}
+        # shape byte-identical.
+        hit = self._make_file("based-related.epub")
+        clean = self._make_file("bare-related.epub")
+        report = [
+            {
+                "file": hit,
+                "title": "Mage: The Awakening Second Edition",
+                "authors": ["Chris Allen"],
+                "isbn": "",
+                "library_hits": [],
+                "related_hits": [
+                    {
+                        "id": 10,
+                        "title": "Mage: The Awakening",
+                        "authors": ["Kraig Blackwelder"],
+                        "formats": ["PDF"],
+                        "basis": "title only, authors differ",
+                    }
+                ],
+                "batch_related": ["/tmp/mate.epub"],
+                "batch_related_basis": {"/tmp/mate.epub": "title only, authors differ"},
+            },
+            {
+                "file": clean,
+                "title": "Wages of Sin",
+                "authors": ["Luke Gearing"],
+                "isbn": "",
+                "library_hits": [],
+                "related_hits": [
+                    {
+                        "id": 3,
+                        "title": "Mothership: Wages of Sin",
+                        "authors": ["Luke Gearing"],
+                        "formats": ["EPUB"],
+                    }
+                ],
+                "batch_related": ["/tmp/other.epub"],
+            },
+        ]
+        proc = mock.Mock(returncode=0, stdout=json.dumps(report), stderr="")
+        notes: dict = {}
+        with mock.patch("cquarry_cli.run._run", return_value=proc):
+            self.assertEqual(
+                _screen_duplicates([hit, clean], self.db_path, notes=notes), set()
+            )
+        self.assertEqual(
+            notes[hit]["related"],
+            [
+                {
+                    "with": "#10",
+                    "title": "Mage: The Awakening",
+                    "basis": "title only, authors differ",
+                },
+                {
+                    "with": "/tmp/mate.epub",
+                    "title": "",
+                    "basis": "title only, authors differ",
+                },
+            ],
+        )
+        self.assertEqual(
+            notes[clean]["related"],
+            [
+                {"with": "#3", "title": "Mothership: Wages of Sin"},
+                {"with": "/tmp/other.epub", "title": ""},
+            ],
+        )
+
     def test_screen_duplicates_against_the_real_script(self):
         # The instrument itself over the fixture library, no mocks: the
         # real bare-list report flows through the seam. (The screen tool's

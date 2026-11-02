@@ -50,6 +50,21 @@ the volume annotations the series rules read stay on the RAW title and two
 DIFFERENT trailing qualifiers stay work identity (distinct), never
 stripped into a match.
 
+Issue #48 (3.83.0) closes the new-edition silent pass, which two
+independent gates kept invisible: the judge also strips the SPELLED-OUT
+edition forms now ("Second Edition" through "Twelfth ed.", the same
+anchors as the digit forms), and when every author-gated route missed, a
+title-only lane supplies same-work candidates past the first-author
+surname search. The live shape: "Mage: The Awakening Second Edition" (a
+2e writer room) arrived beside the held "Mage: The Awakening" (the 1e
+trio) and passed with zero candidates -- no surname of the file's first
+author appears on the held row, so the author-gated doors could never
+supply it, and the unstripped title classified distinct. A pair the judge
+now reads as the same work surfaces as an advisory related candidate
+("title only, authors differ") at both doors, never a refusal: a new
+edition is a new book (both kept), and differing valid ISBNs are what an
+edition looks like.
+
 Issue #28 (3.68.0) gates every identifier binding by SHAPE: the
 2026-10-15 wave refused Poem of the Cid as a duplicate of Return to
 Nevèrÿon because both amateur conversions carried the SAME junk
@@ -330,14 +345,21 @@ _IMPRINT_TAG = re.compile(
 )
 # The edition tags rips and publishers bake into titles (issue #17: the
 # stamp correctly strips them from new arrivals, so a held ", 3rd
-# Edition" title defeated the judge on an otherwise same-edition pair).
-# Ordinal + edition word only, and only where an annotation can end
-# (segment end, colon, comma, semicolon, a closing bracket), so prose
-# like "the 2nd edition of ..." and the "Code: Version 2.0" shape stay
-# title text. Like the imprint set, this grows as new rips surface new
-# shapes.
+# Edition" title defeated the judge on an otherwise same-edition pair;
+# issue #48: the same class one form over, the SPELLED-OUT ordinals --
+# "Mage: The Awakening Second Edition" beside the held "Mage: The
+# Awakening" read as different subtitles). Ordinal + edition word only
+# -- digits with their suffixes, or first through twelfth spelled out --
+# and only where an annotation can end (segment end, colon, comma,
+# semicolon, a closing bracket), so prose like "the 2nd edition of ...",
+# "A First Edition of ...", and the "Code: Version 2.0" shape stay title
+# text. Like the imprint set, this grows as new rips surface new shapes.
 _EDITION_TAG = re.compile(
-    r"\s*,?\s*\b\d+(?:st|nd|rd|th)\s+(?:edition|ed)\b\.?"
+    r"\s*,?\s*\b(?:"
+    r"\d+(?:st|nd|rd|th)"
+    r"|first|second|third|fourth|fifth|sixth"
+    r"|seventh|eighth|ninth|tenth|eleventh|twelfth"
+    r")\s+(?:edition|ed)\b\.?"
     r"(?=\s*[:;,\)\]]|\s*$)",
     re.IGNORECASE,
 )
@@ -484,7 +506,9 @@ def normalize_title(title: str) -> str:
     "The Rust Programming Language, 3rd Edition" loses the edition
     annotation and normalizes next to the bare title (issue #17: the stamp
     strips the tag from new arrivals, so a held edition-tagged title
-    defeated the judge on a same-edition pair); "A Court of Splintered
+    defeated the judge on a same-edition pair); "Mage: The Awakening
+    Second Edition" loses the spelled-out edition form the same way
+    (issue #48); "A Court of Splintered
     Harmony (A Court of Thorns and Roses)" loses the series annotation and
     normalizes next to the held bare-form title (issue #40). Noise outside
     the known sets and a non-trailing bracket compare as title text, as
@@ -650,6 +674,17 @@ def _author_surname(author: str) -> str:
 _FILENAME_PARENS = re.compile(r"^(.*?)\s*\(([^)]+)\)")
 
 
+def _real_authors(authors: object) -> list[str]:
+    """The author list minus the placeholder: a metadata-less file reads
+    Author(s) "Unknown" (ebook-meta's filename fallback), which is no
+    author evidence at all. Empty when the list is empty or all
+    placeholder, so the title-only lane's basis names the evidence
+    honestly."""
+    if not authors:
+        return []
+    return [str(a).strip() for a in authors if str(a).strip().casefold() != "unknown"]
+
+
 def _filename_seed(rec: dict[str, object]) -> dict[str, object] | None:
     """The title/author a filename-shaped record carries, when the read is
     really a filename fallback.
@@ -707,7 +742,12 @@ def _library_hits(
     pair. Related hits are the containment candidates a series/store
     prefix can mask (the 2026-09-21 "Mothership: Wages of Sin" vs "Wages
     of Sin" silent pass): reported for judgment, never as duplicates.
-    Every identifier keypair search is shape-gated (issue #28): a junk
+    When every author-gated route missed, a title-only lane supplies
+    candidates by the normalized base title (issue #48): pairs the judge
+    reads as the same work surface -- author-agreeing ones as duplicate
+    hits, author-differing ones as related candidates, the new-edition
+    class the author gate could never see. Every identifier keypair
+    search is shape-gated (issue #28): a junk
     URL in the isbn or asin slot searches nothing. Each hit descriptor
     carries `basis`: the field that matched (the first route that found
     the book, in search order). Hydrated list fields stay lists (never
@@ -775,6 +815,39 @@ def _library_hits(
             if b["id"] not in seen:
                 seen.add(b["id"])
                 hits.append({**b, "basis": "title+author"})
+
+    # Issue #48: the title-only lane. The author-gated doors above can
+    # never see a new edition whose credits legitimately changed (the 2e
+    # writer room against the held 1e trio: no surname of the file's
+    # first author appears on the held row, so no candidate is ever
+    # supplied), and that pair is exactly the class worth judging. When
+    # nothing conclusive matched, supply candidates by the normalized
+    # base title and surface every pair the judge reads as the same
+    # work: an author-agreeing one is a duplicate hit (the conservative
+    # path, should the author search ever miss a book the tokens bind),
+    # an author-differing one a related candidate with its basis named.
+    # Containment verdicts stay out: base-EQUAL titles by different
+    # hands are the edition signal; base-PREFIX pairs by different hands
+    # are half the library.
+    if title and not hits:
+        base = normalize_title(title)
+        if base:
+            for b in db.search_books(f"title:{_search_escape(base)}"):
+                if b["id"] in seen:
+                    continue
+                if classify_titles(title, b["title"] or "") != "duplicate":
+                    continue
+                seen.add(b["id"])
+                real = _real_authors(authors)
+                if real and any(
+                    _same_author_tokens(normalize_author_brackets(real[0]), a)
+                    for a in (b.get("authors") or [])
+                ):
+                    hits.append({**b, "basis": "title+author"})
+                elif real:
+                    related.append({**b, "basis": "title only, authors differ"})
+                else:
+                    related.append({**b, "basis": "title only, file has no authors"})
     return hits, related
 
 
@@ -903,6 +976,28 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                 other.setdefault("batch_duplicates", []).append(rec["file"])
                 rec.setdefault("batch_duplicate_basis", {})[str(other["file"])] = basis
                 other.setdefault("batch_duplicate_basis", {})[str(rec["file"])] = basis
+            elif verdict == "duplicate" and not same_author:
+                # Issue #48: the title binds (every noise strip applied)
+                # but the credits disagree -- the new-edition class (the
+                # 2e writer room against the held 1e trio). A new edition
+                # is a NEW book (both kept), so the pair surfaces as an
+                # advisory related candidate with its evidence named,
+                # never a refusal. ISBN evidence does not suppress it:
+                # different valid ISBNs are what an edition looks like.
+                rel_basis = (
+                    "title only, authors differ"
+                    if _real_authors(rec.get("authors"))
+                    and _real_authors(other.get("authors"))
+                    else "title only, authors absent on one side"
+                )
+                rec.setdefault("batch_related", []).append(other["file"])
+                other.setdefault("batch_related", []).append(rec["file"])
+                rec.setdefault("batch_related_basis", {})[str(other["file"])] = (
+                    rel_basis
+                )
+                other.setdefault("batch_related_basis", {})[str(rec["file"])] = (
+                    rel_basis
+                )
             elif not same_author:
                 continue
             elif verdict == "related":
@@ -966,22 +1061,37 @@ def _print_report(records: list[dict[str, object]], skipped: list[str]) -> None:
         for h in related:
             candidates += 1
             fmts = ", ".join(h["formats"]) or "no formats"
+            # The hits-line idiom: the id keeps its color, the evidence
+            # reads plain. An unbased row (the author-gated pairs) stays
+            # one unbroken yellow span, byte-identical to before.
+            basis = f"{RESET} on {h['basis']}" if h.get("basis") else ""
             print(
-                f"           {YELLOW}vs library #{h['id']} (related title, judge): "
+                f"           {YELLOW}vs library #{h['id']}{basis}"
+                f" (related title, judge): "
                 f"{h['title']}: {' & '.join(h['authors'])} ({fmts}){RESET}"
             )
-            print(
-                f"{DIM}             one title is the other's series prefix or subtitle: "
-                f"masked duplicate or two products? decide by hand.{RESET}"
-            )
+            if basis:
+                print(
+                    f"{DIM}             same work by the title, different credits: "
+                    f"a new edition or a different work? decide by hand.{RESET}"
+                )
+            else:
+                print(
+                    f"{DIM}             one title is the other's series prefix or subtitle: "
+                    f"masked duplicate or two products? decide by hand.{RESET}"
+                )
         batch_basis = rec.get("batch_duplicate_basis") or {}
         for other in batch:
             candidates += 1
             suffix = f" ({batch_basis[other]})" if other in batch_basis else ""
             print(f"           {YELLOW}duplicate within batch{RESET}: {other}{suffix}")
+        rel_basis = rec.get("batch_related_basis") or {}
         for other in batch_rel:
             candidates += 1
-            print(f"           {YELLOW}related within batch (judge){RESET}: {other}")
+            suffix = f" ({rel_basis[other]})" if other in rel_basis else ""
+            print(
+                f"           {YELLOW}related within batch (judge){RESET}: {other}{suffix}"
+            )
         for other in volumes:
             print(
                 f"{DIM}           multi-volume set member (distinct volume): {other}{RESET}"

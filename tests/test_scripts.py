@@ -1049,6 +1049,55 @@ class TestScreenDuplicateClassify(unittest.TestCase):
             None,
         )
 
+    def test_spelled_out_edition_tags_are_annotations_not_identity(self):
+        # Issue #48's live misses (the 2026-11-02 batch): Mage 2e and
+        # Vampire 2e arrived beside the held first editions and the
+        # screen passed both silently -- the digit-ordinal strip (#17)
+        # does not know the spelled-out forms, so each pair read as
+        # differing real subtitles over one base. The strip now covers
+        # first through twelfth beside the digit forms, same anchors.
+        self._check(
+            "Mage: The Awakening Second Edition",
+            "Mage: The Awakening",
+            "duplicate",
+        )
+        self._check(
+            "Vampire: The Requiem Second Edition",
+            "Vampire: The Requiem",
+            "duplicate",
+        )
+        # Comma and colon-borne forms, and "ed" beside "edition".
+        self._check(
+            "Vampire: The Requiem, Second Edition",
+            "Vampire: The Requiem",
+            "duplicate",
+        )
+        self._check("Foo: Fourth Edition", "Foo", "duplicate")
+        self._check("Foo, Twelfth Ed", "Foo", "duplicate")
+        # Mid-title prose and look-alike words never strip (the spelled
+        # twin of the digit guards above).
+        self._check("A First Edition of Poems", "Poems", None)
+        self._check("The Second Coming", "The Coming", None)
+        # The volume rules keep reading the RAW title, as with the digit
+        # forms: a spelled edition tag on one side cannot flip a
+        # declared-volume disagreement.
+        self._check(
+            "Moral Letters to Lucilius. Volume 1, Second Edition",
+            "Moral Letters to Lucilius. Volume 2",
+            "volume_sibling",
+        )
+        # The strip's own edges: the tag goes, and a word merely
+        # containing "ed" ("Education") or lacking the ordinal
+        # ("New Edition") stays.
+        self.assertEqual(
+            screen_duplicate._strip_edition("Mage: The Awakening Second Edition"),
+            "Mage: The Awakening ",
+        )
+        self.assertEqual(screen_duplicate._strip_edition("New Edition"), "New Edition")
+        self.assertEqual(
+            screen_duplicate._strip_edition("Second Education"), "Second Education"
+        )
+
     def test_trailing_series_annotation_binds_the_bare_held_copy(self):
         # Issue #40's live miss (2026-10-28): a z-lib rip titled
         # "A Court of Splintered Harmony (A Court of Thorns and Roses)"
@@ -1281,6 +1330,31 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         c.execute(
             "INSERT INTO identifiers (book, type, val) VALUES (7, 'isbn', '0195019199')"
         )
+        # The issue-#48 fixture: the held Mage first edition, seven
+        # credited authors (live #11531). The arriving 2e file's writer
+        # room shares none of them, so every author-gated route supplies
+        # nothing and only the title-only lane can surface the pair.
+        c.execute(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (10, 'Mage: The Awakening', 'Mage: The Awakening',"
+            " 'Blackwelder, Kraig', 'p10', 1)"
+        )
+        c.executemany(
+            "INSERT INTO authors (id, name) VALUES (?, ?)",
+            [
+                (11, "Kraig Blackwelder"),
+                (12, "Bill Bridges"),
+                (13, "Brian Campbell"),
+                (14, "Stephen Michael DiPesa"),
+                (15, "Samuel Inabinet"),
+                (16, "Steve Kenson"),
+                (17, "Malcolm Sheppard"),
+            ],
+        )
+        c.executemany(
+            "INSERT INTO books_authors_link (book, author) VALUES (10, ?)",
+            [(11,), (12,), (13,), (14,), (15,), (16,), (17,)],
+        )
         # Tables _BOOK_SELECT joins; empty here, present so get_all_books works.
         c.execute("CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT)")
         c.execute(
@@ -1336,7 +1410,13 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         self.assertEqual([h["id"] for h in hits], [5])
         self.assertEqual(related, [])
         no_asin = dict(fields, asins=[])
-        self.assertEqual(screen_duplicate._library_hits(self.db, no_asin), ([], []))
+        # Without the ASIN this twin passed silently before 3.83.0 (the
+        # translator-form author matched nothing); issue #48's title-only
+        # lane surfaces it as the judged advisory it always was.
+        hits2, related2 = screen_duplicate._library_hits(self.db, no_asin)
+        self.assertEqual(hits2, [])
+        self.assertEqual([h["id"] for h in related2], [5])
+        self.assertEqual(related2[0]["basis"], "title only, authors differ")
 
     def test_embedded_fields_collect_asins(self):
         # The Identifiers-line parse keeps ASIN-type values (both common
@@ -1454,6 +1534,140 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             "isbn": "",
         }
         self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
+
+    def test_spelled_edition_twin_surfaces_title_only_related(self):
+        # Issue #48's live shape: the file carries the spelled-out
+        # edition and the held first edition shares NO author with the
+        # 2e writer room (live #11555 vs #11531), so every author-gated
+        # route supplies nothing. The title-only lane surfaces the pair
+        # as a related candidate with its basis named -- judged, never
+        # silent, never refused (a new edition is a new book).
+        fields = {
+            "file": "/dl/mage2e.pdf",
+            "title": "Mage: The Awakening Second Edition",
+            "authors": ["Chris Allen", "Dave Brookshaw"],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(hits, [])
+        self.assertEqual([h["id"] for h in related], [10])
+        self.assertEqual(related[0]["basis"], "title only, authors differ")
+
+    def test_title_only_lane_runs_without_file_authors(self):
+        # No author side at all: the author-gated block never ran, and
+        # the title-only lane still supplies the same-work pair --
+        # advisory, since there is no author evidence either way.
+        fields = {
+            "file": "/dl/mystery.pdf",
+            "title": "Capital: Volume I",
+            "authors": [],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(hits, [])
+        self.assertEqual([h["id"] for h in related], [1])
+        self.assertEqual(related[0]["basis"], "title only, file has no authors")
+
+    def test_title_only_lane_stays_out_of_containment_pairs(self):
+        # The flood gate: base-PREFIX titles by different hands are not
+        # the edition signal. The author-gated related door required the
+        # author to agree; the title-only lane keeps that boundary and
+        # surfaces only a judge-duplicate pair (base AND core equal).
+        fields = {
+            "file": "/dl/wages2.epub",
+            "title": "Wages of Sin",
+            "authors": ["A. N. Other"],
+            "isbn": "",
+        }
+        self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
+
+    def test_title_only_lane_author_agreement_is_a_hit_not_advisory(self):
+        # The conservative path: should the author search ever miss a
+        # book the author tokens bind, the title-only lane still lands
+        # the pair as a duplicate hit -- a supply-gap edge never
+        # downgrades a refusal to an advisory. The mock starves the
+        # author-gated searches directly.
+        fields = {
+            "file": "/dl/mage1e.pdf",
+            "title": "Mage: The Awakening Second Edition",
+            "authors": ["Kraig Blackwelder"],
+            "isbn": "",
+        }
+        real_search = self.db.search_books
+
+        def starving(expr):
+            if expr.startswith("author:"):
+                return []
+            return real_search(expr)
+
+        with mock.patch.object(self.db, "search_books", side_effect=starving):
+            hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([h["id"] for h in hits], [10])
+        self.assertEqual(hits[0]["basis"], "title+author")
+        self.assertEqual(related, [])
+
+    def test_edition_twin_advised_within_batch_not_refused(self):
+        # Issue #48 within the batch: a first edition and its 2e twin
+        # arrive together. The titles bind post-strip, the credits
+        # disagree, so the pair is an advisory related candidate both
+        # ways with the basis named -- never a refusal.
+        files = [Path("/dl/mage1e.pdf"), Path("/dl/mage2e.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Mage: The Awakening",
+                    "author(s)": "Kraig Blackwelder & Bill Bridges",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Mage: The Awakening Second Edition",
+                    "author(s)": "Chris Allen & Dave Brookshaw",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertNotIn("batch_duplicates", out[0])
+        self.assertNotIn("batch_duplicates", out[1])
+        self.assertEqual(out[0]["batch_related"], ["/dl/mage2e.pdf"])
+        self.assertEqual(out[1]["batch_related"], ["/dl/mage1e.pdf"])
+        self.assertEqual(
+            out[0]["batch_related_basis"],
+            {"/dl/mage2e.pdf": "title only, authors differ"},
+        )
+        self.assertEqual(
+            out[1]["batch_related_basis"],
+            {"/dl/mage1e.pdf": "title only, authors differ"},
+        )
+        # The held 1e row is a true duplicate of the 1e file (same
+        # credits) and stays a REFUSAL; the 2e twin is advisory only.
+        self.assertEqual([h["id"] for h in out[0]["library_hits"]], [10])
+        self.assertEqual(out[1]["library_hits"], [])
+        self.assertEqual([h["id"] for h in out[1]["related_hits"]], [10])
+        self.assertEqual(
+            out[1]["related_hits"][0]["basis"], "title only, authors differ"
+        )
+
+    def test_same_author_spelled_edition_twin_refuses(self):
+        # The digit-form precedent (#17) carried over the spelled forms:
+        # when the credits AGREE across an edition tag, the pair is a
+        # duplicate candidate (a refusal the hand-compare rules on). The
+        # judge cannot tell a same-edition twin (its tag stripped one
+        # side) from a genuinely new edition, and the author gate is not
+        # an edition detector; the refusal is what routes the pair to
+        # the compare-then-rule. (Live-ish shape: Malcolm Sheppard
+        # credits both Mage editions.)
+        fields = {
+            "file": "/dl/mage2e-sheppard.pdf",
+            "title": "Mage: The Awakening, Second Edition",
+            "authors": ["Malcolm Sheppard"],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual([(h["id"], h["basis"]) for h in hits], [(10, "title+author")])
+        self.assertEqual(related, [])
 
     def test_batch_duplicates_cross_reference(self):
         # Within-batch dedup: same ISBN binds the two files both ways.
@@ -1999,14 +2213,21 @@ class TestScreenDuplicateMatching(unittest.TestCase):
 
     def test_surname_match_without_the_author_stays_out(self):
         # The relaxed supply is surname-wide; the token gate is what
-        # keeps a same-surname, different-author book out.
+        # keeps a same-surname, different-author book out of the
+        # REFUSALS. Since 3.83.0 (issue #48) the pair is not silent
+        # either: the title-only lane surfaces it as a judged advisory,
+        # because a same-title book by a different hand is exactly what
+        # deserves the hand-check.
         fields = {
             "file": "/dl/other.pdf",
             "title": "A Pattern Language",
             "authors": ["Sara Alexander"],
             "isbn": "",
         }
-        self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(hits, [])
+        self.assertEqual([h["id"] for h in related], [7])
+        self.assertEqual(related[0]["basis"], "title only, authors differ")
 
     def test_author_gate_checks_any_of_the_book_authors(self):
         # The engine's author search matches ANY author value; the token
