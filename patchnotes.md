@@ -1,5 +1,80 @@
 # CalibreQuarry Patch Notes
 
+# 3.83.0 (2026-11-02)
+
+### The duplicate screen judges new editions instead of passing silently (issue #48)
+
+Mage, the Awakening Second Edition and Vampire, the Requiem Second
+Edition (PDFs, the 2026-11-02 batch) arrived beside the held first
+editions (#11531, #11535) and the phase-1 screen passed all four pairs
+with zero candidates; both imports were wanted (new editions are new
+books, both kept) but the pass was silent rather than judged, caught
+only by the hand-check. Two independent gates kept each pair
+invisible, and either alone sufficed:
+
+- The judge's edition-tag strip (issue #17, 3.64.0) knew the digit
+  ordinals (", 3rd Edition", ": 2nd Edition", "4th ed.") but not the
+  spelled-out ones, so "Mage: The Awakening Second Edition" judged
+  against the held "Mage: The Awakening" read as differing real
+  subtitles over one base: `distinct`, no opinion, silence.
+- Even with a title bind, the library door's candidate supply is a
+  surname search on the file's FIRST author. The 2e writer rooms share
+  no surname with the held 1e trios (Rose Bailey against Marmell,
+  Shomshak, Suleiman), so the held row never reached the judge at all
+  -- and the same-first-author gate would have refused it anyway.
+
+Three lanes close it:
+
+- **The strip covers the spelled ordinals.** `_EDITION_TAG` now also
+  matches `first` through `twelfth` before `edition`/`ed`, same
+  lookahead anchors as the digit forms (segment end, colon, comma,
+  semicolon, closing bracket). Mid-title prose ("A First Edition of
+  Poems"), look-alikes ("New Edition", "Second Education"), and the
+  volume rules' raw-title reads stay exactly where they were.
+- **The library door gains a title-only lane.** When every
+  author-gated route missed (no ISBN/ASIN bind, no surname hit), the
+  door now supplies candidates by the normalized base title
+  (`title:<base>`, contains) and classifies each. A pair the judge
+  reads as the same work surfaces: an author-agreeing one as a
+  duplicate hit (the conservative path, should the author search ever
+  miss a book the tokens bind), an author-differing one as a RELATED
+  candidate with basis `title only, authors differ` ("title only, file
+  has no authors" when the list is all placeholder). Containment
+  verdicts stay out: base-EQUAL titles by different hands are the
+  edition signal, base-PREFIX pairs by different hands are half the
+  library.
+- **Within the batch, the same shape is an advisory.** A duplicate
+  verdict over disagreeing credits lands in `batch_related` both ways
+  with a `batch_related_basis` map ("title only, authors differ" /
+  "title only, authors absent on one side") -- never a refusal, and
+  differing valid ISBNs do not suppress it: that is what an edition
+  looks like.
+
+The advisory is the issue's own desired shape: a hit with a basis, not
+a refusal. The screen exits 1 (candidates found), `related_hits`
+mirror into the manifest's `checks.related_works` (the notes now carry
+the basis), and the report prints the basis after the id with an
+edition-specific hint ("same work by the title, different credits: a
+new edition or a different work? decide by hand."); the older
+author-gated related rows render byte-identical. Verified live on the
+issue's own books: against the pre-import library state, the Mage PDF
+surfaces #11531 and the Requiem PDF surfaces #11535, both
+`on title only, authors differ`, exit 1.
+
+Deliberate widenings, each pinned by a test: the no-ASIN Mabinogion
+imprint twin (translator-form author, issue #13's shape) and the
+same-surname different-author twin ("Sara Alexander" against the held
+Christopher W. Alexander) now surface as advisories where they passed
+silently. Same-author edition twins (a shared credit spans editions,
+the Malcolm Sheppard case) become duplicate REFUSALS, the #17
+compare-then-rule precedent the issue's own Ghidra sentence
+anticipates: the judge cannot tell a same-edition twin whose tag was
+stripped from a genuinely new edition, and the refusal is what routes
+the pair to the hand-compare. Same-author edition twins carrying two
+VALID different ISBNs within one batch stay silent, 3.68.0's recorded
+acceptance (the library door and phase 3's byte-identity floor remain
+the backstops).
+
 # 3.82.0 (2026-11-01)
 
 ### The audit's corroboration reads the ebook block (issue #47)

@@ -5,6 +5,62 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.83.0 onward, the new-edition advisory, issue #48)
+
+- **The judge's edition strip is two-vocabulary now, and the lane that
+  matters is supply, not classification.** `_EDITION_TAG` matches digit
+  ordinals (`2nd`) and spelled-out ones (`first`..`twelfth`) before
+  `edition|ed`, same lookahead anchors; the strip runs wherever
+  `_strip_noise` runs (every compared string) and nowhere else (the
+  volume rules still read the RAW title, pinned by the
+  `Volume 1, Second Edition` vs `Volume 2` pin). But the live pair was
+  silent through BOTH doors even with a hypothetical strip: the library
+  door's supply is a surname search on the file's FIRST author, and a
+  2e writer room shares no surname with the held 1e trio, so the held
+  row never reached `classify_titles`. The fix is `_library_hits`'s
+  title-only lane.
+- **The title-only lane fires only when every conclusive door missed**
+  (`title and not hits`), and that gate is load-bearing: once a book is
+  imported, its own row self-matches `title+author` and shadows the
+  lane, so a post-import re-screen does not re-surface the pair (the
+  phase-1 scenario -- files not yet in the library -- is where the lane
+  lives). The lane searches `title:<normalize_title(title)>` (contains,
+  accent-folded) and classifies each candidate; ONLY a `duplicate`
+  verdict surfaces. Author-agreeing duplicates land in HITS with basis
+  `title+author` (the conservative path: a supply-gap edge must never
+  downgrade a refusal to an advisory), author-differing ones in RELATED
+  with basis `title only, authors differ`, and an all-placeholder
+  author list (`_real_authors`: `Unknown` is no author evidence) reads
+  `title only, file has no authors`. Containment verdicts are dropped:
+  base-EQUAL titles by different hands are the edition signal,
+  base-PREFIX pairs by different hands are half the library.
+- **The within-batch mirror is a new refusal-adjacent surface.**
+  `verdict == "duplicate" and not same_author` lands `batch_related`
+  both ways plus a `batch_related_basis` map ("title only, authors
+  differ" / "title only, authors absent on one side"), inserted BEFORE
+  the `elif not same_author: continue` so only the duplicate-verdict
+  shape widens; related/volume verdicts with differing authors stay
+  silent, exactly as before. `isbn_conflict` deliberately does not
+  suppress the advisory (different valid ISBNs are what an edition
+  looks like); the same-author + `isbn_conflict` silence itself is
+  3.68.0's recorded acceptance and did not move.
+- **The verdict shape is advisory everywhere: no refusal source
+  changed.** run.py's refused set still derives from `library_hits`/
+  `batch_duplicates` only. The related notes in the manifest grow an
+  optional `basis` key (from the descriptor or `batch_related_basis`);
+  author-gated notes stay byte-identical (`{"with", "title"}`). The
+  report's related line puts the basis after the id in the hits-line
+  idiom and swaps the hint text per class; UNbased rows render one
+  unbroken yellow span, byte-identical to 3.82.0.
+- **Deliberate widenings, each pinned:** the no-ASIN Mabinogion imprint
+  twin and the same-surname different-author twin ("Sara Alexander")
+  now surface as advisories (the old `([], [])` pins are rewritten to
+  name the advisory); same-author spelled-edition twins REFUSE
+  (`test_same_author_spelled_edition_twin_refuses`, the #17
+  compare-then-rule precedent). The phase-1 skill's
+  TWO-SCREEN-BLINDNESSES workaround paragraph is retired in the same
+  release.
+
 ## Programmer-facing contract notes (3.82.0 onward, the ebook-block corroboration, issue #47)
 
 - **SELF_ID_RE's binding vocabulary is two-shaped, and both halves
