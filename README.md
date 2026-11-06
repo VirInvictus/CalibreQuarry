@@ -512,7 +512,7 @@ cquarry --search 'tags:"Fic.Fantasy.Grimdark" AND author:"Phil Tucker"'
 * **General Text Search**: An un-prefixed term (e.g., `Rice`) is matched across title, authors, series, publisher, tags, and comments.
 * **Hierarchical tags**: `tags:Fic.Fantasy` matches `Fic.Fantasy` and everything below it (`Fic.Fantasy.Epic`, `Fic.Fantasy.Grimdark`, ...). Prepend `=` for an exact match: `tags:"=Fic.Fantasy"`.
 * **Match kinds**: contains (default; case- and accent-insensitive), `=` exact, `~` regex, `^` accent.
-* **Numbers and dates**: relational operators on numeric fields (`rating:>=4`, `id:<100`) and dates (`pubdate:>2015`, `date:>=2024-01-01`, `timestamp:30daysago`); `field:true`/`field:false` test presence/absence.
+* **Numbers and dates**: relational operators on numeric fields (`rating:>=4`, `id:<100`) and dates (`pubdate:>2015`, `date:>=2024-01-01`, `timestamp:30daysago`), plus Calibre 9.18's relative words (`lastmonth`, `thisyear`, `lastyear`, `13monthsago`, `2yearsago`; a spaced form only parses quoted, as in `date:"6 monthsago"`); `field:true`/`field:false` test presence/absence.
 * **Boolean logic**: `AND`, `OR`, `NOT`, with implicit `AND` between space-separated terms (`tags:Fic tags:SciFi` == `tags:Fic AND tags:SciFi`), and parentheses for grouping (`(tags:Fic OR tags:NonFic) AND NOT tags:Gaming`).
 * **Virtual Library Referencing**: `vl:"Wing Name"` cross-references an existing Wing (recursion is detected and reported).
 * **Empty query**: an empty `--search ''` returns the whole library, matching Calibre.

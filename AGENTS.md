@@ -5,6 +5,39 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.84.0 onward, the cquarry 1.29.0 floor, issue #49)
+
+- **The floor is `>=1.29.0`, and the date-search vocabulary is engine
+  behavior this repo only pins.** cquarry 1.29.0 mirrored Calibre 9.18's
+  new date words (`lastmonth`, `thisyear`, `lastyear`, `N monthsago`,
+  `N yearsago`, upstream d318054731) into the grammar beside the
+  `today`/`yesterday`/`thismonth`/`N daysago` forms it already carried.
+  Every search surface routes through the engine (`db.search` at the
+  cli read surface, the `--restrict` resolve point, wing resolution),
+  so the frontend changed zero lines: the adoption is the floor bump,
+  the spec's 2.1 per-bump bullet, and the pin.
+- **`TestDateSearchVocabulary` (tests/test_search_dates.py,
+  version-gated, skipped below 1.29.0) pins the issue's two shapes at
+  the seam.** Two books at fixed relative offsets keep the test stable
+  at every calendar position: `date:thisyear` binds by added year
+  (today's timestamp matches, 3-years-back does not), and
+  `pubdate:<2yearsago` bounds at the first of the month 24 months back
+  (`_months_ago(today, 12 * 2)`: the old book matches at 36 months
+  back, the fresh one does not). The sweep pins the five-word surface
+  with the months word judged semantically at month precision
+  (`pubdate:<13monthsago` matches the 36-month-old book,
+  `pubdate:<48monthsago` matches nothing), in the glued spelling the
+  calibre manual documents and the quoted spaced form alike. The
+  lexer's bare word is `[^"()\s]+` (upstream `_TOKEN_RE`), so an
+  UNQUOTED spaced spelling never reaches the date parser:
+  `pubdate:<3 monthsago` is a year-3 filter ANDed with a text match,
+  silently empty -- the trap the sweep's old spaced entries fell into
+  before the code-review pass caught it.
+- **Precision follows the engine's standing rule, on the record because
+  patrons will ask:** month words compare year + month, year words
+  compare year only, and the ago forms bound at the first day of the
+  month N months back (upstream 9.18's own semantics, not this repo's).
+
 ## Programmer-facing contract notes (3.83.0 onward, the new-edition advisory, issue #48)
 
 - **The judge's edition strip is two-vocabulary now, and the lane that

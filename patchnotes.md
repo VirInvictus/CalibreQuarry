@@ -1,5 +1,46 @@
 # CalibreQuarry Patch Notes
 
+# 3.84.0 (2026-11-05)
+
+### the cquarry 1.29.0 floor: the Calibre 9.18 date-search vocabulary (issue #49)
+
+Adoption release, the #42/#35/#14 precedent: the vocabulary lives
+upstream and the floor bump is how it reaches this workflow.
+
+- **The floor is `cquarry >= 1.29.0`.** 1.29.0 mirrored Calibre 9.18's
+  new date-search words (upstream d318054731): `lastmonth`, `thisyear`,
+  `lastyear`, `N monthsago`, and `N yearsago`, joining the
+  `today`/`yesterday`/`thismonth`/`N daysago` forms the engine already
+  carried. Every search surface here routes user queries through the
+  cquarry engine, so on the 1.28.3 floor a patron typing
+  `date:lastmonth` or `pubdate:<2yearsago` got a `ParseException` while
+  the installed 9.18 GUI understood the same query. The words work with
+  every relational operator and everywhere date queries are accepted
+  (`pubdate`, `timestamp`, `last_modified`, date custom columns, saved
+  searches). Precision follows the standing rule: month words compare
+  year + month, year words year only; the ago forms bound at the first
+  day of the month N months back.
+- **`TestDateSearchVocabulary` (version-gated, skipped below 1.29.0)
+  pins the seam.** Two books at fixed relative offsets: `date:thisyear`
+  binds by added year (the fresh book matches, the 3-years-back one
+  does not), `pubdate:<2yearsago` bounds at the first of the month 24
+  months back (the old book matches, the fresh one does not), and the
+  months word is judged semantically at month precision
+  (`pubdate:<13monthsago` matches the old book, `pubdate:<48monthsago`
+  matches nothing) -- at every calendar position, so the test never
+  goes stale on the date it runs. One recorded trap from the review
+  pass: the engine's bare-word token is `[^"()\s]+`, so an unquoted
+  spaced spelling (`pubdate:<3 monthsago`) never reaches the date
+  parser at all -- it is a year-3 filter ANDed with a text match,
+  silently empty. The glued spellings are what the calibre manual
+  documents; the spaced form works only quoted
+  (`pubdate:"<13 monthsago"`, pinned in the same test). The suite
+  verified green against 1.29.0 before the bump landed (1279 passed,
+  1 skipped, 68 subtests).
+- **The lock relocked in the same pass** (the 3.77.0 contract: a floor
+  bump never leaves `uv.lock` behind), and the README's grammar
+  summary names the new words beside the old examples.
+
 # 3.83.0 (2026-11-02)
 
 ### The duplicate screen judges new editions instead of passing silently (issue #48)
