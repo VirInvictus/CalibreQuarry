@@ -1,5 +1,33 @@
 # CalibreQuarry Patch Notes
 
+# 3.84.1 (2026-11-05)
+
+### the real-instrument screen test runs again (tests only; no behavior changes)
+
+`test_screen_duplicates_against_the_real_script` (tests/test_run.py)
+had skipped itself on EVERY machine since the 2026-09-08 sweep: its
+`ebook-meta` guard read the shared `shutil` module, which
+`RunCase.setUp` had just patched to return None (`mock.patch` on
+`cquarry_cli.run.shutil.which` retargets the module object both
+modules share), so the guard always saw the stub. The suite's local
+"1 skipped" was this test, not an environment skip. Found by the
+2026-11-05 verification pass.
+
+- **The body was verified current before the fix landed.** Run by hand
+  with the guard bypassed, it passes against the live pipeline: real
+  ebook-meta 9.18 over the invalid fixture payload, the screen's
+  filename fallback, the seeded library hit, and the refusal
+  descriptor carrying its 3.68.0 `basis` field. The test had survived
+  seven screen waves (3.63.7 through 3.83.0) untouched, so the fix
+  turns the pin back on rather than exposing a stale test.
+- **The fix is two lines in the house idiom.** `setUp` saves the real
+  `shutil.which` on self before the patch (`self._real_which`), and
+  the guard consults that saved callable. Machines with calibre get
+  the real-instrument pin again (the one layer the mocked tests
+  cannot cover: the real screen subprocess over real ebook-meta over
+  the real search engine); CI, with no ebook-meta, skips it
+  correctly. Zero `src/` changes.
+
 # 3.84.0 (2026-11-05)
 
 ### the cquarry 1.29.0 floor: the Calibre 9.18 date-search vocabulary (issue #49)

@@ -111,6 +111,10 @@ class RunCase(unittest.TestCase):
         # are payload bytes, and a real calibre on PATH would exit 0 with
         # its own filename-derived guess (CI has no calibre at all). The
         # seeding tests opt back in with explicit patching.
+        # NOTE: the patch retargets the SHARED shutil module object, so
+        # test bodies must not read shutil.which directly; the real
+        # which is saved first for environment guards.
+        self._real_which = shutil.which
         which = mock.patch("cquarry_cli.run.shutil.which", return_value=None)
         which.start()
         self.addCleanup(which.stop)
@@ -1465,7 +1469,7 @@ class TestPhase1Seams(RunCase):
         # reverse of run.py's stamp parser — so the seeded match mirrors
         # that split; with embedded metadata the real fields come from
         # ebook-meta and no fallback happens.)
-        if shutil.which("ebook-meta") is None:
+        if self._real_which("ebook-meta") is None:
             self.skipTest("needs Calibre's ebook-meta on PATH")
         epub = self._make_file("Seeded Author - Seeded Title.epub")
         con = sqlite3.connect(self.db_path)
