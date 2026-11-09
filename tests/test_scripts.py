@@ -2432,6 +2432,33 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             out[0]["batch_duplicate_basis"]["/dl/pv2.pdf"], "isbn 978-0-14-044568-8"
         )
 
+    def test_placeholder_metadata_files_not_batch_duplicates(self):
+        # Issue #50: Two files carrying placeholder embedded metadata
+        # (title "Untitled", author "Unknown") must never bind to each
+        # other as mutual batch duplicates or related candidates.
+        files = [Path("/dl/unstamped1.pdf"), Path("/dl/unstamped2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Untitled",
+                    "author(s)": "Unknown",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Untitled",
+                    "author(s)": "Unknown",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertNotIn("batch_duplicates", out[0])
+        self.assertNotIn("batch_duplicates", out[1])
+        self.assertNotIn("batch_related", out[0])
+        self.assertNotIn("batch_related", out[1])
+
 
 class TestIdentifierShapes(unittest.TestCase):
     """The issue-#28 binding gates: only real identifier SHAPES bind, and

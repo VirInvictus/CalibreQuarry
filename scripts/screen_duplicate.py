@@ -306,7 +306,7 @@ def _embedded_fields(path: Path) -> dict[str, object]:
         elif kind in _ASIN_TYPES and val:
             asins.append(val)
     return {
-        "file": str(path),
+        "file": path.as_posix() if hasattr(path, "as_posix") else str(path),
         "title": title,
         "authors": authors,
         "isbn": isbn,
@@ -685,6 +685,21 @@ def _real_authors(authors: object) -> list[str]:
     return [str(a).strip() for a in authors if str(a).strip().casefold() != "unknown"]
 
 
+_PLACEHOLDER_TITLES = frozenset({
+    "untitled",
+    "untitled document",
+    "unknown",
+    "none",
+})
+
+
+def _is_placeholder_title(title: object) -> bool:
+    """Return True if title is empty or a common placeholder sentinel."""
+    if not title:
+        return True
+    return str(title).strip().casefold() in _PLACEHOLDER_TITLES
+
+
 def _filename_seed(rec: dict[str, object]) -> dict[str, object] | None:
     """The title/author a filename-shaped record carries, when the read is
     really a filename fallback.
@@ -780,8 +795,9 @@ def _library_hits(
 
     title = fields.get("title") or ""
     authors = fields.get("authors") or []
-    if title and authors:
-        first = normalize_author_brackets(authors[0])
+    real_auth = _real_authors(authors)
+    if title and real_auth and not _is_placeholder_title(title):
+        first = normalize_author_brackets(real_auth[0])
         strict = db.search_books(
             f"title:{_search_escape('=' + title)} AND author:{_search_escape('=' + first)}"
         )
@@ -829,7 +845,7 @@ def _library_hits(
     # Containment verdicts stay out: base-EQUAL titles by different
     # hands are the edition signal; base-PREFIX pairs by different hands
     # are half the library.
-    if title and not hits:
+    if title and not hits and not _is_placeholder_title(title):
         base = normalize_title(title)
         if base:
             for b in db.search_books(f"title:{_search_escape(base)}"):
@@ -889,10 +905,12 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
             # "Christopher W. Alexander" and "Christopher Alexander" are
             # one author; multi-letter tokens all compare, so different
             # names stay different.
+            real_a = _real_authors(rec.get("authors"))
+            real_b = _real_authors(other.get("authors"))
             same_author = bool(
-                rec.get("authors")
-                and other.get("authors")
-                and _same_author_tokens(rec["authors"][0], other["authors"][0])
+                real_a
+                and real_b
+                and _same_author_tokens(real_a[0], real_b[0])
             )
             seed_a, seed_b = seeds[key_a], seeds[key_b]
             if (
@@ -967,16 +985,25 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                     # bind on (junk): the titles and author are the
                     # evidence, the identifier equality is not.
                     basis = "title+author"
+            placeholder_title = (
+                _is_placeholder_title(titles.get(key_a))
+                or _is_placeholder_title(titles.get(key_b))
+            )
             if (
                 isbn_bound
                 or shared_asin
-                or (same_author and verdict == "duplicate" and not isbn_conflict)
+                or (
+                    same_author
+                    and verdict == "duplicate"
+                    and not isbn_conflict
+                    and not placeholder_title
+                )
             ):
                 rec.setdefault("batch_duplicates", []).append(other["file"])
                 other.setdefault("batch_duplicates", []).append(rec["file"])
                 rec.setdefault("batch_duplicate_basis", {})[str(other["file"])] = basis
                 other.setdefault("batch_duplicate_basis", {})[str(rec["file"])] = basis
-            elif verdict == "duplicate" and not same_author:
+            elif verdict == "duplicate" and not same_author and not placeholder_title:
                 # Issue #48: the title binds (every noise strip applied)
                 # but the credits disagree -- the new-edition class (the
                 # 2e writer room against the held 1e trio). A new edition
