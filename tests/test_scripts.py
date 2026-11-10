@@ -1355,6 +1355,16 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             "INSERT INTO books_authors_link (book, author) VALUES (10, ?)",
             [(11,), (12,), (13,), (14,), (15,), (16,), (17,)],
         )
+        # The issue-#50 fixture: an UNSTAMPED placeholder row (title
+        # "Untitled", author "Unknown" -- what any producer-stripped PDF
+        # imports as outside the phase flow). The library door's title
+        # routes must never bind a stripped arrival to it.
+        c.execute(
+            "INSERT INTO books (id, title, sort, author_sort, path, has_cover)"
+            " VALUES (11, 'Untitled', 'Untitled', 'Unknown', 'p11', 1)"
+        )
+        c.execute("INSERT INTO authors VALUES (18, 'Unknown')")
+        c.execute("INSERT INTO books_authors_link (book, author) VALUES (11, 18)")
         # Tables _BOOK_SELECT joins; empty here, present so get_all_books works.
         c.execute("CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT)")
         c.execute(
@@ -1668,6 +1678,134 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         hits, related = screen_duplicate._library_hits(self.db, fields)
         self.assertEqual([(h["id"], h["basis"]) for h in hits], [(10, "title+author")])
         self.assertEqual(related, [])
+
+    def test_placeholder_metadata_pair_advised_within_batch_not_refused(self):
+        # Issue #50's live shape: two genuinely unrelated PDFs whose
+        # embedded metadata is all sentinel (title "Untitled", Author(s)
+        # "Unknown" -- one a PDFsam build). The title+author leg judged
+        # two stripped files and refused both; any two unstamped files
+        # in one batch collide on that pair. The pair is now the judged
+        # advisory, its basis naming the void -- never a refusal, so the
+        # same-work stripped twin keeps its human look.
+        files = [Path("/dl/felleisen.pdf"), Path("/dl/dewdney.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {"title": "Untitled", "author(s)": "Unknown", "identifiers": ""},
+                {"title": "Untitled", "author(s)": "Unknown", "identifiers": ""},
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertNotIn("batch_duplicates", out[0])
+        self.assertNotIn("batch_duplicates", out[1])
+        self.assertEqual(out[0]["batch_related"], ["/dl/dewdney.pdf"])
+        self.assertEqual(out[1]["batch_related"], ["/dl/felleisen.pdf"])
+        self.assertEqual(
+            out[0]["batch_related_basis"],
+            {"/dl/dewdney.pdf": "placeholder title, no author evidence"},
+        )
+        self.assertEqual(
+            out[1]["batch_related_basis"],
+            {"/dl/felleisen.pdf": "placeholder title, no author evidence"},
+        )
+        # The library holds an unstamped placeholder row (fixture book
+        # 11); neither door may bind the stripped files to it either.
+        self.assertEqual(out[0]["library_hits"], [])
+        self.assertEqual(out[1]["library_hits"], [])
+
+    def test_placeholder_title_carries_no_library_evidence(self):
+        # Issue #50's library door: a stripped arrival (title
+        # "Untitled", authors ["Unknown"]) must not hit the unstamped
+        # placeholder row the fixture library carries (book 11). Every
+        # title route skips the sentinel: the exact pair search, the
+        # surname supply, and the title-only lane would all bind the
+        # two placeholders to each other.
+        fields = {
+            "file": "/dl/stripped.pdf",
+            "title": "Untitled",
+            "authors": ["Unknown"],
+            "isbn": "",
+        }
+        self.assertEqual(screen_duplicate._library_hits(self.db, fields), ([], []))
+
+    def test_placeholder_title_with_real_author_keeps_library_routes(self):
+        # The gate's narrowing: only a FULL-placeholder record stands
+        # down. A sentinel title beside real credits keeps every route --
+        # here the title-only lane still supplies the unstamped fixture
+        # row (book 11) and the author gate reads it honestly: the
+        # credits differ, so the pair is the advisory, never a hit.
+        fields = {
+            "file": "/dl/untitled-real.pdf",
+            "title": "Untitled",
+            "authors": ["Matthias Felleisen"],
+            "isbn": "",
+        }
+        hits, related = screen_duplicate._library_hits(self.db, fields)
+        self.assertEqual(hits, [])
+        self.assertEqual([h["id"] for h in related], [11])
+        self.assertEqual(related[0]["basis"], "title only, authors differ")
+
+    def test_placeholder_pair_sharing_isbn_still_refuses(self):
+        # The ISBN bind outranks the placeholder disarm: two stripped
+        # files that share a real edition key are a duplicate refusal on
+        # the ISBN basis, exactly as before issue #50.
+        files = [Path("/dl/s1.pdf"), Path("/dl/s2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Untitled",
+                    "author(s)": "Unknown",
+                    "identifiers": "isbn:9780140445688",
+                },
+                {
+                    "title": "Untitled",
+                    "author(s)": "Unknown",
+                    "identifiers": "isbn:9780140445688",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/s2.pdf"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/s1.pdf"])
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"],
+            {"/dl/s2.pdf": "isbn 9780140445688"},
+        )
+
+    def test_placeholder_title_with_real_agreeing_author_still_refuses(self):
+        # The disarm's deliberate boundary (unobserved shape, deferred
+        # under the grows-as-shapes-surface doctrine): a sentinel title
+        # beside REAL agreeing credits keeps today's title+author
+        # refusal. The credits are the only real evidence, and widening
+        # the disarm past the issue's stripped-file shape would need its
+        # own observed case first.
+        files = [Path("/dl/u1.pdf"), Path("/dl/u2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Untitled",
+                    "author(s)": "Matthias Felleisen",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Untitled",
+                    "author(s)": "Matthias Felleisen",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/u2.pdf"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/u1.pdf"])
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"],
+            {"/dl/u2.pdf": "title+author, isbn absent on one side"},
+        )
 
     def test_batch_duplicates_cross_reference(self):
         # Within-batch dedup: same ISBN binds the two files both ways.

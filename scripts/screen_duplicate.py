@@ -65,6 +65,26 @@ now reads as the same work surfaces as an advisory related candidate
 edition is a new book (both kept), and differing valid ISBNs are what an
 edition looks like.
 
+Issue #50 (3.85.0) closes the placeholder false bind: two unrelated
+PDFs whose embedded metadata is all sentinel (title "Untitled",
+Author(s) "Unknown" -- one a PDFsam build) refused as mutual duplicates
+because the title+author leg was judging two stripped files, and any
+two unstamped files in one batch collide on that pair. A placeholder
+title is no work identity now: the full-placeholder pair surfaces as
+the judged advisory ("placeholder title, no author evidence") instead
+of the refusal -- so the same-work stripped twin keeps its human look,
+the one thing the old refusal was accidentally catching -- and the
+library door's title routes skip a full-placeholder record (sentinel
+title, no real author evidence on the file side), so an unstamped
+placeholder row in the library can never false-bind a future stripped
+file; a sentinel title beside REAL credits keeps every route, because
+a work genuinely titled "Untitled" must not lose its library doors.
+The sentinel set is curated and grows as shapes surface ("untitled",
+"untitled document", "unknown"), judged through the title judge's own
+stripping so a furniture suffix ("Untitled (z-library.sk)") reads as
+the sentinel it normalizes to; the filename-seed path is untouched,
+since parsed stems carry real evidence.
+
 Issue #28 (3.68.0) gates every identifier binding by SHAPE: the
 2026-10-15 wave refused Poem of the Cid as a duplicate of Return to
 Nevèrÿon because both amateur conversions carried the SAME junk
@@ -673,6 +693,22 @@ def _author_surname(author: str) -> str:
 
 _FILENAME_PARENS = re.compile(r"^(.*?)\s*\(([^)]+)\)")
 
+# The placeholder titles stripped files carry (issue #50's live shape:
+# two unrelated PDFs, one a PDFsam build, both title "Untitled" and
+# Author(s) "Unknown", refused as mutual duplicates on a pair that binds
+# nothing). Exact case-folded forms only; the set grows as shapes
+# surface, like _IMPRINT_TAG.
+_PLACEHOLDER_TITLES = frozenset({"untitled", "untitled document", "unknown"})
+
+
+def _is_placeholder_title(title: str) -> bool:
+    """True for a sentinel title a producer bakes into a stripped file:
+    it names no work, so it is never binding evidence (issue #50). The
+    judge's own normalization runs first, so a furniture suffix the
+    judge strips ("Untitled (z-library.sk)") reads as the sentinel it
+    normalizes to, never as new evidence."""
+    return _judge_form(title or "").strip().casefold() in _PLACEHOLDER_TITLES
+
 
 def _real_authors(authors: object) -> list[str]:
     """The author list minus the placeholder: a metadata-less file reads
@@ -748,7 +784,12 @@ def _library_hits(
     hits, author-differing ones as related candidates, the new-edition
     class the author gate could never see. Every identifier keypair
     search is shape-gated (issue #28): a junk
-    URL in the isbn or asin slot searches nothing. Each hit descriptor
+    URL in the isbn or asin slot searches nothing. And a FULL-placeholder
+    record (sentinel title, no real author evidence; issue #50) runs no
+    title route at all: its only possible bind is an unstamped
+    placeholder row in the library, and a sentinel title names no work,
+    so the strict pair search, the surname supply, and the title-only
+    lane all stand down for it. Each hit descriptor
     carries `basis`: the field that matched (the first route that found
     the book, in search order). Hydrated list fields stay lists (never
     comma-split) per the cquarry contract.
@@ -780,7 +821,19 @@ def _library_hits(
 
     title = fields.get("title") or ""
     authors = fields.get("authors") or []
-    if title and authors:
+    # A FULL-placeholder record's title is no search evidence (issue
+    # #50): its routes below could only ever bind it to a
+    # placeholder-titled library row -- any unstamped import -- and the
+    # bind rests on nothing. A sentinel title beside REAL credits keeps
+    # the routes: the strict pair search cannot match an unstamped
+    # "Unknown" row's author, and a work genuinely titled "Untitled"
+    # keeps its library doors. The ISBN/ASIN keypair routes above are
+    # unaffected either way.
+    if (
+        title
+        and authors
+        and not (_is_placeholder_title(title) and not _real_authors(authors))
+    ):
         first = normalize_author_brackets(authors[0])
         strict = db.search_books(
             f"title:{_search_escape('=' + title)} AND author:{_search_escape('=' + first)}"
@@ -829,7 +882,11 @@ def _library_hits(
     # Containment verdicts stay out: base-EQUAL titles by different
     # hands are the edition signal; base-PREFIX pairs by different hands
     # are half the library.
-    if title and not hits:
+    if (
+        title
+        and not (_is_placeholder_title(title) and not _real_authors(authors))
+        and not hits
+    ):
         base = normalize_title(title)
         if base:
             for b in db.search_books(f"title:{_search_escape(base)}"):
@@ -945,6 +1002,21 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                 and _isbn_valid(a_isbn)
                 and _isbn_valid(b_isbn)
             )
+            # Issue #50: a placeholder pair binds nothing. Both titles
+            # sentinel ("Untitled"/"Unknown" producers) and neither side
+            # carrying real author evidence means the title+author leg
+            # is judging two stripped files, and any two unstamped files
+            # in one batch collide on that pair. The filename-seed path
+            # above is untouched: its verdict comes from the parsed
+            # stems, which carry real evidence, and a sentinel title
+            # never holds a paren group to parse.
+            placeholder_pair = (
+                verdict == "duplicate"
+                and _is_placeholder_title(str(titles[key_a]))
+                and _is_placeholder_title(str(titles[key_b]))
+                and not _real_authors(rec.get("authors"))
+                and not _real_authors(other.get("authors"))
+            )
             basis = None
             if isbn_bound:
                 # Digit-identical spellings (pure producer punctuation
@@ -970,12 +1042,33 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
             if (
                 isbn_bound
                 or shared_asin
-                or (same_author and verdict == "duplicate" and not isbn_conflict)
+                or (
+                    same_author
+                    and verdict == "duplicate"
+                    and not isbn_conflict
+                    and not placeholder_pair
+                )
             ):
                 rec.setdefault("batch_duplicates", []).append(other["file"])
                 other.setdefault("batch_duplicates", []).append(rec["file"])
                 rec.setdefault("batch_duplicate_basis", {})[str(other["file"])] = basis
                 other.setdefault("batch_duplicate_basis", {})[str(rec["file"])] = basis
+            elif placeholder_pair:
+                # Issue #50: judged, not refused. Two stripped files in
+                # one batch surface as related candidates so the
+                # same-work stripped twin keeps its human look (the one
+                # thing the old refusal was accidentally catching), with
+                # a basis that names what matched: a placeholder title
+                # and no author evidence on either side.
+                rel_basis = "placeholder title, no author evidence"
+                rec.setdefault("batch_related", []).append(other["file"])
+                other.setdefault("batch_related", []).append(rec["file"])
+                rec.setdefault("batch_related_basis", {})[str(other["file"])] = (
+                    rel_basis
+                )
+                other.setdefault("batch_related_basis", {})[str(rec["file"])] = (
+                    rel_basis
+                )
             elif verdict == "duplicate" and not same_author:
                 # Issue #48: the title binds (every noise strip applied)
                 # but the credits disagree -- the new-edition class (the
