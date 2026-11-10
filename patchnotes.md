@@ -1,5 +1,70 @@
 # CalibreQuarry Patch Notes
 
+# 3.85.0 (2026-11-09)
+
+### The duplicate screen judges the placeholder pair instead of refusing it (issue #50)
+
+Two genuinely unrelated PDFs in one phase-1 batch (the 2026-11-08
+wave, 32 files) both carried placeholder embedded metadata -- title
+"Untitled", Author(s) "Unknown"; one a PDFsam build -- and the screen
+refused BOTH as mutual batch duplicates on the basis "title+author,
+isbn absent on one side". A Little Java, A Few Patterns and The New
+Turing Omnibus: 66 Excursions in Computer Science are real, distinct
+books; the title+author leg was judging two stripped files, and any
+two unstamped files in one batch collide on that pair. The live
+override (flip verdict, approve, sign -- the sanctioned three steps)
+absorbed this occurrence, but the class is systematic: it fires on
+every future batch that carries two metadata-stripped files.
+
+- **The full-placeholder pair binds nothing and surfaces as the
+  judged advisory.** When BOTH titles are sentinel (`_PLACEHOLDER_
+  TITLES`: "untitled", "untitled document", "unknown" -- exact
+  case-folded membership through the title judge's own stripping, so
+  "Untitled (z-library.sk)" reads as the sentinel it normalizes to;
+  the set grows as shapes surface, the `_IMPRINT_TAG` precedent) AND
+  neither side carries real author evidence (`_real_authors` empty:
+  an all-"Unknown" list is no author evidence, the 3.83.0 rule), the
+  title+author refusal stands down and the pair lands in
+  `batch_related` both ways with basis "placeholder title, no author
+  evidence" -- never a refusal. run.py already mirrors
+  `batch_related_basis` into the manifest's `checks.related_works`
+  (issue #48's plumbing), so the advisory flows through with zero
+  consumer changes: the report prints "related within batch (judge)",
+  exit 1, and the review pass judges. The advisory keeps the one
+  thing the old refusal was accidentally catching: two stripped
+  copies of the SAME work in one batch still get their human look
+  instead of passing silently into a doubled library.
+- **The library door stands down for a full-placeholder record.** Its
+  title routes (the strict `title:=X AND author:=Y` pair search, the
+  surname supply, the issue-#48 title-only lane) could only ever bind
+  such a file to a placeholder-titled library row -- any import made
+  outside the stamp flow -- and the sentinel names no work, so the
+  routes skip it entirely. The gate narrows on
+  `_is_placeholder_title(title) and not _real_authors(authors)`,
+  never the title alone: a sentinel title beside REAL credits keeps
+  every route, because the strict search cannot match an unstamped
+  "Unknown" row's author and a work genuinely titled "Untitled" must
+  not lose its library doors (the title-only lane reads the unstamped
+  row honestly, as "title only, authors differ").
+- **The binds that carry real evidence outrank the disarm.** A shared
+  ISBN (the issue-#28 shape gate) or ASIN over a placeholder-titled
+  pair still refuses, on the identifier basis. The filename-seed path
+  (issue #5) is untouched: an exact sentinel holds no paren group, so
+  the two paths are structurally disjoint. The unobserved adjacent
+  shape -- sentinel titles over REAL agreeing authors -- still
+  refuses (the credits are the only real evidence; deferred under the
+  grows-as-shapes-surface doctrine) and is pinned as the boundary.
+
+Verified: the issue's live shape drives both doors -- within the batch
+the two stripped files surface as the advisory with the honest basis
+(no `batch_duplicates`), and against a fixture library holding an
+unstamped "Untitled"/"Unknown" row (what any producer-stripped PDF
+imports outside the phase flow) the stripped arrival binds nothing at
+all. Five pins: the advisory both ways, the library stand-down, the
+real-credits route keeper, ISBN-outranks-disarm, and the refuses-still
+boundary. The phase-1 skill's judgment rules gain the placeholder
+bullet in the same pass.
+
 # 3.84.1 (2026-11-05)
 
 ### the real-instrument screen test runs again (tests only; no behavior changes)

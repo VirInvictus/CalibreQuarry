@@ -5,6 +5,57 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.85.0 onward, the placeholder-advisory batch, issue #50)
+
+- **The full-placeholder pair binds nothing, and the advisory is its
+  surface.** `_PLACEHOLDER_TITLES` (screen_duplicate.py) is the
+  curated sentinel set -- `untitled`, `untitled document`, `unknown`
+  -- with exact case-folded membership through `_judge_form` (the
+  title judge's own stripping), so a furniture suffix the judge
+  strips ("Untitled (z-library.sk)") reads as the sentinel it
+  normalizes to; the set grows as shapes surface, the `_IMPRINT_TAG`
+  precedent. In `_screen`'s batch loop, `placeholder_pair` requires
+  verdict `duplicate` + BOTH titles sentinel + BOTH sides
+  `_real_authors`-empty (the 3.83.0 no-author-evidence rule), and its
+  only effect is suppressing the title+author refusal's third
+  disjunct: the pair lands in `batch_related` both ways with basis
+  "placeholder title, no author evidence". ISBN/ASIN binds sit in the
+  FIRST branch and outrank the disarm (a shared real edition key over
+  placeholder titles still refuses, `isbn` basis); the `elif` chain
+  order makes the advisory reachable exactly when that third disjunct
+  was the bind. run.py consumes it unchanged (the issue-#48
+  `batch_related_basis` mirroring); the report line is the existing
+  "related within batch (judge)" idiom.
+- **The library door stands down only for a FULL-placeholder record.**
+  The gate is `not (_is_placeholder_title(title) and not
+  _real_authors(authors))`, never the title alone: sentinel title +
+  real credits keeps the strict pair search, the surname supply, and
+  the title-only lane (the strict search cannot match an unstamped
+  "Unknown" row's author, so no false bind is possible there, and a
+  work genuinely titled "Untitled" keeps its doors -- the title-only
+  lane reads the unstamped row honestly as "title only, authors
+  differ"). The false-bind the skip closes needs an unstamped
+  placeholder ROW in the library (any import made outside the stamp
+  flow); a stamped library can never produce one.
+- **Boundaries pinned, deferred shapes named.** The filename-seed
+  path (issue #5) is untouched and structurally disjoint (an exact
+  sentinel holds no paren group, so `_filename_seed` returns None).
+  Sentinel titles over REAL agreeing authors still refuse (the
+  credits are the only real evidence; deferred under the
+  grows-as-shapes-surface doctrine;
+  `test_placeholder_title_with_real_agreeing_author_still_refuses`
+  pins it). Tests:
+  `test_placeholder_metadata_pair_advised_within_batch_not_refused`
+  (the issue's live shape, both ways, with the library-hits-empty
+  assertion),
+  `test_placeholder_title_carries_no_library_evidence` (the fixture's
+  unstamped row binds nothing),
+  `test_placeholder_title_with_real_author_keeps_library_routes` (the
+  narrowing's boundary: the title-only lane supplies the unstamped
+  row as related), and `test_placeholder_pair_sharing_isbn_still_
+  refuses`; fixture book 11 ("Untitled"/"Unknown") models the
+  unstamped import.
+
 ## Programmer-facing contract notes (3.84.0 onward, the cquarry 1.29.0 floor, issue #49)
 
 - **The floor is `>=1.29.0`, and the date-search vocabulary is engine
