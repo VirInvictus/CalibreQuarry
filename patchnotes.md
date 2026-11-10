@@ -1,5 +1,43 @@
 # CalibreQuarry Patch Notes
 
+# 3.86.0 (2026-11-09)
+
+### The cquarry 1.29.1 floor: author_sort flip assembly reaches the import path (issue #52)
+
+Adoption release, the #42/#35/#49/#14 precedent: the fix lives upstream
+and the floor bump is how it reaches this workflow. cquarry 1.29.1
+(upstream 748482e) fixes cquarry issue #11 -- THIS repo's live report
+from the 2026-11-08 30-book phase-2 batch: the 1.26 port of upstream's
+`author_to_author_sort` transcribed the token discovery faithfully but
+comma-joined EVERY flipped token, so new author rows created through
+the import path stored `Kemp, Paul, S.` where Calibre writes `Kemp,
+Paul S.` (and `Egremont, Carlton, III` where Calibre writes `Egremont,
+Carlton III`). Two-token names never diverged, which is why the suite
+and the live library missed it.
+
+- **The floor is `>=1.29.1`, and nothing in this frontend changes.**
+  Every phase-2 import creating a three-or-more-token author through
+  `add_book`/`set_authors` gets Calibre-shaped row sorts and
+  book-level `author_sort` from 1.29.1 on; the adoption is the floor,
+  the spec's 2.1 per-bump bullet, and the pin. `uv.lock` relocked in
+  the same pass (the 3.77.0 contract).
+- **`TestImportAuthorSortFlipParity` (tests/test_write_flow.py,
+  version-gated, skipped below 1.29.1) pins the seam the verb rides.**
+  The call shape run.py's import batch makes (`add_book(title,
+  ["Paul S. Kemp"])` over the fixture schema), asserting the author
+  row's `sort` AND the book's recomputed `author_sort` together:
+  `Kemp, Paul S.` for the three-token name, `Egremont, Carlton III`
+  for the suffix shape. Both facts proven live: under 1.29.0 the same
+  call stores `Kemp, Paul, S.` in both places; under 1.29.1 the
+  upstream shape.
+- **Rows written while on 1.26-1.29.0 keep the broken sorts.**
+  Author-row reuse stores the row's sort verbatim by design, so
+  nothing converges them; the repair is one `set_author_sort_name(
+  display_name, proper_sort)` call per affected row (the heal
+  cquarry#11 itself used, the eight-row batch). The screen: a stored
+  `authors.sort` carrying a comma immediately after the first given
+  name. Library-lane work, deliberately not repo code.
+
 # 3.85.0 (2026-11-09)
 
 ### The duplicate screen judges the placeholder pair instead of refusing it (issue #50)

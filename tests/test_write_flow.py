@@ -954,5 +954,63 @@ class TestAddFormatExtensionRefusal(_TempDBCase):
             con.close()
 
 
+@unittest.skipUnless(
+    _cquarry_at_least(1, 29, 1),
+    "needs cquarry >= 1.29.1 (the author_sort flip assembly fix)",
+)
+class TestImportAuthorSortFlipParity(_TempDBCase):
+    """Issue #52, the cquarry 1.29.1 adoption: the phase-2 verb import is
+    the add_book path that surfaced upstream's flawed flip assembly (the
+    live 2026-11-08 30-book batch) -- the 1.26 port comma-joined EVERY
+    flipped token, so a new three-token author row stored `Kemp, Paul,
+    S.` where Calibre writes `Kemp, Paul S.` (two-token names never
+    diverged, which is why the suite and the live library missed it).
+    1.29.1 transcribes upstream's assembly verbatim: the comma rides the
+    surname token alone, the given names space-join behind it, suffixes
+    stay trailing. This pins both shapes at the seam the verb rides --
+    the row's `authors.sort` AND the book's recomputed `author_sort`
+    together, the call shape run.py's import batch makes. Model:
+    cquarry tests/test_write.py
+    TestAddBook.test_add_book_three_token_author_has_no_mid_comma."""
+
+    def test_three_token_author_gets_the_upstream_sort(self):
+        from cquarry.write import WritableCalibreDB
+
+        with WritableCalibreDB(self.db_path) as wdb:
+            book_id = wdb.add_book("The White Company", ["Paul S. Kemp"])
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute(
+                    "SELECT name, sort FROM authors WHERE name = 'Paul S. Kemp'"
+                ).fetchall(),
+                [("Paul S. Kemp", "Kemp, Paul S.")],
+            )
+            self.assertEqual(
+                con.execute(
+                    "SELECT author_sort FROM books WHERE id = ?", (book_id,)
+                ).fetchone()[0],
+                "Kemp, Paul S.",
+            )
+        finally:
+            con.close()
+
+    def test_suffix_stays_trailing_not_comma_joined(self):
+        from cquarry.write import WritableCalibreDB
+
+        with WritableCalibreDB(self.db_path) as wdb:
+            wdb.add_book("The Silver Stair", ["Carlton Egremont III"])
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute(
+                    "SELECT sort FROM authors WHERE name = 'Carlton Egremont III'"
+                ).fetchone()[0],
+                "Egremont, Carlton III",
+            )
+        finally:
+            con.close()
+
+
 if __name__ == "__main__":
     unittest.main()

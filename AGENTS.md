@@ -5,6 +5,37 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.86.0 onward, the cquarry 1.29.1 floor, issue #52)
+
+- **The floor is `>=1.29.1`, and the flip assembly is engine behavior
+  this repo only pins.** cquarry 1.29.1 (upstream 748482e) transcribes
+  upstream's `author_to_author_sort` assembly verbatim: the comma
+  rides the surname token alone, the given names space-join behind it,
+  suffixes stay trailing (`Egremont, Carlton III`), and a lone usable
+  token sorts bare with prefixes dropped. The phase-2 import batch's
+  `add_book(title, authors)` call is this repo's one seam onto the
+  surface; `set_authors` rides the same helper. The frontend changed
+  zero lines: the adoption is the floor bump, the spec's 2.1 per-bump
+  bullet, and the pin.
+- **`TestImportAuthorSortFlipParity` (tests/test_write_flow.py,
+  version-gated, skipped below 1.29.1) drives the verb's call shape
+  over the fixture schema** and asserts the row's `authors.sort` AND
+  the book's `author_sort` TOGETHER (the two places the broken shape
+  showed): `Kemp, Paul S.` for `Paul S. Kemp`, `Egremont, Carlton
+  III` for `Carlton Egremont III`. Both facts verified live against
+  1.29.0 (which stores `Kemp, Paul, S.` in both places) and 1.29.1
+  before the bump landed, the #49 verification shape.
+- **Broken rows are a library-lane residue, deliberately not repo
+  code.** Author-row reuse stores the row's sort verbatim by design,
+  so books imported while on 1.26-1.29.0 never converge; the repair is
+  one `set_author_sort_name(display_name, proper_sort)` call per
+  affected row, screened by "a stored `authors.sort` containing a
+  comma immediately after the first given name". The phase-3 skill's
+  flawed-sort-keys entry-state paragraph names the same screen and
+  stays (its scope widens from the live batch to every pre-1.29.1
+  row); its "once cquarry#11 ships this becomes archaeology" tail is
+  now true.
+
 ## Programmer-facing contract notes (3.85.0 onward, the placeholder-advisory batch, issue #50)
 
 - **The full-placeholder pair binds nothing, and the advisory is its
