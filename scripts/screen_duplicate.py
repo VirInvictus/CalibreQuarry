@@ -85,6 +85,20 @@ stripping so a furniture suffix ("Untitled (z-library.sk)") reads as
 the sentinel it normalizes to; the filename-seed path is untouched,
 since parsed stems carry real evidence.
 
+Issue #55 (3.87.0) closes the stamped re-mint's lost advisories: the
+2026-11-11 batch re-minted over completed/ (after stamping) carried NO
+related_works / volume_siblings mirrors for two pairs the vetting mint had
+surfaced, because the advisory chain gated `related` and `volume_sibling`
+verdicts behind same_author -- the unstamped vetting seeds read same-author
+("Unknown" == "Unknown") and mirrored, while the stamped files' real,
+per-volume credits dropped the pairs from the mint that gets signed. The
+containment advisory now rides the title verdict alone (differing credits
+name their evidence state via the issue-#48 basis strings; agreeing credits
+keep the legacy unbased shape), and the judge's volume_sibling rule covers
+the trailing BARE ordinals its own docstring always claimed ("Mysteries of
+the Empire I" vs "...II": strict-grammar romans within the practical range,
+both sides declaring, values disagreeing, one stripped stem).
+
 Issue #28 (3.68.0) gates every identifier binding by SHAPE: the
 2026-10-15 wave refused Poem of the Cid as a duplicate of Return to
 Nevèrÿon because both amateur conversions carried the SAME junk
@@ -394,6 +408,18 @@ _LEADING_ANN = re.compile(
     r"^\s*(vol|volume|part|pt|book|bd)\.?\s*(\d+|[ivxlcdm]+)\b\s*", re.IGNORECASE
 )
 _TRAILING_ORDINAL = re.compile(r"\s+\d+$")
+#: A trailing BARE roman numeral (no vol/volume/part/book token before it):
+#: the "Lex Arcana - Mysteries of the Empire I" vs "...II" shape (issue
+#: #55), whose ordinals sit on the base title where neither the annotation
+#: rules nor the arabic core rule could see them. Strict roman grammar plus
+#: a practical range bound, because an unanchored letter run must not read
+#: as a numeral: "Mix" (1009) is a title word, never a volume declaration
+#: (the token-anchored annotation rules never needed this bound).
+_TRAILING_ROMAN = re.compile(r"\s+([ivxlcdm]+)$")
+_ROMAN_FORM = re.compile(
+    r"^(?=[ivxlcdm]+$)m{0,4}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$"
+)
+_MAX_BARE_ROMAN = 100
 _ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
 #: vol/volume, part/pt and book/bd are one declaration spelled three ways;
 #: the signature keeps the raw token (its shape is pinned), annotations
@@ -419,6 +445,36 @@ def _roman_to_int(text: str) -> int | None:
         total += value if value >= prev else -value
         prev = max(prev, value)
     return total
+
+
+def _ordinal_value(text: str) -> int | None:
+    """The value of text's trailing bare ordinal (arabic digits, or a
+    strict roman within the practical range), or None when it does not
+    end in one. Folded text only: the helpers feed on the judge's folded
+    forms (full titles, cores), never raw input."""
+    m = _TRAILING_ORDINAL.search(text or "")
+    if m:
+        return int(m.group(0))
+    m = _TRAILING_ROMAN.search(text or "")
+    if not m or not _ROMAN_FORM.match(m.group(1)):
+        return None
+    value = _roman_to_int(m.group(1))
+    if value is None or value > _MAX_BARE_ROMAN:
+        return None
+    return value
+
+
+def _strip_trailing_ordinal(text: str) -> str:
+    """The title minus ONE trailing bare ordinal (the arabic half is the
+    core rule's existing strip, unchanged; roman added, issue #55)."""
+    text = text or ""
+    m = _TRAILING_ORDINAL.search(text)
+    if m:
+        return text[: m.start()]
+    m = _TRAILING_ROMAN.search(text)
+    if m and _ROMAN_FORM.match(m.group(1)) and _ordinal_value(text) is not None:
+        return text[: m.start()]
+    return text
 
 
 def _volume_signature(title: str) -> frozenset:
@@ -574,7 +630,13 @@ def classify_titles(a: str, b: str) -> str | None:
       masked duplicate exactly as often as it is two products of one
       series. A candidate for human judgment, never an auto-refusal.
     - "volume_sibling": distinct declared volumes of one series root
-      (Moral Letters 1 vs 2; "Monster Vault" vs "Monster Vault 2").
+      (Moral Letters 1 vs 2; "Monster Vault" vs "Monster Vault 2"). The
+      declaration can be a token-anchored annotation ("Vol I" vs "Vol
+      II"), an arabic ordinal trailing a core, or — since issue #55 — a
+      trailing BARE ordinal (arabic or roman) on the full title when BOTH
+      sides declare and the values disagree ("Mysteries of the Empire I"
+      vs "...II"); one-sided and same-value spellings ("Foo I" vs "Foo 1")
+      stay no-match.
     - "distinct": shared base, differing real subtitles (the ARM vs
       x86-64 sibling editions), or differing trailing parentheticals
       (the same rule in its parenthetical form, issue #40).
@@ -620,6 +682,20 @@ def classify_titles(a: str, b: str) -> str | None:
             and (full_a in (base_b, sub_b) or full_b in (base_a, sub_a))
         ):
             return "related"
+        # Issue #55: a trailing bare ordinal on the full title (no
+        # vol/volume/part/book token, so neither the annotation rules nor
+        # the signature can see it) declares the volume. Both sides must
+        # declare and disagree over one stripped stem -- one-sided stays
+        # the silent gap-fill the signature gate keeps, and "Foo I" vs
+        # "Foo 1" is the SAME volume spelled two ways, not siblings.
+        ord_a, ord_b = _ordinal_value(full_a), _ordinal_value(full_b)
+        if (
+            ord_a is not None
+            and ord_b is not None
+            and ord_a != ord_b
+            and _strip_trailing_ordinal(full_a) == _strip_trailing_ordinal(full_b)
+        ):
+            return "volume_sibling"
         return None
     core_a, core_b = _core_title(a), _core_title(b)
     if core_a == core_b:
@@ -634,7 +710,7 @@ def classify_titles(a: str, b: str) -> str | None:
             if sub and not core:
                 return "duplicate"
         return "related"
-    if _TRAILING_ORDINAL.sub("", core_a) == _TRAILING_ORDINAL.sub("", core_b):
+    if _strip_trailing_ordinal(core_a) == _strip_trailing_ordinal(core_b):
         return "volume_sibling"
     return "distinct"
 
@@ -719,6 +795,15 @@ def _real_authors(authors: object) -> list[str]:
     if not authors:
         return []
     return [str(a).strip() for a in authors if str(a).strip().casefold() != "unknown"]
+
+
+def _title_only_basis(rec: dict[str, object], other: dict[str, object]) -> str:
+    """The evidence-state basis for a title-bound pair whose credits
+    disagree (the issue-#48 strings, shared by the duplicate lane and the
+    widened containment lane of issue #55)."""
+    if _real_authors(rec.get("authors")) and _real_authors(other.get("authors")):
+        return "title only, authors differ"
+    return "title only, authors absent on one side"
 
 
 def _filename_seed(rec: dict[str, object]) -> dict[str, object] | None:
@@ -1077,12 +1162,7 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                 # advisory related candidate with its evidence named,
                 # never a refusal. ISBN evidence does not suppress it:
                 # different valid ISBNs are what an edition looks like.
-                rel_basis = (
-                    "title only, authors differ"
-                    if _real_authors(rec.get("authors"))
-                    and _real_authors(other.get("authors"))
-                    else "title only, authors absent on one side"
-                )
+                rel_basis = _title_only_basis(rec, other)
                 rec.setdefault("batch_related", []).append(other["file"])
                 other.setdefault("batch_related", []).append(rec["file"])
                 rec.setdefault("batch_related_basis", {})[str(other["file"])] = (
@@ -1091,12 +1171,32 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                 other.setdefault("batch_related_basis", {})[str(rec["file"])] = (
                     rel_basis
                 )
-            elif not same_author:
-                continue
             elif verdict == "related":
+                # Issue #55: the containment advisory rides the title
+                # verdict, not the credits. The `not same_author: continue`
+                # gate that used to sit here is what a stamped re-mint
+                # fell through (the 2026-11-11 Lex Arcana batch): the
+                # vetting mint's unstamped seeds read same-author
+                # ("Unknown" == "Unknown") and mirrored the pair, while
+                # the stamped files' real, differing credits dropped it
+                # from the mint that gets signed. Agreeing credits keep
+                # the legacy unbased shape; differing credits name their
+                # evidence state.
                 rec.setdefault("batch_related", []).append(other["file"])
                 other.setdefault("batch_related", []).append(rec["file"])
+                if not same_author:
+                    rel_basis = _title_only_basis(rec, other)
+                    rec.setdefault("batch_related_basis", {})[str(other["file"])] = (
+                        rel_basis
+                    )
+                    other.setdefault("batch_related_basis", {})[str(rec["file"])] = (
+                        rel_basis
+                    )
             elif verdict == "volume_sibling":
+                # Issue #55: informational like the rest of the volume
+                # class, and no longer behind the author gate -- a
+                # multi-volume set's credits legitimately differ per
+                # volume, and the set is approve-all either way.
                 rec.setdefault("batch_volumes", []).append(other["file"])
                 other.setdefault("batch_volumes", []).append(rec["file"])
     return records
