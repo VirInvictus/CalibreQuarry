@@ -85,4 +85,15 @@ jobs:
       - name: Mint the Release from the tag's verbatim message
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --notes-from-tag --verify-tag
+        # Idempotent on the release existing: the standing tag procedure
+        # mints the Release manually before this workflow reaches its last
+        # step (v3.87.0, 2026-11-13), and `gh release create` refuses with
+        # HTTP 422 "Release.tag_name already exists". An existing Release
+        # is a success here, not a failure -- the tag's verbatim message is
+        # either already rendered as the body or about to be.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --verify-tag > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; nothing to mint."
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" --notes-from-tag --verify-tag
