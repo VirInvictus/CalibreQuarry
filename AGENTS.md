@@ -5,6 +5,8 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+**CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). Open follow-ups from the 2026-11-13 live audit: issue #57 (top-level help wraps vs truncates inconsistently, doubled "also:" header, no exit line on the surface) and issue #58 (`--help json` carries the flag surface but not the exit contracts and gate annotations that bindery's `--help-json` and lattice's `help --json` both carry; fix additive-only, a new top-level json key, never reshaping `topics`/`groups`).
+
 ## Programmer-facing contract notes (3.87.0 onward, the battery-and-mirror batch, issues #53/#54/#55)
 
 - **The PDF DRM verdict is three-valued, and the trailer is the
