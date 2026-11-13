@@ -1,5 +1,94 @@
 # CalibreQuarry Patch Notes
 
+# 3.87.0 (2026-11-13)
+
+### The phase-1 battery reads the file it is looking at (issues #53, #54, #55)
+
+Three live-class fixes from the 2026-11-11 first full import-runner run,
+all in the vetting battery's observability layer. Nothing gates
+differently where it gated correctly before; what changed is what the
+audit sees, what the documented invocation accepts, and what the mint
+that gets signed records.
+
+- **An orphaned DRM dictionary is `DRM_RESIDUE`, not `DRM` (issue #53,
+  audit_drm.py).** The Tea book's PDF carried a complete Adobe ADEPT
+  encryption dictionary (`EBX_HANDLER`, `ADEPT_LICENSE`) as an
+  UNREFERENCED object: the trailer has zero `/Encrypt` references,
+  meaning the file was already decrypted and only the corpse survives in
+  the xref space. The byte-scan verdict read the signature and reported
+  `DRM`, so the file quarantined as unimportable while qpdf --check said
+  "not encrypted" and exiftool wrote and read back fields fine. The
+  verdict is now trailer-resolved: an encrypted PDF always references its
+  encryption dictionary from the trailer (that is how a reader finds
+  it), so a signature WITH the reference is a live lock (`DRM`,
+  unchanged) and a signature WITHOUT one is `DRM_RESIDUE` -- already
+  decrypted, not a lock, never quarantined by the phase-1 gate (the
+  first-token rule needed no change), but named with the one-shot heal
+  (`qpdf --replace-input` drops the orphan; verify the page count) and
+  counted in a summary clause of its own, exit 1, so the residue is
+  still seen. The named residual: the 2026-09-17 z-library class choked
+  exiftool on exactly this shape, so residue is usually inert but not
+  provably so; the phase-1 skill's residual-ADEPT paragraph now says
+  heal on sight. `Verdict.is_drm` is unchanged, and the CSV/manifest
+  surface is the same columns with a new status value.
+- **check_pdf.py accepts the documented `<files-or-dir>` (issue #54).**
+  The phase-1 skill has documented `check_pdf.py <files-or-dir> --json
+  FILE` for years and the wave pattern passed a directory; on 3.86.0 a
+  directory argument died with `[Errno 21] Is a directory` because
+  main() fed every argument straight to the header sniff's `open()`,
+  while the runner's internal call (explicit file list) worked. A
+  directory argument now expands to the PDF/DJVU files under it --
+  recursive, sorted, audit_drm's directory-mode convention, so the DRM
+  scan and the battery of one pass cover the same population; explicit
+  file paths pass through unchanged (an explicit non-PDF file still
+  reports its unknown header), and a directory with no PDF/DJVU files is
+  a setup error (exit 2) before any spawn.
+- **A stamped re-mint keeps the screen's advisory mirrors (issue #55,
+  screen_duplicate.py).** The 2026-11-11 batch re-minted over completed/
+  (skill step 5c, after stamping) carried NO `checks.related_works` /
+  `checks.volume_siblings` entries for two pairs the vetting mint had
+  surfaced, and the vetting mint's mirrors rode a coincidence: the
+  unstamped files' filename-fallback seeds made both Mysteries PDFs read
+  title "LA Adventures" with placeholder-garbage authors, so the
+  issue-#48 lane (duplicate verdict, differing authors) fired -- and the
+  stamped files' REAL metadata dropped both pairs from the mint that
+  gets signed. Two gates were closing it. The within-batch advisory
+  chain gated `related` and `volume_sibling` verdicts behind
+  same_author (the FAQ containment pair died there: "An Empire Without
+  End" vs its "Frequently Asked Questions" subtitle, four credited
+  authors vs one), and the judge had no rule for a trailing BARE
+  ordinal on the base title (the "Mysteries of the Empire I" vs "...II"
+  pair read None: no vol/volume token, colon-free bases, so neither the
+  annotation rules nor the arabic-only core strip could see it). The
+  author gate is gone from the advisory branches: a containment
+  advisory now surfaces regardless of the credits (differing credits
+  carry the issue-#48 evidence-state basis, agreeing credits keep the
+  byte-identical unbased shape), and `volume_sibling` advisories fire
+  regardless of the credits -- a multi-volume set's credits legitimately
+  differ per volume. The judge's `volume_sibling` rule gained the
+  trailing bare ordinal on the full title: arabic or strict-grammar
+  roman within the practical range (a roman above 100 is a title word,
+  never a numeral: "Mix" (1009) stays title text), BOTH sides declaring,
+  values disagreeing, one stripped stem; one-sided declarations keep the
+  gap-fill silence the signature gate keeps, and the same volume in two
+  spellings ("Foo I" vs "Foo 1") is still no-match. The core strip is
+  roman-aware now while keeping its one-sided semantics. The library
+  door is untouched: volume_sibling verdicts were dropped there before
+  and are dropped now, and the title-only lane still filters to
+  duplicates only.
+- **Tests**: the audit pins both PDF branches (the trailer-`/Encrypt`
+  DRM pin, the orphaned-EBX and orphaned-FileOpen residue pins, the
+  straddle pin, the CSV/exit-1 pin) and run.py pins the non-quarantine
+  (`test_drm_residue_verdict_is_not_quarantined`); the battery pins the
+  directory expansion, the mixed-args verb run over a tree, and the
+  empty-dir setup error (`TestCheckPdfTargets`); the screen pins both
+  live pairs end to end (containment-with-differing-credits surfaces
+  with its basis, the bare-roman volume pair with differing credits is
+  advised), the byte-identical legacy shape (same-author containment
+  stays unbased), the advisory scope (distinct verdicts by different
+  hands stay silent), and the judge guards (one-sided, same-value,
+  word-roman, and the documented year-pair trade).
+
 # 3.86.0 (2026-11-09)
 
 ### The cquarry 1.29.1 floor: author_sort flip assembly reaches the import path (issue #52)

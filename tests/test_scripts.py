@@ -938,6 +938,47 @@ class TestScreenDuplicateClassify(unittest.TestCase):
             "volume_sibling",
         )
 
+    def test_bare_base_roman_ordinals_are_volume_siblings(self):
+        # Issue #55's live pair (the 2026-11-11 Lex Arcana batch): the
+        # ordinals sit on the BASE with no vol/volume/part/book token
+        # before them, where neither the annotation rules nor the arabic
+        # core rule could see them. Strict-grammar romans within the
+        # practical range now declare the volume set.
+        self._check(
+            "Lex Arcana - Mysteries of the Empire I",
+            "Lex Arcana - Mysteries of the Empire II",
+            "volume_sibling",
+        )
+
+    def test_core_roman_ordinals_are_volume_siblings(self):
+        # The core rule's arabic-only strip read roman cores as distinct
+        # works; the same trailing-ordinal semantics now cover romans.
+        self._check("Foo: Bar I", "Foo: Bar II", "volume_sibling")
+
+    def test_one_sided_base_ordinal_stays_silent(self):
+        # One-sided declarations are the gap-fill silence the signature
+        # gate keeps (the Wandering-Inn flood guard): the bare-base
+        # ordinal rule needs BOTH sides declaring.
+        self._check("Monster Vault", "Monster Vault 2", None)
+
+    def test_same_volume_two_spellings_is_not_a_sibling(self):
+        # "Foo I" and "Foo 1" are the SAME volume in two spellings: the
+        # values agree, so the pair is no-match (unchanged).
+        self._check("Foo I", "Foo 1", None)
+
+    def test_wordish_roman_never_reads_as_an_ordinal(self):
+        # The unanchored token needs a grammar-and-range guard: "Mix"
+        # (1009) is a title word, never a volume declaration, so no
+        # sibling fires over it.
+        self._check("Foo Mix", "Foo Xi", None)
+
+    def test_year_pair_over_one_stripped_stem_is_a_sibling(self):
+        # The accepted false-positive class (informational, judged by
+        # hand like the core rule's one-sided arabic): two trailing
+        # numbers over one stripped stem read as a set. The verdict is
+        # volume_sibling, never a refusal.
+        self._check("Berlin 1936", "Berlin 1945", "volume_sibling")
+
     def test_differing_real_subtitles_are_distinct_works(self):
         # The 2026-09-21 sibling collapse: two real books sharing a base
         # title, different ISBNs, 520 vs 515 pages. Never a match.
@@ -1889,6 +1930,123 @@ class TestScreenDuplicateMatching(unittest.TestCase):
         self.assertNotIn("batch_duplicates", out[1])
         self.assertEqual(out[0]["batch_volumes"], ["/dl/vault2.pdf"])
         self.assertEqual(out[1]["batch_volumes"], ["/dl/vault.pdf"])
+
+    def test_containment_pair_with_differing_credits_surfaces(self):
+        # Issue #55's live pair 1 (the 2026-11-11 stamped re-mint): the
+        # rulebook and its FAQ share the base; the FAQ's credits differ,
+        # and the author gate that used to sit on the related advisory
+        # dropped the pair from the mint that gets signed. The advisory
+        # rides the title verdict now, with the evidence state named.
+        files = [Path("/dl/la-core.pdf"), Path("/dl/la-faq.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Lex Arcana - An Empire Without End",
+                    "author(s)": "Leonardo Colovini & Dario De Toffoli",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Lex Arcana - An Empire Without End: "
+                    "Frequently Asked Questions",
+                    "author(s)": "Emanuele Dominique Cappella",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_related"], ["/dl/la-faq.pdf"])
+        self.assertEqual(out[1]["batch_related"], ["/dl/la-core.pdf"])
+        self.assertEqual(
+            out[0]["batch_related_basis"]["/dl/la-faq.pdf"],
+            "title only, authors differ",
+        )
+        self.assertEqual(
+            out[1]["batch_related_basis"]["/dl/la-core.pdf"],
+            "title only, authors differ",
+        )
+
+    def test_same_author_containment_keeps_the_legacy_unbased_shape(self):
+        # The 2026-09-21 masked-duplicate class within one batch, agreeing
+        # credits: the advisory keeps its pre-#55 shape (no basis key,
+        # byte-identical mirrors).
+        files = [Path("/dl/wages.epub"), Path("/dl/mothership.epub")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Wages of Sin",
+                    "author(s)": "Luke Gearing",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Mothership: Wages of Sin",
+                    "author(s)": "Luke Gearing",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_related"], ["/dl/mothership.epub"])
+        self.assertEqual(out[1]["batch_related"], ["/dl/wages.epub"])
+        self.assertNotIn("batch_related_basis", out[0])
+        self.assertNotIn("batch_related_basis", out[1])
+
+    def test_bare_roman_volume_pair_with_differing_credits_is_advised(self):
+        # Issue #55's live pair 2: the I/II set's credits legitimately
+        # differ per volume, and the volumes advisory is approve-all
+        # information either way. The judge's widened rule fires; the
+        # author gate no longer suppresses it.
+        files = [Path("/dl/myst1.pdf"), Path("/dl/myst2.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Lex Arcana - Mysteries of the Empire I",
+                    "author(s)": "Ciro Alessandro Sacco & Andrea Marengo",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Lex Arcana - Mysteries of the Empire II",
+                    "author(s)": "Luca Scoz & Steffan Kuppers",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertNotIn("batch_duplicates", out[0])
+        self.assertNotIn("batch_duplicates", out[1])
+        self.assertEqual(out[0]["batch_volumes"], ["/dl/myst2.pdf"])
+        self.assertEqual(out[1]["batch_volumes"], ["/dl/myst1.pdf"])
+
+    def test_distinct_verdict_with_differing_credits_stays_silent(self):
+        # The widening is scoped to the advisory classes: differing real
+        # subtitles by different hands were and stay no-match.
+        files = [Path("/dl/arm.pdf"), Path("/dl/x86.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "Introduction to Computer Organization: ARM",
+                    "author(s)": "Jonathan Bartlett",
+                    "identifiers": "",
+                },
+                {
+                    "title": "Introduction to Computer Organization: x86-64",
+                    "author(s)": "Robert Plantz",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_related", rec)
+            self.assertNotIn("batch_volumes", rec)
 
     def test_moral_letters_volumes_advised_as_a_set(self):
         # The 2026-09-16 roadmap shape, within-batch: differing declared
@@ -4608,6 +4766,85 @@ class TestCheckPdfDepth(unittest.TestCase):
         )
 
 
+class TestCheckPdfTargets(unittest.TestCase):
+    """Issue #54: the documented <files-or-dir> usage. A directory
+    argument expands to the PDF/DJVU files under it (recursive, like
+    audit_drm's directory mode, so the two batteries of one pass see the
+    same population); explicit file paths pass through unchanged."""
+
+    def _tree(self):
+        tmp = tempfile.mkdtemp(prefix="cquarry_battery_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        os.makedirs(os.path.join(tmp, "nested"))
+        payloads = {
+            "a.pdf": b"%PDF-1.4 fake",
+            "b.djvu": b"AT&TFORM\x00\x00\x00\x00DJVM",
+            "nested/c.pdf": b"%PDF-1.4 fake",
+            "skip.epub": b"x",
+            "skip.txt": b"x",
+        }
+        for rel, payload in payloads.items():
+            with open(os.path.join(tmp, rel), "wb") as f:
+                f.write(payload)
+        return tmp
+
+    def test_directory_expands_to_pdf_and_djvu_recursive(self):
+        tmp = self._tree()
+        self.assertEqual(
+            check_pdf._expand_targets([tmp]),
+            [
+                os.path.join(tmp, "a.pdf"),
+                os.path.join(tmp, "b.djvu"),
+                os.path.join(tmp, "nested", "c.pdf"),
+            ],
+        )
+
+    def test_explicit_paths_pass_through_unchanged(self):
+        self.assertEqual(
+            check_pdf._expand_targets(["/dl/x.epub", "/dl/y.pdf"]),
+            ["/dl/x.epub", "/dl/y.pdf"],
+        )
+
+    def test_directory_over_the_verb_reports_every_file(self):
+        # The live failure: `check_pdf.py <dir> --json FILE` died with
+        # "[Errno 21] Is a directory" on the first file read. The verb
+        # now walks the dir and reports each file.
+        tmp = self._tree()
+        outdir = tempfile.mkdtemp(prefix="cquarry_battery_out_")
+        self.addCleanup(shutil.rmtree, outdir, ignore_errors=True)
+        out = os.path.join(outdir, "battery.json")
+
+        def fake_run(cmd, timeout=120, **kwargs):
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(
+                sys, "argv", ["check_pdf.py", tmp, "--json", out, "--quiet"]
+            ),
+            mock.patch("subprocess.run", side_effect=fake_run),
+        ):
+            rc = check_pdf.main()
+        self.assertEqual(rc, 0)
+        with open(out, encoding="utf-8") as f:
+            report = json.load(f)
+        self.assertEqual(
+            sorted(os.path.basename(r["path"]) for r in report["files"]),
+            ["a.pdf", "b.djvu", "c.pdf"],
+        )
+        self.assertEqual(report["structural"], 0)
+
+    def test_directory_without_battery_files_is_setup_error(self):
+        tmp = tempfile.mkdtemp(prefix="cquarry_battery_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with (
+            mock.patch.object(sys, "argv", ["check_pdf.py", tmp]),
+            mock.patch("subprocess.run") as run,
+        ):
+            rc = check_pdf.main()
+        self.assertEqual(rc, 2)
+        run.assert_not_called()
+
+
 class TestIsbnCopyrightYear(unittest.TestCase):
     """Phase 19 B.8: (c)-years captured in the front-matter pass; a gap
     over the tolerance against the pubdate year is VARIANT-class
@@ -4657,6 +4894,25 @@ class TestDrmCsvCarriesNaRows(unittest.TestCase):
         self.assertEqual([r["path"] for r in rows], [djvu])
         self.assertEqual(rows[0]["status"], "N/A")
         self.assertEqual(rows[0]["kind"], "djvu")
+
+    def test_residue_rows_reach_the_csv_and_exit_one(self):
+        # Issue #53: the orphaned-handler verdict rides the same CSV the
+        # runner consumes (and the phase-1 gate's first-token parse
+        # deliberately does not quarantine it), while the summary counts
+        # it in the FOUND line and the run exits 1.
+        tmp = tempfile.mkdtemp(prefix="cquarry_drm_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        orphan = os.path.join(tmp, "tea.pdf")
+        with open(orphan, "wb") as f:
+            f.write(b"%PDF-1.6\n/Filter /EBX_HANDLER\n%%EOF")
+        csv_path = os.path.join(tmp, "drm.csv")
+        rc = audit_drm.run_directory(pathlib.Path(tmp), pathlib.Path(csv_path))
+        self.assertEqual(rc, 1)
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual(rows[0]["status"], "DRM_RESIDUE")
+        self.assertEqual(rows[0]["kind"], "Adobe ADEPT")
+        self.assertIn("no /Encrypt", rows[0]["detail"])
 
 
 class TestCodeClassificationGuards(unittest.TestCase):

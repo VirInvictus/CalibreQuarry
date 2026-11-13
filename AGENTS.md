@@ -5,6 +5,71 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
+## Programmer-facing contract notes (3.87.0 onward, the battery-and-mirror batch, issues #53/#54/#55)
+
+- **The PDF DRM verdict is three-valued, and the trailer is the
+  arbiter.** `classify_pdf`: a handler signature with a trailer
+  `/Encrypt` reference stays `DRM` (an encrypted PDF always references
+  its dict from the trailer; that is how a reader finds it), a signature
+  WITHOUT one is the new `DRM_RESIDUE` -- the orphaned corpse of a past
+  decryption (issue #53's live shape: the Tea book's complete ADEPT
+  dictionary unreferenced in the xref space, qpdf "not encrypted",
+  exiftool writing and reading back fine). `Verdict.is_drm` is unchanged
+  (`DRM`/`ERROR`), so run.py's first-token quarantine gate needs no
+  change: `DRM_RESIDUE` rides `checks.drm` verbatim and the file approves
+  exactly like BENIGN. The audit's own summary grew a residue count and
+  the FOUND clause names it ("heal before stamping"), exit 1 so a
+  residue-only scan is still seen. The named residual: the 2026-09-17
+  z-library class choked exiftool on exactly this shape, so residue is
+  usually inert but not provably so -- the verdict's detail carries the
+  one-shot heal (`qpdf --replace-input`, page count verified), and the
+  phase-1 skill's residual-ADEPT paragraph now says heal on sight.
+- **check_pdf's `<files-or-dir>` usage is true again.** `_expand_targets`
+  expands directory arguments to the PDF/DJVU files under them,
+  recursive, sorted (audit_drm's directory-mode convention, so the DRM
+  scan and the battery of one pass cover the same population); explicit
+  file paths pass through unchanged (an explicit non-PDF still reports
+  its unknown header), and zero expanded targets is a setup error (exit
+  2) before any spawn. The runner's internal call passes explicit files
+  and is byte-identical.
+- **The advisory mirrors ride the title verdict, not the credits.** The
+  `elif not same_author: continue` gate that sat between the
+  duplicate lanes and the related/volume branches is gone (issue #55):
+  a containment advisory (`verdict == "related"`) surfaces regardless of
+  the credits -- differing credits carry the issue-#48 evidence-state
+  basis via the shared `_title_only_basis` helper ("title only, authors
+  differ" / "title only, authors absent on one side"), agreeing credits
+  keep the legacy unbased shape byte-identical -- and `volume_sibling`
+  advisories fire regardless of the credits (a multi-volume set's
+  credits legitimately differ per volume). The judge's `volume_sibling`
+  rule gained the trailing BARE ordinal on the full title: arabic or
+  strict-grammar roman within the practical range (`_MAX_BARE_ROMAN`
+  100, so the word "Mix" (1009) never reads as a numeral), BOTH sides
+  declaring, values disagreeing, one stripped stem; one-sided and
+  same-value spellings ("Foo I" vs "Foo 1") stay no-match, and the core
+  rule's strip is roman-aware while keeping its one-sided semantics.
+  Library-door blast radius: none -- volume_sibling verdicts were
+  dropped there before (None) and are dropped now; the title-only lane
+  still filters to `duplicate` only.
+- **The live mechanism is on the record because the manifests carried
+  it.** The 2026-11-11 vetting mint mirrored "LA Adventures" I/II
+  through the issue-#48 lane because the unstamped seeds read
+  same-author ("Unknown" == "Unknown"); the stamped completed/ mint's
+  real per-volume credits dropped BOTH live pairs (the FAQ containment
+  pair at the author gate, the I/II roman pair at the judge, whose
+  base-level ordinals fired no rule at all). The re-mint that gets
+  signed now carries both mirrors. Tests:
+  `test_containment_pair_with_differing_credits_surfaces`,
+  `test_bare_roman_volume_pair_with_differing_credits_is_advised`,
+  `test_same_author_containment_keeps_the_legacy_unbased_shape`
+  (byte-identical legacy), `test_distinct_verdict_with_differing_
+  credits_stays_silent` (the widening is advisory-scoped), the judge
+  pins (`test_bare_base_roman_ordinals_are_volume_siblings` and the
+  guard/same-value/one-sided pins), `test_orphaned_adept_dict_is_
+  residue` + `test_residue_is_not_a_drm_verdict` + the
+  trailer-`/Encrypt` DRM pin, `TestCheckPdfTargets`, and run.py's
+  `test_drm_residue_verdict_is_not_quarantined`.
+
 ## Programmer-facing contract notes (3.86.0 onward, the cquarry 1.29.1 floor, issue #52)
 
 - **The floor is `>=1.29.1`, and the flip assembly is engine behavior
