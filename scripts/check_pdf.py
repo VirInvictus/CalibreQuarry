@@ -18,9 +18,12 @@ For each file it reports, without changing anything:
   images        pdfimages -list: image count and area-weighted DPI
 
 Every external tool is optional; a missing tool marks its check
-"unavailable" rather than failing the file. Exit codes: 0 all files
-verified without structural findings, 1 findings, 2 setup error.
-`--json FILE` writes the machine report for the phase-1 runner.
+"unavailable" rather than failing the file. Each argument may be a file or
+a directory: a directory expands to the PDF/DJVU files under it (recursive,
+like audit_drm's directory mode, so the two batteries of one phase-1 pass
+see the same file set). Exit codes: 0 all files verified without structural
+findings, 1 findings, 2 setup error. `--json FILE` writes the machine
+report for the phase-1 runner.
 """
 
 import argparse
@@ -41,6 +44,12 @@ except ImportError:  # a lone deployed copy: no siblings beside it
 
 _PDF_MAGIC = b"%PDF-"
 _DJVU_MAGIC = b"AT&TFORM"
+
+# The extensions a directory argument expands to (issue #54: the phase-1
+# skill documents <files-or-dir>, and for years the wave pattern passed a
+# directory; the tool refused it with "[Errno 21] Is a directory" because
+# main() fed every argument straight to check_file's open()).
+_BATTERY_EXTS = (".pdf", ".djvu")
 
 # The finding kinds that count toward the structural total (exit 1).
 # Everything else (warnings, fonts, text layer, dpi, timeouts) is
@@ -283,12 +292,37 @@ def check_file(path: str) -> dict:
     return report
 
 
+def _expand_targets(paths: list[str]) -> list[str]:
+    """files-or-dir: a directory argument expands to the PDF/DJVU files
+    under it, recursive (audit_drm's directory-mode convention, so the two
+    batteries of one pass cover the same population), sorted for stable
+    report order. Explicit file paths pass through unchanged: a non-PDF
+    file named directly still reports its unknown header, exactly as
+    before."""
+    out: list[str] = []
+    for raw in paths:
+        p = Path(raw).expanduser()
+        if p.is_dir():
+            out.extend(
+                sorted(
+                    str(f) for f in p.rglob("*") if f.suffix.lower() in _BATTERY_EXTS
+                )
+            )
+        else:
+            out.append(raw)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="The phase-1 PDF/DJVU battery: header, page count, "
         "qpdf --check (real-vs-benign), fonts, text layer, images. Read-only."
     )
-    ap.add_argument("files", nargs="+", help="PDF/DJVU files to check")
+    ap.add_argument(
+        "files",
+        nargs="+",
+        help="PDF/DJVU files, or directories whose PDF/DJVU files are checked",
+    )
     ap.add_argument("--json", metavar="FILE", help="also write the machine report")
     ap.add_argument(
         "--quiet", action="store_true", help="suppress the per-file progress lines"
@@ -297,8 +331,12 @@ def main() -> int:
 
     announce()
 
+    targets = _expand_targets(args.files)
+    if not targets:
+        print("ERROR: no PDF/DJVU files to check.", file=sys.stderr)
+        return 2
     reports = []
-    for path in args.files:
+    for path in targets:
         try:
             reports.append(check_file(path))
         except OSError as e:
