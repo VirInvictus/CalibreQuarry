@@ -916,10 +916,11 @@ def run_phase1(
                 entry["checks"]["volume_siblings"] = advisory["volumes"]
         # Quarantine audit_drm's own problem set only (its is_problem:
         # DRM, plus ERROR, a scan that could not verify). BENIGN (font
-        # obfuscation, permission flags) and N/A (DJVU) are not locks and
-        # never move a file; the docs' dry promise is for them too. The
-        # class is the first token: an ERROR row may carry its parse
-        # failure after a colon (see _drm_verdicts).
+        # obfuscation, permission flags), DRM_RESIDUE (an orphaned handler
+        # dict: the file was already decrypted; issue #53), and N/A (DJVU)
+        # are not locks and never move a file; the docs' dry promise is
+        # for them too. The class is the first token: an ERROR row may
+        # carry its parse failure after a colon (see _drm_verdicts).
         head, sep, tail = drm_status.partition(":")
         problem = head.strip().upper()
         if problem in ("DRM", "ERROR"):

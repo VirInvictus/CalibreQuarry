@@ -163,25 +163,56 @@ class PdfTests(unittest.TestCase):
         p.write_bytes(body)
         return p
 
-    def test_ebx_handler_is_drm(self):
-        p = self._pdf("adept.pdf", b"%PDF-1.6\n/Filter /EBX_HANDLER\n%%EOF")
+    def test_ebx_handler_with_encrypt_dict_is_drm(self):
+        # A live lock: the handler dict is referenced from the trailer
+        # (/Encrypt, which is how a reader finds it). Signature + trailer
+        # reference = DRM.
+        p = self._pdf(
+            "adept.pdf",
+            b"%PDF-1.6\n/Filter /EBX_HANDLER\ntrailer<< /Encrypt 5 0 R >>\n%%EOF",
+        )
         v = drm.classify_pdf(p)
         self.assertEqual(v.status, drm.DRM)
         self.assertEqual(v.kind, "Adobe ADEPT")
 
-    def test_fileopen_is_drm(self):
+    def test_orphaned_adept_dict_is_residue(self):
+        # Issue #53's live shape (the Tea book, 2026-11-11): a complete
+        # ADEPT encryption dictionary survives in the xref space but the
+        # trailer has zero /Encrypt references -- the file was already
+        # decrypted and only the corpse remains. qpdf --check says "not
+        # encrypted" and exiftool writes and reads back fine, so it is not
+        # a lock and never quarantines; the verdict names the one-shot
+        # heal because the residue can still confuse a metadata writer.
+        p = self._pdf("tea.pdf", b"%PDF-1.6\n/Filter /EBX_HANDLER\n%%EOF")
+        v = drm.classify_pdf(p)
+        self.assertEqual(v.status, drm.DRM_RESIDUE)
+        self.assertEqual(v.kind, "Adobe ADEPT")
+        self.assertIn("no /Encrypt", v.detail)
+        self.assertIn("qpdf --replace-input", v.detail)
+
+    def test_residue_is_not_a_drm_verdict(self):
+        p = self._pdf("tea.pdf", b"%PDF-1.6\n/Filter /EBX_HANDLER\n%%EOF")
+        self.assertFalse(drm.classify_pdf(p).is_drm)
+
+    def test_orphaned_fileopen_dict_is_residue(self):
+        # Every third-party handler shares the rule: a signature without a
+        # trailer /Encrypt reference is residue of a past decryption, not
+        # a lock.
         p = self._pdf("fo.pdf", b"%PDF-1.6\n/Filter /FOPN_foweb\n%%EOF")
         v = drm.classify_pdf(p)
-        self.assertEqual(v.status, drm.DRM)
+        self.assertEqual(v.status, drm.DRM_RESIDUE)
         self.assertEqual(v.kind, "FileOpen")
 
     def test_signature_across_chunk_boundary(self):
-        # straddle the 1 MiB streaming boundary to exercise the tail overlap.
+        # straddle the 1 MiB streaming boundary to exercise the tail
+        # overlap; the verdict is residue because the trailer carries no
+        # /Encrypt, but finding the far-away signature is what the test
+        # pins.
         sig = b"EBX_HANDLER"
         pad = (1 << 20) - 5
         body = b"%PDF-1.6\n" + b"\x00" * pad + sig + b"\n%%EOF"
         p = self._pdf("straddle.pdf", body)
-        self.assertEqual(drm.classify_pdf(p).status, drm.DRM)
+        self.assertEqual(drm.classify_pdf(p).status, drm.DRM_RESIDUE)
 
     def test_clean_pdf_no_signature_no_encrypt(self):
         # no DRM handler and no /Encrypt: clean regardless of qpdf availability.

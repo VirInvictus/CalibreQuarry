@@ -306,6 +306,33 @@ class TestRunPhase1(RunCase):
         self.assertEqual(man["decisions_needed"][0]["detail"], "DRM: DRM")
         self.assertNotIn(path, man["approved_for_import"])
 
+    def test_drm_residue_verdict_is_not_quarantined(self):
+        # Issue #53: an orphaned handler dict (signature present, no
+        # /Encrypt in the trailer) is already-decrypted residue, not a
+        # lock. audit_drm reports DRM_RESIDUE; the runner records the
+        # check and approves the file exactly like BENIGN, never
+        # quarantining.
+        path = self._make_file("tea.pdf")
+        with (
+            mock.patch("cquarry_cli.run._screen_duplicates", return_value=set()),
+            mock.patch(
+                "cquarry_cli.run._drm_verdicts",
+                return_value={path: "DRM_RESIDUE"},
+            ),
+            mock.patch("cquarry_cli.run._pdf_battery", return_value={}),
+            mock.patch("cquarry_cli.run._bindery_phase1", return_value={}),
+        ):
+            rc = run_phase1(self.downloads, self.db_path)
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(path))
+        manifests = os.path.join(self.library, ".claude", "manifests")
+        (manifest_path,) = os.listdir(manifests)
+        man = manifest.load(os.path.join(manifests, manifest_path))
+        self.assertEqual(man["quarantines"], [])
+        entry = manifest.file_by_path(man, path)
+        self.assertEqual(entry["checks"]["drm"], "DRM_RESIDUE")
+        self.assertEqual(entry["verdict"], "approved_for_import")
+
     def test_error_verdict_quarantines_like_drm(self):
         # ERROR is the other half of audit_drm's is_problem set: a scan
         # that could not verify gets the same conservative treatment.

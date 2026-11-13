@@ -25,11 +25,17 @@ Per format:
          META-INF/encryption.xml => DRM only if it encrypts content (XHTML/CSS/
          OPF) or uses a non-font algorithm; font-only obfuscation is BENIGN.
   PDF    A non-Standard security handler (EBX_HANDLER, FOPN_foweb/fLock, the
-         ADEPT namespace) found by a streaming byte scan => DRM, even when the
-         dictionary is residual/inactive. An active Standard-handler encryption
-         is classed with qpdf: requires a password => DRM; opens without one =>
-         PERMISSIONS (benign). qpdf is optional; without it, Standard encryption
-         is reported as ENCRYPTED-UNCLASSIFIED rather than guessed.
+         ADEPT namespace) found by a streaming byte scan => DRM when the
+         trailer still carries /Encrypt (the handler dict is live), and
+         DRM_RESIDUE when it does not: an encrypted PDF always references its
+         encryption dictionary from the trailer, so a signature with no
+         /Encrypt is the orphaned corpse of a past decryption (issue #53) --
+         not a lock, but residue that can still confuse metadata writers, so
+         the verdict names the one-shot qpdf heal instead of quarantining.
+         An active Standard-handler encryption is classed with qpdf: requires
+         a password => DRM; opens without one => PERMISSIONS (benign). qpdf is
+         optional; without it, Standard encryption is reported as
+         ENCRYPTED-UNCLASSIFIED rather than guessed.
   MOBI   The PalmDOC/MOBI record-0 encryption-type field (0 none, 1/2
   /AZW3   Mobipocket DRM). Pure stdlib.
   DJVU   No DRM scheme in practice => reported N/A.
@@ -46,7 +52,8 @@ Run from the library directory:
 
 Exit codes:
     0 = clean (no DRM; font obfuscation and permission flags are not DRM)
-    1 = DRM found, or a scan error
+    1 = DRM found, DRM residue found (already decrypted; the verdict's
+        detail names the one-shot heal), or a scan error
     2 = setup error (missing DB / library, or no ebook files in directory)
 """
 
@@ -91,6 +98,7 @@ SUPPORTED_EXT = (".epub", ".pdf", ".azw3", ".mobi", ".azw", ".prc", ".djvu")
 # Verdict status values.
 CLEAN = "CLEAN"
 DRM = "DRM"
+DRM_RESIDUE = "DRM_RESIDUE"  # orphaned handler dict: already decrypted, not a lock
 BENIGN = "BENIGN"  # font obfuscation / permission flags: looks encrypted, isn't a lock
 NA = "N/A"  # format that does not carry DRM (DJVU)
 ERROR = "ERROR"
@@ -329,7 +337,26 @@ def classify_pdf(path: Path) -> Verdict:
             "FOPN_foweb": "FileOpen",
             "FOPN_fLock": "FileOpen",
         }.get(name, name)
-        return Verdict(DRM, handler, f"security handler signature {name!r}")
+        # A live encryption dictionary is referenced from the trailer: an
+        # encrypted PDF always carries /Encrypt there (that is how a reader
+        # finds the dict), so signature + /Encrypt is a lock. Issue #53's
+        # live shape is the opposite: the trailer has zero /Encrypt
+        # references and only the dict survives in the xref space -- the
+        # orphaned corpse of a past decryption (the Tea book, 2026-11-11).
+        # qpdf --check calls it "not encrypted" and exiftool writes and
+        # reads back fine, so it is not a lock and never quarantines; the
+        # residue can still confuse a metadata writer (the 2026-09-17
+        # z-library class choked exiftool on exactly this shape), so the
+        # verdict names the one-shot heal instead of claiming CLEAN.
+        if _pdf_has_encrypt_dict(path):
+            return Verdict(DRM, handler, f"security handler signature {name!r}")
+        return Verdict(
+            DRM_RESIDUE,
+            handler,
+            f"orphaned security handler {name!r} (no /Encrypt in trailer: "
+            "already decrypted). Heal: qpdf --replace-input drops the "
+            "orphan; verify the page count is preserved.",
+        )
     verdict = _qpdf_classify_standard(path)
     if verdict is not None:
         return verdict
@@ -411,29 +438,36 @@ def classify_file(path: Path) -> Verdict:
 # Reporting
 # --------------------------------------------------------------------------- #
 def _color(status: str) -> str:
-    return {DRM: RED, ERROR: RED, BENIGN: YELLOW, CLEAN: GREEN, NA: GREEN}.get(
-        status, ""
-    )
+    return {
+        DRM: RED,
+        ERROR: RED,
+        DRM_RESIDUE: YELLOW,
+        BENIGN: YELLOW,
+        CLEAN: GREEN,
+        NA: GREEN,
+    }.get(status, "")
 
 
 def _print_row(label: str, verdict: Verdict) -> None:
     c = _color(verdict.status)
     kind = (
         f" [{verdict.kind}]"
-        if verdict.kind and verdict.status in (DRM, BENIGN, ERROR)
+        if verdict.kind and verdict.status in (DRM, DRM_RESIDUE, BENIGN, ERROR)
         else ""
     )
-    ui.tqdm.write(f"  {c}{verdict.status:<7}{RESET}{kind} {label}")
-    if verdict.detail and verdict.status in (DRM, ERROR):
+    ui.tqdm.write(f"  {c}{verdict.status:<12}{RESET}{kind} {label}")
+    if verdict.detail and verdict.status in (DRM, DRM_RESIDUE, ERROR):
         ui.tqdm.write(f"      {verdict.detail}")
 
 
-def _summary(drm, benign, errors, scanned) -> int:
+def _summary(drm, residue, benign, errors, scanned) -> int:
     print()
-    if drm or errors:
+    if drm or residue or errors:
         print(
             f"{RED}{BOLD}FOUND{RESET}: {drm} DRM-locked file(s), "
-            f"{errors} scan error(s); {benign} benign-encrypted, {scanned} scanned."
+            f"{residue} DRM-residue file(s) (already decrypted; heal before "
+            f"stamping), {errors} scan error(s); {benign} benign-encrypted, "
+            f"{scanned} scanned."
         )
         return 1
     note = f" ({benign} benign font/permission encryption)" if benign else ""
@@ -461,7 +495,7 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
         print(ui.warn(f"No ebook files found under {directory}"))
         return 2
     print(ui.info(f"Scanning {len(files)} file(s) in {directory} for DRM\n"))
-    drm = benign = errors = scanned = 0
+    drm = residue = benign = errors = scanned = 0
     csv_rows = []
     for path in ui.tqdm(files, desc=ui.info("Scanning files")):
         verdict = classify_file(path)
@@ -474,16 +508,18 @@ def run_directory(directory: Path, csv_path: Path | None) -> int:
         scanned += 1
         if verdict.status == DRM:
             drm += 1
+        elif verdict.status == DRM_RESIDUE:
+            residue += 1
         elif verdict.status == BENIGN:
             benign += 1
         elif verdict.status == ERROR:
             errors += 1
-        if verdict.status in (DRM, BENIGN, ERROR):
+        if verdict.status in (DRM, DRM_RESIDUE, BENIGN, ERROR):
             _print_row(path.name, verdict)
     if csv_path:
         _write_csv(csv_path, csv_rows)
         print(f"\nWrote {csv_path}")
-    return _summary(drm, benign, errors, scanned)
+    return _summary(drm, residue, benign, errors, scanned)
 
 
 def run_library(csv_path: Path | None) -> int:
@@ -513,7 +549,7 @@ def run_library(csv_path: Path | None) -> int:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     print(ui.info(f"Scanning {len(rows)} file(s) across the library for DRM\n"))
-    drm = benign = errors = scanned = 0
+    drm = residue = benign = errors = scanned = 0
     csv_rows = []
     for book_id, title, path, name, fmt in ui.tqdm(
         rows, desc=ui.info("Scanning library")
@@ -534,16 +570,18 @@ def run_library(csv_path: Path | None) -> int:
         scanned += 1
         if verdict.status == DRM:
             drm += 1
+        elif verdict.status == DRM_RESIDUE:
+            residue += 1
         elif verdict.status == BENIGN:
             benign += 1
         elif verdict.status == ERROR:
             errors += 1
-        if verdict.status in (DRM, BENIGN, ERROR):
+        if verdict.status in (DRM, DRM_RESIDUE, BENIGN, ERROR):
             _print_row(f"#{book_id} [{fmt}] {title}", verdict)
     if csv_path:
         _write_csv(csv_path, csv_rows)
         print(f"\nWrote {csv_path}")
-    return _summary(drm, benign, errors, scanned)
+    return _summary(drm, residue, benign, errors, scanned)
 
 
 def main() -> int:
