@@ -26,12 +26,22 @@ the issue's order, until a rung yields cover bytes:
    right half by a SECOND render cropped in RENDER pixels measured from
    the PNG's IHDR -- the manual pipeline's recorded lesson ("measure the
    render, not the points": a points-based crop landed on the wrong half).
-4. **sibling** -- exactly one other book sharing a case-folded author
+   When page 1 is declined by the BLANK gate exactly (issue #69: indie
+   RPG PDFs whose page 1 is blank by design), ONE page-2 render runs
+   through the same gates before the ladder falls on -- a wrapper or
+   landscape decline, or a render failure, never re-tries, and a page-2
+   win reports the `page2-render` rung.
+4. **djvu-render** -- DJVUs: `ddjvu -page=1 -scale=150 -format=ppm`,
+   re-encoded to PNG in stdlib (the blank gate only reads PNGs; no
+   ImageMagick dependency), then the blank and landscape gates (issue
+   #67). No wrapper gate (pdftotext cannot read the format) and no
+   page-2 arm yet -- a blank-page-1 DJVU is a named deferred shape.
+5. **sibling** -- exactly one other book sharing a case-folded author
    whose has_cover is truthy donates its catalogued cover (the indie
    two-volume shape: rules volume + art volume, the art volume's true
    cover living on the sibling's page 1). Zero covered siblings is a
    silent miss; two or more is a declined ambiguity.
-5. **url** -- an explicit --url ID=URL overrides the ladder for that
+6. **url** -- an explicit --url ID=URL overrides the ladder for that
    book (news's explicit-over-curated rule): the URL is fetched (network
    at --apply ONLY; the dry run plans it), direct image bytes are
    sniffed, and an HTML product page has its og:image/twitter:image
@@ -157,19 +167,21 @@ def _run_pdftotext(cmd: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def _render_page1(pdf: str, workdir: str, crop: tuple[int, int] | None = None):
-    """One pdftoppm page-1 render; (bytes, detail) where bytes is None on
-    any failure and detail names it. `crop` is (x_offset, width) in RENDER
-    pixels -- the spread-crop's second pass, measured from the first
-    render's IHDR (the manual pipeline's recorded lesson: never from the
-    PDF's points)."""
-    prefix = f"{workdir}/page1"
+def _render_pdf_page(
+    pdf: str, page: int, workdir: str, crop: tuple[int, int] | None = None
+):
+    """One pdftoppm render of `page`; (bytes, detail) where bytes is None
+    on any failure and detail names it. `crop` is (x_offset, width) in
+    RENDER pixels -- the spread-crop's second pass, measured from the
+    first render's IHDR (the manual pipeline's recorded lesson: never
+    from the PDF's points)."""
+    prefix = f"{workdir}/page{page}"
     cmd = [
         "pdftoppm",
         "-f",
-        "1",
+        str(page),
         "-l",
-        "1",
+        str(page),
         "-r",
         str(_RENDER_DPI),
         "-png",
@@ -244,6 +256,124 @@ def _embedded_cover(fmt_path: str, workdir: str) -> tuple[bytes | None, str]:
     if not data or sniff_image_format(data) is None:
         return None, "extracted payload is not a JPEG/PNG"
     return data, ""
+
+
+# --- the DJVU render rung (issue #67) ---------------------------------
+
+
+def _run_ddjvu(cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace", timeout=300
+    )
+
+
+def _parse_ppm(data: bytes) -> tuple[int, int, bytes] | None:
+    """(width, height, raw RGB rows) from a binary PPM (P6, maxval 255),
+    or None when the bytes are not one the rung can use (16-bit, truncated,
+    garbage): the rung declines, never a crash. The header grammar allows
+    whitespace runs and `#` comments between the fields, and exactly one
+    whitespace byte before the raster."""
+    if data[:2] != b"P6":
+        return None
+    pos = 2
+    values: list[int] = []
+    while len(values) < 3:
+        while pos < len(data) and data[pos : pos + 1].isspace():
+            pos += 1
+        if pos < len(data) and data[pos : pos + 1] == b"#":
+            while pos < len(data) and data[pos : pos + 1] not in (b"\n", b"\r"):
+                pos += 1
+            continue
+        start = pos
+        while pos < len(data) and data[pos : pos + 1].isdigit():
+            pos += 1
+        if pos == start:
+            return None
+        values.append(int(data[start:pos]))
+    if pos >= len(data) or not data[pos : pos + 1].isspace():
+        return None
+    pos += 1
+    width, height, maxval = values
+    if width <= 0 or height <= 0 or maxval == 0 or maxval > 255:
+        return None
+    need = width * height * 3
+    raw = data[pos : pos + need]
+    if len(raw) < need:
+        return None
+    return width, height, raw
+
+
+def _encode_png(width: int, height: int, raw: bytes) -> bytes:
+    """An 8-bit RGB PNG from raw rows, filter type 0 (the stdlib twin of
+    the blank gate's decoder: ddjvu writes PPM, and every gate and the
+    sniff below read PNG, so the rung re-encodes in stdlib rather than
+    growing an ImageMagick dependency)."""
+    stride = width * 3
+
+    def chunk(ctype: bytes, body: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(body))
+            + ctype
+            + body
+            + struct.pack(">I", zlib.crc32(ctype + body) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    idat = zlib.compress(
+        b"".join(b"\x00" + raw[y * stride : (y + 1) * stride] for y in range(height))
+    )
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", idat)
+        + chunk(b"IEND", b"")
+    )
+
+
+def _render_djvu_page1(djvu: str, workdir: str, crop: tuple[int, int] | None = None):
+    """One ddjvu page-1 render (150% scale, the issue's hand recipe) as
+    PPM, re-encoded to PNG; (bytes, detail) where bytes is None on any
+    failure. `crop` is (x_offset, width) in RENDER pixels, sliced from
+    the PPM raster before the encode -- the --spread-crop second pass,
+    measured from the first render ("measure the render, not the
+    points", the PDF rung's recorded lesson)."""
+    out = f"{workdir}/djvu1.ppm"
+    cmd = [
+        "ddjvu",
+        "-page=1",
+        "-scale=150",
+        "-format=ppm",
+        djvu,
+        out,
+    ]
+    try:
+        proc = _run_ddjvu(cmd)
+    except subprocess.TimeoutExpired:
+        return None, "ddjvu timed out"
+    except OSError as e:
+        return None, f"ddjvu failed: {e}"
+    if proc.returncode != 0:
+        # Squashed like the poppler detail: multi-line stderr, one-line rows.
+        return None, " ".join((proc.stderr or "ddjvu failed").split())[:160]
+    try:
+        with open(out, "rb") as f:
+            ppm = f.read()
+    except OSError as e:
+        return None, f"render unreadable: {e}"
+    parsed = _parse_ppm(ppm)
+    if parsed is None:
+        return None, "djvu render is not a readable PPM"
+    width, height, raw = parsed
+    if crop is not None:
+        x, w = crop
+        x = max(0, min(x, width))
+        w = max(1, min(w, width - x))
+        stride = width * 3
+        raw = b"".join(
+            raw[y * stride + x * 3 : y * stride + (x + w) * 3] for y in range(height)
+        )
+        return _encode_png(w, height, raw), ""
+    return _encode_png(width, height, raw), ""
 
 
 # --- the blank gate (stdlib PNG walk) --------------------------------
@@ -378,10 +508,10 @@ def _is_blank_render(data: bytes) -> bool | None:
     return max(counts.values()) / len(samples) >= _BLANK_MODAL_SHARE
 
 
-def _page1_markers(pdf: str) -> str:
-    """The first wrapper-host marker on page 1's text layer, or ""."""
+def _page_markers(pdf: str, page: int) -> str:
+    """The first wrapper-host marker on one page's text layer, or ""."""
     try:
-        proc = _run_pdftotext(["pdftotext", "-f", "1", "-l", "1", pdf, "-"])
+        proc = _run_pdftotext(["pdftotext", "-f", str(page), "-l", str(page), pdf, "-"])
     except subprocess.TimeoutExpired, OSError:
         return ""
     if proc.returncode != 0:
@@ -531,11 +661,13 @@ def plan_cover_source(db, args) -> list[dict]:
 def _plan_one(db, book: dict, spread: bool, workdir: str) -> dict:
     """One book's ladder evaluation. `data` rides the row when a rung
     produced cover bytes (the apply pass writes it; the dry run never
-    does). Rungs run in the issue's order and the first one yielding
-    bytes wins; a rung with nothing contributes its reason to `notes`
-    and the ladder CONTINUES (the sibling rung rescues what the gates
-    skip). Row actions: set_cover (a sourced cover) or declined (every
-    rung missed, or none applied -- either way the worklist)."""
+    does). Rungs run in the issue's order (declared-epub, own-file,
+    page1-render with the page-2 arm, djvu-render, sibling, url) and the
+    first one yielding bytes wins; a rung with nothing contributes its
+    reason to `notes` and the ladder CONTINUES (the sibling rung rescues
+    what the gates skip). Row actions: set_cover (a sourced cover) or
+    declined (every rung missed, or none applied -- either way the
+    worklist)."""
     row = {
         "book": book["id"],
         "title": book["title"],
@@ -582,10 +714,11 @@ def _plan_one(db, book: dict, spread: bool, workdir: str) -> dict:
             return row
         row["notes"].append(f"{fmt}: {detail}")
 
-    # Rung 3: the PDF page-1 render behind the blank and wrapper gates.
+    # Rung 3: the PDF render behind the blank, wrapper, and landscape
+    # gates; a page-1 BLANK decline arms the issue-#69 page-2 render.
     pdf = formats.get("PDF")
     if pdf is not None:
-        data, detail = _plan_render(pdf["path"], spread, workdir)
+        data, detail, rung = _plan_render(pdf["path"], spread, workdir)
         if data is not None:
             siblings = _covered_siblings(db, book)
             note = ""
@@ -594,7 +727,7 @@ def _plan_one(db, book: dict, spread: bool, workdir: str) -> dict:
             after = f" (after: {'; '.join(row['notes'])})" if row["notes"] else ""
             row.update(
                 action="set_cover",
-                rung="page1-render",
+                rung=rung,
                 detail=detail + note + after,
                 data=data,
             )
@@ -602,7 +735,30 @@ def _plan_one(db, book: dict, spread: bool, workdir: str) -> dict:
         if detail:
             row["notes"].append(detail)
 
-    # Rung 4: the unique covered sibling donates its cover.
+    # Rung 4: the DJVU page-1 render behind the blank and landscape
+    # gates (issue #67). No wrapper gate (pdftotext cannot read the
+    # format) and no page-2 arm -- a blank-page-1 DJVU is the named
+    # deferred shape; the ladder continues to the sibling rung.
+    djvu = formats.get("DJVU")
+    if djvu is not None:
+        data, detail = _plan_djvu(djvu["path"], spread, workdir)
+        if data is not None:
+            siblings = _covered_siblings(db, book)
+            note = ""
+            if len(siblings) == 1:
+                note = f"; sibling cover also available: #{siblings[0]['id']}"
+            after = f" (after: {'; '.join(row['notes'])})" if row["notes"] else ""
+            row.update(
+                action="set_cover",
+                rung="djvu-render",
+                detail=detail + note + after,
+                data=data,
+            )
+            return row
+        if detail:
+            row["notes"].append(detail)
+
+    # Rung 5: the unique covered sibling donates its cover.
     siblings = _covered_siblings(db, book)
     if len(siblings) == 1:
         data = db.get_cover_bytes(siblings[0]["id"])
@@ -628,46 +784,107 @@ def _plan_one(db, book: dict, spread: bool, workdir: str) -> dict:
     row["action"] = "declined"
     row["rung"] = "ladder"
     row["detail"] = "; ".join(row["notes"]) or (
-        "no declared EPUB cover, no PDF to render, no covered sibling"
+        "no declared EPUB cover, no PDF/DJVU to render, no covered sibling"
     )
     return row
 
 
-def _plan_render(pdf_path: str, spread: bool, workdir: str) -> tuple[bytes, str]:
-    """The gated page-1 render. Returns (bytes, "") when a render
-    survived the gates, (None, reason) when declined or failed, and
-    (None, "") when the format simply has no render to try (never the
-    case here: the caller only sends PDFs)."""
-    data, detail = _render_page1(pdf_path, workdir)
+def _gated_render(
+    pdf_path: str, page: int, spread: bool, workdir: str
+) -> tuple[bytes | None, str, bool]:
+    """One gated render of `page`. (bytes, detail, False) when a render
+    survived the gates; (None, reason, blank) when declined or failed,
+    where blank is True only for the blank-gate decline -- the one class
+    the issue-#69 page-2 arm retries. The other declines (a wrapper
+    banner, a landscape spread, an unreadable render, a spawn failure)
+    are terminal for the rung."""
+    data, detail = _render_pdf_page(pdf_path, page, workdir)
+    if data is None:
+        return None, detail, False
+    size = _png_dimensions(data)
+    if size is None:
+        return None, "render is not a readable PNG", False
+    width, height = size
+    if _is_blank_render(data):
+        return None, f"page-{page} is blank (modal color over the grid)", True
+    marker = _page_markers(pdf_path, page)
+    if marker:
+        return None, f"wrapper banner on page {page}: {marker}", False
+    if width > height and not spread:
+        return (
+            None,
+            f"page-{page} is landscape ({width}x{height}; likely a cover "
+            "spread): re-run with --spread-crop to take the right half",
+            False,
+        )
+    if width > height:
+        half = width // 2
+        data, detail = _render_pdf_page(
+            pdf_path, page, workdir, crop=(half, width - half)
+        )
+        if data is None:
+            return None, detail, False
+        return (
+            data,
+            f"page-{page} spread crop, right half "
+            f"({width - half}x{height} of {width}x{height}, "
+            f"{len(data) >> 10} KB)",
+            False,
+        )
+    return data, f"page-{page} render ({width}x{height}, {len(data) >> 10} KB)", False
+
+
+def _plan_render(
+    pdf_path: str, spread: bool, workdir: str
+) -> tuple[bytes | None, str, str]:
+    """The gated PDF render rung (issue #69's page-2 arm included).
+    Returns (bytes, detail, rung) on a pass -- `page1-render`, or
+    `page2-render` when the page-1 blank decline armed the retry -- and
+    (None, reason, "page1-render") when declined or failed, with both
+    reasons composed when the page-2 retry also missed."""
+    data, detail, blank = _gated_render(pdf_path, 1, spread, workdir)
+    if data is not None:
+        return data, detail, "page1-render"
+    if blank:
+        data2, detail2, _ = _gated_render(pdf_path, 2, spread, workdir)
+        if data2 is not None:
+            return data2, f"{detail2} (page-1 was blank)", "page2-render"
+        tail = detail2.removeprefix("page-2 ")
+        return None, f"{detail}; page-2 {tail}", "page1-render"
+    return None, detail, "page1-render"
+
+
+def _plan_djvu(djvu_path: str, spread: bool, workdir: str) -> tuple[bytes, str]:
+    """The gated DJVU page-1 render (issue #67). The blank and landscape
+    gates run exactly as the PDF rung's; there is no wrapper gate
+    (pdftotext cannot read the format) and no page-2 arm (a blank-page-1
+    DJVU is the named deferred shape)."""
+    data, detail = _render_djvu_page1(djvu_path, workdir)
     if data is None:
         return None, detail
     size = _png_dimensions(data)
     if size is None:
-        return None, "render is not a readable PNG"
+        return None, "djvu render is not a readable PNG"
     width, height = size
-    blank = _is_blank_render(data)
-    if blank:
-        return None, "page-1 is blank (modal color over the grid)"
-    marker = _page1_markers(pdf_path)
-    if marker:
-        return None, f"wrapper banner on page 1: {marker}"
+    if _is_blank_render(data):
+        return None, "djvu page-1 is blank (modal color over the grid)"
     if width > height and not spread:
         return (
             None,
-            f"page-1 is landscape ({width}x{height}; likely a cover "
+            f"djvu page-1 is landscape ({width}x{height}; likely a cover "
             "spread): re-run with --spread-crop to take the right half",
         )
     if width > height:
         half = width // 2
-        data, detail = _render_page1(pdf_path, workdir, crop=(half, width - half))
+        data, detail = _render_djvu_page1(djvu_path, workdir, crop=(half, width - half))
         if data is None:
             return None, detail
         return data, (
-            f"page-1 spread crop, right half "
+            f"djvu page-1 spread crop, right half "
             f"({width - half}x{height} of {width}x{height}, "
             f"{len(data) >> 10} KB)"
         )
-    return data, f"page-1 render ({width}x{height}, {len(data) >> 10} KB)"
+    return data, f"djvu page-1 render ({width}x{height}, {len(data) >> 10} KB)"
 
 
 # --- the verb ---------------------------------------------------------

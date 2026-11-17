@@ -7,6 +7,54 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 **CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). The 2026-11-13 live audit's two named open follow-ups are closed as of 3.89.0: issue #57 (the compact overview wraps instead of truncating, one "also:" block, the exit legend on the surface) and issue #58 (`topic_details` in `--help json` carries the exit contracts and gate annotations; additive-only, `topics`/`groups` untouched).
 
+## Programmer-facing contract notes (3.91.0 onward, the cover-ladder batch, issues #67/#69)
+
+- **The ladder is six rungs, and the page-2 arm is a conditional
+  extension of the render rung, not a seventh.** Order:
+  declared-epub, own-file, page1-render (with the issue-#69 page-2
+  arm), djvu-render (issue #67), sibling, url. The `djvu-render` rung
+  is `_plan_djvu` over `_render_djvu_page1`: one
+  `ddjvu -page=1 -scale=150 -format=ppm` spawn (the issue's hand
+  recipe; `-scale` is 150% magnification) whose PPM is re-encoded to
+  PNG in stdlib (`_parse_ppm` + `_encode_png`, the blank gate's
+  decoder twin -- every gate and `sniff_image_format` read PNG, so
+  the re-encode grows no ImageMagick dependency). Gates: blank and
+  landscape exactly as the PDF rung's, `--spread-crop` included (the
+  crop slices the SECOND render's PPM raster at half its width,
+  "measure the render, not the points"). No wrapper gate (pdftotext
+  cannot read the format) and no page-2 arm: a blank-page-1 DJVU
+  declines with its reason and the ladder continues -- the named
+  deferred shape. The spawn is the `_run_ddjvu` module seam
+  (`subprocess` timeout 300, the pdftoppm budget); a missing ddjvu is
+  a decline detail (the render rung's shape), never a crash.
+- **The page-2 arm fires ONLY on the blank-gate decline.**
+  `_plan_render` returns `(data, detail, rung)`: `page1-render` or
+  `page2-render` on a win, and `_gated_render` returns a third element
+  flagging the blank class -- a wrapper banner, a landscape spread, an
+  unreadable render, or a spawn failure never retries. A page-2 win's
+  detail carries the provenance ("... (page-1 was blank)"); a page-2
+  miss composes both reasons ("page-1 is blank (...); page-2 <why>"),
+  and the wrapper gate runs on page 2's own text layer
+  (`_page_markers(pdf, page)`). A one-page PDF's page-2 attempt is the
+  spawn failure path (poppler refuses the range) and lands in the
+  composed decline honestly. Rung 3's success branch in `_plan_one`
+  takes the rung name from `_plan_render`, so reports never say
+  `page1-render` for a page-2 cover.
+- **PDF outranks DJVU, and a book carrying both formats tries each
+  rung in order.** The rungs are independent: each contributes its
+  decline reason to `notes` on a miss. The no-render default decline
+  reads "no declared EPUB cover, no PDF/DJVU to render, no covered
+  sibling". Tests: `TestDjvuRenderRung` (win byte-identical to the
+  re-encode, blank/landscape declines, the raster-slicing crop,
+  squashed stderr, unreadable PPM, PDF priority, the stub-db default
+  string), `TestPage2RenderArm` (win + apply, both-blank composition,
+  the three no-retry declines, the page-2 crop), `TestPpmAndPngHelpers`
+  (parser tolerance: header comments and whitespace runs; refusals:
+  P5, 16-bit maxval, truncation), and `TestLiveDjvuRender` (c44-crafted
+  DJVU through the real spawn; skipUnless both binaries exist, CI has
+  neither). The `_fake_pages` per-page mock keys on the `-f` value, so
+  a fake the page-2 arm reads must be declared per page.
+
 ## Programmer-facing contract notes (3.90.0 onward, the cquarry 1.29.2 floor, issue #66)
 
 - **The floor is `>=1.29.2`, and the empty-name clear is engine

@@ -2,9 +2,10 @@
 coverless books. The house convention holds: cquarry's WritableCalibreDB
 runs for real against the temp database (covers are really written and
 read back through get_cover_bytes), the external programs are mocked at
-the module seams (_run_pdftoppm / _run_pdftotext), and one live class
-exercises the real poppler binaries over crafted PDFs (skipUnless they
-are installed; CI has neither)."""
+the module seams (_run_pdftoppm / _run_pdftotext / _run_ebook_meta /
+_run_ddjvu), and live classes exercise the real poppler and djvulibre
+binaries over crafted documents (skipUnless they are installed; CI has
+neither)."""
 
 import contextlib
 import http.client
@@ -12,6 +13,7 @@ import io
 import shutil
 import sqlite3
 import struct
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -289,6 +291,32 @@ class CoverSourceCase(unittest.TestCase):
         for m in re.finditer(r"^  #(\d+) (\S+)(?: \[(\w[-\w]*)\])?", out, re.M):
             rows.append((int(m.group(1)), m.group(2), m.group(3)))
         return rows
+
+    _BOOK_RELS = {
+        1: "H/Rules Volume (1)",
+        2: "H/Art Volume (2)",
+        3: "O/Plain EPUB (3)",
+        4: "T/Mobi Book (4)",
+        5: "H/Second Hutchings (5)",
+    }
+
+    def _add_djvu(self, book_id: int = 2) -> Path:
+        """A DJVU format row + fake file on one fixture book (the schema
+        and file tree the ladder reads; OR REPLACE because a dry-then-
+        apply test re-adds the row and data is UNIQUE(book, format))."""
+        rel = self._BOOK_RELS[book_id]
+        stem = f"Djvu{book_id}"
+        con = sqlite3.connect(self.db_path)
+        con.execute(
+            "INSERT OR REPLACE INTO data (book,format,name,uncompressed_size) "
+            "VALUES (?, 'DJVU', ?, 4096)",
+            (book_id, stem),
+        )
+        con.commit()
+        con.close()
+        path = self.tmpdir / rel / f"{stem}.djvu"
+        path.write_bytes(b"fake djvu bytes " * 10)
+        return path
 
 
 # --- the cover.jpg naming contract (cquarry 1.28.3) --------------------
@@ -1258,6 +1286,349 @@ class TestRails(CoverSourceCase):
 
 
 # --- the live poppler seam (skipped without the binaries) -----------------
+
+
+# --- the page-2 arm and the DJVU rung (issues #69 and #67) -------------
+
+
+def _ppm(width: int, height: int, painter) -> bytes:
+    """A binary PPM (P6, maxval 255); painter(x, y) -> (r, g, b) -- the
+    shape ddjvu writes and _parse_ppm reads."""
+    raw = bytes(v for y in range(height) for x in range(width) for v in painter(x, y))
+    return b"P6\n%d %d\n255\n%s" % (width, height, raw)
+
+
+def _solid_ppm(color=(250, 250, 250), size=64):
+    return _ppm(size, size, lambda x, y: color)
+
+
+def _busy_ppm(size=64):
+    return _ppm(
+        size,
+        size,
+        lambda x, y: (200, 30, 40) if (x // 4 + y // 4) % 2 else (20, 60, 200),
+    )
+
+
+class TestPage2RenderArm(CoverSourceCase):
+    """Issue #69: a page-1 BLANK decline (only that class) evaluates ONE
+    page-2 render through the same gates before the ladder falls to the
+    sibling/url rungs. A wrapper decline, a landscape decline, or a
+    render failure never retries."""
+
+    @staticmethod
+    def _fake_pages(pages: dict, record=None):
+        def _run(cmd, **kwargs):
+            if record is not None:
+                record.append(cmd)
+            page = int(cmd[cmd.index("-f") + 1])
+            png = pages.get(page)
+            if png is None:
+                # A page the document does not carry: poppler refuses.
+                return mock.Mock(returncode=1, stdout="", stderr="Wrong page range")
+            Path(cmd[-1] + ".png").write_bytes(png)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        return _run
+
+    def _run_plan(self, pages, record=None, *extra):
+        with mock.patch(
+            "cquarry_cli.coversource._run_pdftoppm",
+            side_effect=self._fake_pages(pages, record),
+        ):
+            with mock.patch(
+                "cquarry_cli.coversource._run_pdftotext",
+                side_effect=self._fake_text(""),
+            ):
+                return self.run_cli(
+                    "run",
+                    "cover-source",
+                    "--ids",
+                    "1",
+                    "--db",
+                    str(self.db_path),
+                    *extra,
+                )
+
+    def test_blank_page1_arms_a_page2_render_that_wins(self):
+        art = _busy_png(64)
+        _code, out, _ = self._run_plan({1: _solid_png(), 2: art})
+        self.assertIn("[page2-render]", out)
+        self.assertIn("page-1 was blank", out)
+        code, _out, _ = self._run_plan(
+            {1: _solid_png(), 2: art},
+            None,
+            "--apply",
+            "--backup-dir",
+            str(self.backups),
+        )
+        self.assertEqual(code, 0)
+        has_cover, stored = self.db_state(1)
+        self.assertTrue(has_cover)
+        self.assertEqual(stored, art)
+
+    def test_page2_also_blank_composes_both_reasons(self):
+        _code, out, _ = self._run_plan({1: _solid_png(), 2: _solid_png()})
+        self.assertIn("declined", out)
+        self.assertIn("page-1 is blank", out)
+        self.assertIn("page-2 is blank", out)
+
+    def test_wrapper_decline_does_not_arm_the_retry(self):
+        calls = []
+        with mock.patch(
+            "cquarry_cli.coversource._run_pdftoppm",
+            side_effect=self._fake_pages({1: _busy_png(64)}, record=calls),
+        ):
+            with mock.patch(
+                "cquarry_cli.coversource._run_pdftotext",
+                side_effect=self._fake_text("Downloaded by ilide.info\n"),
+            ):
+                _code, out, _ = self.run_cli(
+                    "run", "cover-source", "--ids", "1", "--db", str(self.db_path)
+                )
+        self.assertEqual(len(calls), 1)
+        self.assertIn("wrapper banner", out)
+        self.assertNotIn("page-2", out)
+
+    def test_landscape_decline_does_not_arm_the_retry(self):
+        wide = _png(128, 64, lambda x, y: (10 * x % 256, 20 * y % 256, 90))
+        calls = []
+        _code, out, _ = self._run_plan({1: wide}, record=calls)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("landscape", out)
+        self.assertNotIn("page-2", out)
+
+    def test_render_failure_does_not_arm_the_retry(self):
+        calls = []
+        _code, out, _ = self._run_plan({}, record=calls)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("declined", out)
+        self.assertNotIn("page-2 ", out)
+
+    def test_page2_landscape_spread_crop_crops_page2(self):
+        wide = _png(128, 64, lambda x, y: (10 * x % 256, 20 * y % 256, 90))
+        calls = []
+        _code, out, _ = self._run_plan(
+            {1: _solid_png(), 2: wide}, calls, "--spread-crop"
+        )
+        # Page-1 blank render, page-2 render, page-2 crop: three spawns,
+        # the crop on PAGE 2 at half the rendered width.
+        self.assertEqual(len(calls), 3)
+        for cmd in calls[1:]:
+            self.assertEqual(cmd[cmd.index("-f") + 1], "2")
+        crop = calls[2]
+        self.assertEqual(crop[crop.index("-x") + 1], "64")
+        self.assertIn("page-2 spread crop", out)
+        self.assertIn("[page2-render]", out)
+
+
+class TestDjvuRenderRung(CoverSourceCase):
+    """Issue #67: the DJVU page-1 render rung. ddjvu writes PPM; the rung
+    re-encodes to PNG in stdlib (the blank gate only reads PNGs) and runs
+    the blank and landscape gates. No wrapper gate (pdftotext cannot read
+    the format) and no page-2 arm: a blank-page-1 DJVU declines with its
+    reason and the ladder continues."""
+
+    @staticmethod
+    def _fake_ddjvu(payload: bytes | None, record=None):
+        def _run(cmd, **kwargs):
+            if record is not None:
+                record.append(cmd)
+            if payload is None:
+                return mock.Mock(returncode=1, stdout="", stderr="Cannot decode\n")
+            Path(cmd[-1]).write_bytes(payload)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        return _run
+
+    def _djvu_plan(self, payload, record=None, *extra):
+        self._add_djvu(2)
+        with mock.patch(
+            "cquarry_cli.coversource._run_ddjvu",
+            side_effect=self._fake_ddjvu(payload, record),
+        ):
+            with mock.patch(
+                "cquarry_cli.coversource._run_pdftoppm",
+                return_value=mock.Mock(returncode=1, stdout="", stderr="no poppler"),
+            ):
+                return self.run_cli(
+                    "run",
+                    "cover-source",
+                    "--ids",
+                    "2",
+                    "--db",
+                    str(self.db_path),
+                    *extra,
+                )
+
+    def test_busy_render_wins_and_apply_writes_the_encoded_png(self):
+        ppm = _busy_ppm(96)
+        _code, out, _ = self._djvu_plan(ppm)
+        self.assertIn("[djvu-render]", out)
+        self.assertIn("djvu page-1 render (96x96", out)
+        _has, _stored = self.db_state(2)
+        self.assertFalse(_has)  # the dry run wrote nothing
+        width, height, raw = coversource._parse_ppm(ppm)
+        expected = coversource._encode_png(width, height, raw)
+        code, _out, _ = self._djvu_plan(
+            ppm, None, "--apply", "--backup-dir", str(self.backups)
+        )
+        self.assertEqual(code, 0)
+        has_cover, stored = self.db_state(2)
+        self.assertTrue(has_cover)
+        self.assertEqual(stored, expected)
+        self.assertEqual(coversource._png_dimensions(stored), (96, 96))
+
+    def test_blank_render_declines(self):
+        _code, out, _ = self._djvu_plan(_solid_ppm())
+        self.assertIn("declined", out)
+        self.assertIn("djvu page-1 is blank", out)
+
+    def test_landscape_declines_without_the_flag(self):
+        wide = _ppm(128, 64, lambda x, y: (10 * x % 256, 20 * y % 256, 90))
+        _code, out, _ = self._djvu_plan(wide)
+        self.assertIn("djvu page-1 is landscape", out)
+        self.assertIn("--spread-crop", out)
+
+    def test_spread_crop_slices_the_ppm_raster(self):
+        wide = _ppm(128, 64, lambda x, y: (10 * x % 256, 20 * y % 256, 90))
+        calls = []
+        _code, out, _ = self._djvu_plan(wide, calls, "--spread-crop")
+        # Two ddjvu spawns: the first render, then the crop pass (the
+        # crop itself slices the second PPM's raster before the encode).
+        self.assertEqual(len(calls), 2)
+        self.assertIn("djvu page-1 spread crop", out)
+        self.assertIn("[djvu-render]", out)
+        code, _out, _ = self._djvu_plan(
+            wide, None, "--apply", "--backup-dir", str(self.backups), "--spread-crop"
+        )
+        self.assertEqual(code, 0)
+        _has, stored = self.db_state(2)
+        width, height, raw = coversource._parse_ppm(wide)
+        half = width // 2
+        stride = width * 3
+        right = b"".join(
+            raw[y * stride + half * 3 : (y + 1) * stride] for y in range(height)
+        )
+        self.assertEqual(stored, coversource._encode_png(half, height, right))
+        self.assertEqual(coversource._png_dimensions(stored), (64, 64))
+
+    def test_ddjvu_failure_declines_with_the_squashed_stderr(self):
+        _code, out, _ = self._djvu_plan(None)
+        self.assertIn("declined", out)
+        self.assertIn("Cannot decode", out)
+        self.assertNotIn("\nCannot", out)
+
+    def test_unreadable_ppm_declines(self):
+        _code, out, _ = self._djvu_plan(b"not a ppm at all")
+        self.assertIn("djvu render is not a readable PPM", out)
+
+    def test_pdf_rung_outranks_djvu(self):
+        self._add_djvu(2)
+        calls = []
+        art = _busy_png(64)
+        with mock.patch(
+            "cquarry_cli.coversource._run_pdftoppm",
+            side_effect=TestPage2RenderArm._fake_pages({1: art}, record=calls),
+        ):
+            with mock.patch(
+                "cquarry_cli.coversource._run_pdftotext",
+                side_effect=self._fake_text(""),
+            ):
+                with mock.patch(
+                    "cquarry_cli.coversource._run_ddjvu",
+                    side_effect=self._fake_ddjvu(_busy_ppm(96), record=calls),
+                ):
+                    _code, out, _ = self.run_cli(
+                        "run", "cover-source", "--ids", "2", "--db", str(self.db_path)
+                    )
+        self.assertIn("[page1-render]", out)
+        # Only the pdftoppm spawn ran; the DJVU rung was never reached.
+        self.assertEqual(len(calls), 1)
+        self.assertIn("pdftoppm", calls[0][0])
+
+    def test_default_decline_names_both_formats(self):
+        class _StubDb:
+            def get_formats(self, book_id):
+                return {}
+
+            def get_all_books(self):
+                return []
+
+        row = coversource._plan_one(
+            _StubDb(), {"id": 99, "title": "X", "authors": []}, False, str(self.tmpdir)
+        )
+        self.assertEqual(row["action"], "declined")
+        self.assertEqual(
+            row["detail"],
+            "no declared EPUB cover, no PDF/DJVU to render, no covered sibling",
+        )
+
+
+class TestPpmAndPngHelpers(unittest.TestCase):
+    def test_parse_ppm_tolerates_comments_and_whitespace(self):
+        data = b"P6 # writer comment\n  4  2\n# maxval next\n255\n" + bytes(range(24))
+        self.assertEqual(coversource._parse_ppm(data), (4, 2, bytes(range(24))))
+
+    def test_parse_ppm_refuses_the_unusable(self):
+        self.assertIsNone(coversource._parse_ppm(b"P5\n4 2\n255\n" + bytes(8)))
+        self.assertIsNone(coversource._parse_ppm(b"P6\n4 2\n65535\n" + bytes(48)))
+        self.assertIsNone(coversource._parse_ppm(b"P6\n4 2\n255\n" + bytes(10)))
+        self.assertIsNone(coversource._parse_ppm(b"P6\n4 x\n255\n" + bytes(24)))
+
+    def test_encode_png_round_trips_through_the_blank_gate(self):
+        raw = bytes(
+            v for y in range(8) for x in range(8) for v in ((x * 30) % 256, 40, 90)
+        )
+        png = coversource._encode_png(8, 8, raw)
+        self.assertEqual(coversource._png_dimensions(png), (8, 8))
+        samples = coversource._png_samples(png)
+        self.assertEqual(len(samples), 64)
+        self.assertEqual(samples[0], (0, 40, 90))
+
+
+class TestLiveDjvuRender(CoverSourceCase):
+    def setUp(self):
+        import shutil as _shutil
+
+        if not (_shutil.which("ddjvu") and _shutil.which("c44")):
+            self.skipTest("djvulibre tools (ddjvu/c44) are not on PATH")
+        super().setUp()
+
+    def test_busy_page_1_applies_end_to_end(self):
+        # c44 turns a PPM into a real single-page DJVU; the rung's real
+        # ddjvu spawn, stdlib re-encode, gates, and cover write then run
+        # end to end.
+        djvu_path = self._add_djvu(2)
+        ppm_path = self.tmpdir / "fixture.ppm"
+        ppm_path.write_bytes(_busy_ppm(256))
+        proc = subprocess.run(
+            ["c44", str(ppm_path), str(djvu_path)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        _code, out, _ = self.run_cli(
+            "run", "cover-source", "--ids", "2", "--db", str(self.db_path)
+        )
+        self.assertIn("[djvu-render]", out)
+        code, _out, _ = self.run_cli(
+            "run",
+            "cover-source",
+            "--ids",
+            "2",
+            "--apply",
+            "--backup-dir",
+            str(self.backups),
+            "--db",
+            str(self.db_path),
+        )
+        self.assertEqual(code, 0)
+        has_cover, stored = self.db_state(2)
+        self.assertTrue(has_cover)
+        # 256 source pixels at the rung's 150% scale.
+        self.assertEqual(coversource._png_dimensions(stored), (384, 384))
 
 
 class TestLiveRender(CoverSourceCase):

@@ -118,8 +118,10 @@ metadata-mutating verbs) a `--backup-dir` outside the library.
 `run cover-source` walks every coverless book (the default target;
 `--search`/`--ids` narrow it) through the cover ladder -- declared EPUB
 cover, the book's own AZW3/MOBI file's embedded cover
-(`ebook-meta --get-cover`), gated PDF page-1 render, unique covered
-sibling, explicit `--url ID=URL` -- and its dry run fully evaluates the
+(`ebook-meta --get-cover`), gated PDF page-1 render (a blank page 1
+retries one page-2 render through the same gates), gated DJVU page-1
+render, unique covered sibling, explicit `--url ID=URL` -- and its dry
+run fully evaluates the
 offline rungs so
 the plan shows the cover each book would get; declined books are the
 report's worklist, never failures. A

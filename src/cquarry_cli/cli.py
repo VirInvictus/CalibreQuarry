@@ -1035,9 +1035,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--spread-crop",
         dest="spread_crop",
         action="store_true",
-        help="cover-source: take the RIGHT HALF of a landscape page-1 "
-        "render (a front/back cover spread) instead of declining it; the "
-        "crop is measured from the render's own pixels",
+        help="cover-source: take the RIGHT HALF of a landscape render "
+        "(page 1 or the page-2 fallback; a front/back cover spread) "
+        "instead of declining it; the crop is measured from the render's "
+        "own pixels",
     )
     run_p.add_argument(
         "--list-plugins",

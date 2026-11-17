@@ -1,5 +1,49 @@
 # CalibreQuarry Patch Notes
 
+# 3.91.0 (2026-11-17)
+
+### The cover ladder grows a DJVU rung and a page-2 arm (issues #67 and #69)
+
+The 2026-11-17 143-book mega-batch left two coverless books the ladder
+declined by design: the batch's one DJVU import (The Professional
+Barista's Handbook) had no rung at all, and an indie RPG PDF (Soth)
+declined on a blank page 1 that was blank by design, its real cover
+sitting on page 2. Both hand routes are ladder rungs now.
+
+- **`djvu-render` is rung 4** (issue #67), after the PDF render rung
+  and before sibling: `ddjvu -page=1 -scale=150 -format=ppm` (the
+  issue's hand recipe; ddjvu's `-scale` is 150% magnification),
+  re-encoded to PNG in stdlib -- ddjvu writes PPM and every gate plus
+  the sniff read PNG, so the rung re-encodes rather than growing an
+  ImageMagick dependency -- then the same blank and landscape gates as
+  the PDF rung, `--spread-crop` included (the crop slices the second
+  render's PPM raster, "measure the render, not the points"). No
+  wrapper gate (pdftotext cannot read the format) and no page-2 arm: a
+  blank-page-1 DJVU is the named deferred shape. The spawn is the
+  `_run_ddjvu` module seam; `TestDjvuRenderRung` pins the win (apply
+  writes the re-encoded bytes byte-identically), the blank and
+  landscape declines, the crop (stored cover equals the right-half
+  raster re-encoded), the squashed-stderr failure, the unreadable-PPM
+  decline, and PDF-rung priority over DJVU; `TestLiveDjvuRender` runs
+  real c44+ddjvu end to end (skipUnless installed; CI has neither).
+- **A page-1 BLANK decline arms ONE page-2 render** through the same
+  gates (issue #69): blank, wrapper, landscape -- the full chain --
+  before the ladder falls to sibling/url. Only the blank class
+  retries: a wrapper banner, a landscape spread, or a render failure
+  is terminal for the rung. A page-2 win reports the new
+  `page2-render` rung; a page-2 miss composes both reasons into the
+  one decline detail ("page-1 is blank (...); page-2 is blank (...)").
+  Pinned by `TestPage2RenderArm` (the win and its apply, the
+  both-blank composition, and the three no-retry declines, with the
+  crop verified to fire on page 2).
+- **Details**: the no-render default decline now names both formats
+  ("no declared EPUB cover, no PDF/DJVU to render, no covered
+  sibling"); the `--spread-crop` help and the `run cover-source` help
+  page describe the new rungs; the render seam gained a page
+  parameter (`_render_pdf_page`) and the marker gate one too
+  (`_page_markers`), so the page-2 arm runs the wrapper gate on page
+  2's own text layer.
+
 # 3.90.0 (2026-11-16)
 
 ### Adopt cquarry 1.29.2: the audit-fix wave (issue #66)
