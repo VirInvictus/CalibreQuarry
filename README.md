@@ -907,12 +907,17 @@ library (exact ISBN first, with the 10-form and its 13-form read as the
 one edition they are, then classified normalized title + first author,
 where a middle initial on one side no longer splits one author in two)
 and within the batch, and printed as comparison columns. Beyond true
-duplicates, the classifier surfaces two advisory classes it never auto-
+duplicates, the classifier surfaces advisory classes it never auto-
 refuses: differing declared volume annotations as one multi-volume set
 (`batch_volumes`), and colon-boundary title containment as related
 candidates (`batch_related`, `related_hits`): the shape a series/store
 prefix makes when it can either mask a duplicate or join two distinct
-products, so the human judges. `--format json` emits the bare list of
+products, so the human judges. Junk seeds refuse nothing either: a
+title that parses as a print pipeline's filesystem path or an author
+that is a print-tool string, and any identical title+author seed
+shared by three or more identifier-less files (print-shop template
+spill), surface as related advisories naming their basis instead of
+refusing distinct files (since 3.92.0). `--format json` emits the bare list of
 per-file records the `run phase1` seam consumes (only records with
 `library_hits`/`batch_duplicates` are duplicates; advisories ride into the
 manifest's `checks`). Exit codes: 0 clean, 1 candidates found, 2 setup

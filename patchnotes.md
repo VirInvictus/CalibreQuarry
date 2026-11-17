@@ -1,5 +1,56 @@
 # CalibreQuarry Patch Notes
 
+# 3.92.0 (2026-11-17)
+
+### The duplicate screen learns print-shop junk seeds (issue #68)
+
+The same 143-file mega-batch also handed the screen nine false
+duplicate refusals, all one mechanism: a print pipeline's volume-1
+metadata sheet copied across every file it produced. Two shapes
+shipped disarmed, both as the issue-#50 placeholder disarm's judged
+advisory, never a refusal:
+
+- **Shape A: junk seed vocabulary.** A title that parses as the
+  pipeline's filesystem path (a drive-letter prefix, a backslash
+  separator, a `For <name>` folder segment, a `.indd`/`.psd`/`.pdf`
+  suffix) or an author value from the curated print-tool set ("PNP
+  Tool") is junk seed, never work identity. The live shape: three
+  distinct War Claw Games PnP decks all carrying title
+  `D:\Desktop\PNP\Doom Pilgrim\For Javier\Doom Pilgrim - A4 -
+  Duplex` and author `PNP Tool` refused as mutual duplicates; they now
+  surface as `batch_related` with basis `junk seed: path title + tool
+  author`. The vocabulary is curated and grows as shapes surface (the
+  `_PLACEHOLDER_TITLES` precedent); forward slashes and colons stay
+  title punctuation, pinned.
+- **Shape B: the template-spill census.** One identical title+author
+  seed on THREE or more files with no binding identifier is print-shop
+  spill (the three MIRU volumes all carried volume 1's `M1_Adventure`
+  / `Kelley Chance`), likewise advisory with basis `identical seeds
+  across N files`. Strict membership (exact case-folded title and
+  first author) and the three-file bound are the recorded trade: a
+  PAIR of identical real-looking seeds is the genuine-duplicate shape
+  and keeps the refusal, and a genuine no-identifier triplicate of one
+  book now takes the advisory (judged, never silent; the library
+  screen and phase 3's byte-identity floor are the backstops). Records
+  carrying a shaped ISBN or bindable ASIN are exempt -- the ISBN/ASIN
+  binds outrank both disarms exactly as they outrank the placeholder
+  disarm (the issue-#50 precedent, pinned both ways).
+
+Both gates ride the same refused state as the placeholder disarm
+(duplicate verdict, agreeing credits), so they never shadow the
+related/volume advisory branches; a one-sided junk seed binds nothing
+special. The `run phase1` seam needs no change: `batch_related` and
+`batch_related_basis` are the issue-#48 mirroring's existing surface.
+Pinned by `test_print_shop_junk_seed_trio_advised_not_refused`,
+`test_template_spill_trio_advised_not_refused`,
+`test_identical_seed_pair_still_refuses`,
+`test_genuine_triplicate_takes_the_advisory`,
+`test_census_exempt_when_a_shaped_identifier_is_present`,
+`test_junk_seed_pair_sharing_isbn_still_refuses`, and the vocabulary
+boundary units; the five disarm-dependent tests fail on the pre-fix
+module (stash-verified). The phase-1 skill's judgment rules gain the
+junk-seed bullet in the same pass.
+
 # 3.91.0 (2026-11-17)
 
 ### The cover ladder grows a DJVU rung and a page-2 arm (issues #67 and #69)

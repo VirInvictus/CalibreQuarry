@@ -1872,6 +1872,254 @@ class TestScreenDuplicateMatching(unittest.TestCase):
             {"/dl/u2.pdf": "title+author, isbn absent on one side"},
         )
 
+    def test_print_shop_junk_seed_trio_advised_not_refused(self):
+        # Issue #68 shape A, the live shape: three distinct War Claw
+        # Games PnP decks whose embedded metadata is all the print
+        # shop's volume-1 InDesign sheet (the working path as the title,
+        # "PNP Tool" as the author). The old screen refused all three
+        # as mutual duplicates on the identical junk seed; the junk
+        # vocabulary now disarms the refusal into the judged advisory,
+        # its basis naming the junk surfaces.
+        files = [
+            Path("/dl/Doom Deeper - Václav Trajer.pdf"),
+            Path("/dl/Doom Pilgrim - Václav Trajer.pdf"),
+            Path("/dl/Flails and Citadels - Václav Trajer.pdf"),
+        ]
+        junk = {
+            "title": "D:\\Desktop\\PNP\\Doom Pilgrim\\For Javier\\"
+            "Doom Pilgrim - A4 - Duplex",
+            "author(s)": "PNP Tool",
+            "identifiers": "",
+        }
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[dict(junk) for _ in files],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertEqual(
+                sorted(rec["batch_related"]),
+                sorted(str(f) for f in files if f != Path(rec["file"])),
+            )
+            self.assertEqual(
+                rec["batch_related_basis"],
+                {
+                    str(f): "junk seed: path title + tool author"
+                    for f in files
+                    if f != Path(rec["file"])
+                },
+            )
+
+    def test_junk_seed_parts_unit(self):
+        # The census vocabulary: path titles by all four shapes, the
+        # tool author set, and a clean seed naming nothing.
+        self.assertEqual(
+            screen_duplicate._junk_seed_parts(
+                {"title": "D:\\Desktop\\PNP\\X\\For Jim\\X.indd", "authors": []}
+            ),
+            ["path title"],
+        )
+        self.assertEqual(
+            screen_duplicate._junk_seed_parts(
+                {"title": "layout copy.psd", "authors": []}
+            ),
+            ["path title"],
+        )
+        self.assertEqual(
+            screen_duplicate._junk_seed_parts(
+                {"title": "M1_Adventure", "authors": ["PNP Tool"]}
+            ),
+            ["tool author"],
+        )
+        self.assertEqual(
+            screen_duplicate._junk_seed_parts(
+                {"title": "A Game of Thrones", "authors": ["George R. R. Martin"]}
+            ),
+            [],
+        )
+
+    def test_junk_title_regex_stays_off_real_titles(self):
+        # The boundary: forward slashes and colons are title punctuation
+        # (a real title carries them); the junk shapes are the
+        # backslash path grammar and the print suffixes.
+        for real in (
+            "Fight/Fight On: A Trilogy",
+            "Re: Monster",
+            "The .hack Legacy",
+            "Adobe Indesign For Writers",
+        ):
+            self.assertEqual(
+                screen_duplicate._junk_seed_parts({"title": real, "authors": []}),
+                [],
+                real,
+            )
+        for junk in (
+            "C:\\Users\\shop\\For Javier\\deck.pdf",
+            "\\\\nas\\PNP\\layout.indd",
+            "Doom Pilgrim - A4 - Duplex.psd",
+        ):
+            self.assertEqual(
+                screen_duplicate._junk_seed_parts({"title": junk, "authors": []}),
+                ["path title"],
+                junk,
+            )
+
+    def test_template_spill_trio_advised_not_refused(self):
+        # Issue #68 shape B, the live shape: three distinct MIRU volumes
+        # all carrying volume 1's print-shop metadata ("M1_Adventure" /
+        # "Kelley Chance" -- a REAL-looking seed, neither a path nor a
+        # tool name). One identical seed on three identifier-less files
+        # is the census: judged advisory, never a refusal.
+        files = [
+            Path("/dl/MIRU 1.pdf"),
+            Path("/dl/MIRU 2.pdf"),
+            Path("/dl/MIRU 3.pdf"),
+        ]
+        seed = {"title": "M1_Adventure", "author(s)": "Kelley Chance"}
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[dict(seed) for _ in files],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertEqual(
+                sorted(rec["batch_related"]),
+                sorted(str(f) for f in files if f != Path(rec["file"])),
+            )
+            self.assertEqual(
+                rec["batch_related_basis"],
+                {
+                    str(f): "identical seeds across 3 files"
+                    for f in files
+                    if f != Path(rec["file"])
+                },
+            )
+            # No library route bound the junk seed either.
+            self.assertEqual(rec["library_hits"], [])
+
+    def test_identical_seed_pair_still_refuses(self):
+        # The census's deliberate boundary: a PAIR of identical
+        # real-looking seeds is the genuine-duplicate shape and keeps
+        # the title+author refusal. Only N >= 3 disarms.
+        files = [Path("/dl/p1.pdf"), Path("/dl/p2.pdf")]
+        seed = {"title": "M1_Adventure", "author(s)": "Kelley Chance"}
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[dict(seed) for _ in files],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/p2.pdf"])
+        self.assertEqual(out[1]["batch_duplicates"], ["/dl/p1.pdf"])
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"],
+            {"/dl/p2.pdf": "title+author, isbn absent on one side"},
+        )
+
+    def test_genuine_triplicate_takes_the_advisory(self):
+        # The recorded trade: three no-identifier copies of ONE book
+        # (identical real title and author) take the same census
+        # advisory instead of the refusal -- judged, never silent, the
+        # library screen and phase 3's byte-identity floor the
+        # backstops.
+        files = [Path("/dl/c1.epub"), Path("/dl/c2.epub"), Path("/dl/c3.epub")]
+        seed = {"title": "Raft", "author(s)": "Stephen Baxter"}
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[dict(seed) for _ in files],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertEqual(
+                rec["batch_related_basis"],
+                {
+                    str(f): "identical seeds across 3 files"
+                    for f in files
+                    if f != Path(rec["file"])
+                },
+            )
+
+    def test_census_exempt_when_a_shaped_identifier_is_present(self):
+        # The census's identifier exemption: three files sharing the
+        # identical seed AND one shaped ISBN have real edition keys --
+        # the ISBN bind refuses them exactly as before the census.
+        files = [Path("/dl/i1.pdf"), Path("/dl/i2.pdf"), Path("/dl/i3.pdf")]
+        seed = {
+            "title": "M1_Adventure",
+            "author(s)": "Kelley Chance",
+            "identifiers": "isbn:9780140445688",
+        }
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[dict(seed) for _ in files],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_related", rec)
+            self.assertEqual(
+                sorted(rec["batch_duplicates"]),
+                sorted(str(f) for f in files if f != Path(rec["file"])),
+            )
+            self.assertEqual(
+                rec["batch_duplicate_basis"],
+                {str(f): "isbn 9780140445688" for f in files if f != Path(rec["file"])},
+            )
+
+    def test_junk_seed_pair_sharing_isbn_still_refuses(self):
+        # The bind outranks the junk disarm, the issue-#50 precedent:
+        # two junk-seeded files that share a shaped ISBN refuse on the
+        # ISBN basis (a pair, so the census never arms either).
+        files = [Path("/dl/j1.pdf"), Path("/dl/j2.pdf")]
+        seed = {
+            "title": "D:\\Desktop\\PNP\\deck.indd",
+            "author(s)": "PNP Tool",
+            "identifiers": "isbn:9780140445688",
+        }
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[dict(seed) for _ in files],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        self.assertEqual(out[0]["batch_duplicates"], ["/dl/j2.pdf"])
+        self.assertEqual(
+            out[0]["batch_duplicate_basis"],
+            {"/dl/j2.pdf": "isbn 9780140445688"},
+        )
+
+    def test_one_sided_junk_seed_keeps_the_normal_verdicts(self):
+        # A junk seed beside a real seed binds nothing special: the
+        # titles differ, so no verdict fires at all -- the junk gates
+        # never shadow the normal branches.
+        files = [Path("/dl/junk.pdf"), Path("/dl/real.pdf")]
+        with mock.patch.object(
+            screen_duplicate,
+            "_ebook_meta",
+            side_effect=[
+                {
+                    "title": "D:\\Desktop\\PNP\\deck.indd",
+                    "author(s)": "PNP Tool",
+                    "identifiers": "",
+                },
+                {
+                    "title": "A Real Work",
+                    "author(s)": "A Real Author",
+                    "identifiers": "",
+                },
+            ],
+        ):
+            out = screen_duplicate._screen(files, self.db)
+        for rec in out:
+            self.assertNotIn("batch_duplicates", rec)
+            self.assertNotIn("batch_related", rec)
+
     def test_batch_duplicates_cross_reference(self):
         # Within-batch dedup: same ISBN binds the two files both ways.
         files = [Path("/dl/a.epub"), Path("/dl/b.epub")]

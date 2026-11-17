@@ -99,6 +99,25 @@ the trailing BARE ordinals its own docstring always claimed ("Mysteries of
 the Empire I" vs "...II": strict-grammar romans within the practical range,
 both sides declaring, values disagreeing, one stripped stem).
 
+Issue #68 (3.92.0) closes the print-shop junk-seed false bind: nine
+distinct files in one 143-file batch refused as mutual duplicates
+because a print pipeline's volume-1 metadata sheet was copied across
+every file. Two shapes, one disarm: a title that parses as the
+pipeline's filesystem path (a drive-letter prefix, a backslash
+separator, a "For <name>" folder segment, a .indd/.psd/.pdf suffix) or
+an author value from the curated print-tool set ("PNP Tool") is junk
+seed, never work identity -- the pair surfaces as the judged advisory
+("junk seed: path title + tool author") instead of the refusal; and
+one identical title+author seed on THREE or more files with no binding
+identifier is the template-spill census (the MIRU volumes'
+"M1_Adventure" / "Kelley Chance"), likewise advisory ("identical seeds
+across N files"). Strict membership and the >=3 bound are the recorded
+trade: a pair of identical real-looking seeds is the genuine-duplicate
+shape and keeps the refusal, and a no-identifier triplicate of one
+book takes the advisory (judged, never silent). Both gates ride the
+same refused state as the issue-#50 placeholder disarm and rank below
+the ISBN/ASIN binds, which still refuse.
+
 Issue #28 (3.68.0) gates every identifier binding by SHAPE: the
 2026-10-15 wave refused Poem of the Cid as a duplicate of Return to
 Nevèrÿon because both amateur conversions carried the SAME junk
@@ -796,6 +815,50 @@ def _is_placeholder_title(title: str) -> bool:
     return _judge_form(title or "").strip().casefold() in _PLACEHOLDER_TITLES
 
 
+# The print-pipeline junk-title shapes (issue #68's live shape: three
+# War Claw Games PnP decks whose embedded title was the print shop's
+# InDesign working path, "D:\\Desktop\\PNP\\Doom Pilgrim\\For
+# Javier\\Doom Pilgrim - A4 - Duplex"). A title that parses as a
+# pipeline's filesystem path names no work, so it is never binding
+# evidence: a Windows drive-letter prefix, any backslash separator, a
+# "For <name>" folder segment, or a print-source suffix (.indd/.psd/
+# .pdf) anywhere in the title. Curated and grows as shapes surface
+# (the _PLACEHOLDER_TITLES precedent). A forward slash alone is NOT a
+# shape: real titles carry them, and the live class was all backslashes.
+_JUNK_TITLE_RE = re.compile(
+    r"(?:^[A-Za-z]:\\)"  # drive-letter prefix
+    r"|(?:\\)"  # a backslash separator
+    r"|(?:\bfor [^\\]+\\)"  # a "For <name>" folder segment
+    r"|(?:\.(?:indd|psd|pdf)\b)",  # a print-source suffix
+    re.IGNORECASE,
+)
+
+# The print-pipeline tool strings that land in the author slot (issue
+# #68: "PNP Tool" on all three decks). Exact case-folded membership;
+# the set grows as shapes surface.
+_TOOL_AUTHORS = frozenset({"pnp tool"})
+
+
+def _is_tool_author(author: str) -> bool:
+    """True for an author value that is a print-pipeline tool string,
+    not a person (issue #68)."""
+    return (author or "").strip().casefold() in _TOOL_AUTHORS
+
+
+def _junk_seed_parts(record: dict[str, object]) -> list[str]:
+    """The junk-seed surfaces a record carries (issue #68): "path title"
+    when the embedded title parses as a print pipeline's filesystem
+    path, "tool author" when an author value matches the curated
+    print-tool set. Empty when the seed is real work identity."""
+    parts: list[str] = []
+    title = str(record.get("title") or "")
+    if title and _JUNK_TITLE_RE.search(title):
+        parts.append("path title")
+    if any(_is_tool_author(str(a)) for a in record.get("authors") or []):
+        parts.append("tool author")
+    return parts
+
+
 def _real_authors(authors: object) -> list[str]:
     """The author list minus the placeholder: a metadata-less file reads
     Author(s) "Unknown" (ebook-meta's filename fallback), which is no
@@ -1033,6 +1096,38 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
 
     titles = {str(r["file"]): r.get("title") or "" for r in records}
     seeds = {str(r["file"]): _filename_seed(r) for r in records}
+    # Issue #68 shape B: the template-spill census. One identical
+    # title+author seed on THREE or more files with no binding
+    # identifier is a print shop's volume-1 metadata sheet copied across
+    # every volume (the three MIRU volumes all carried "M1_Adventure" /
+    # "Kelley Chance"), not work identity. Strict membership: exact
+    # case-folded title and first author, so the census cannot over-
+    # group past literal identity; records carrying a binding-capable
+    # identifier are exempt (they have real edition keys, and the
+    # differing-valid-ISBNs rule judges those pairs on its own). The
+    # recorded trade: a genuine no-identifier triplicate of one book
+    # takes the same advisory (judged, never silent); a PAIR of
+    # identical seeds is untouched -- that is the real-duplicate shape.
+    seed_groups: dict[tuple[str, str], list[str]] = {}
+    for rec in records:
+        rec_authors = [str(a).strip().casefold() for a in rec.get("authors") or []]
+        seed_title = str(rec.get("title") or "").strip().casefold()
+        seed_author = rec_authors[0] if rec_authors else ""
+        has_key = bool(
+            (rec.get("isbn") and _isbn_shaped(str(rec["isbn"])))
+            or any(_bindable_asin(str(a)) for a in rec.get("asins") or [])
+        )
+        if seed_title and seed_author and not has_key:
+            seed_groups.setdefault((seed_title, seed_author), []).append(
+                str(rec["file"])
+            )
+    census_junk: set[str] = set()
+    census_size: dict[str, int] = {}
+    for members in seed_groups.values():
+        if len(members) >= 3:
+            for member in members:
+                census_junk.add(member)
+                census_size[member] = len(members)
     for i, rec in enumerate(records):
         for other in records[i + 1 :]:
             key_a, key_b = str(rec["file"]), str(other["file"])
@@ -1112,6 +1207,26 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                 and not _real_authors(rec.get("authors"))
                 and not _real_authors(other.get("authors"))
             )
+            # Issue #68: the print-shop junk-seed disarm and the
+            # template-spill census, the same refused state as the
+            # placeholder disarm. Both gates ride the refused shape
+            # (duplicate verdict, agreeing credits), so they can never
+            # shadow the advisory branches below; the ISBN/ASIN binds
+            # above outrank them exactly as they outrank the
+            # placeholder disarm (issue #50).
+            junk_a_parts = _junk_seed_parts(rec)
+            junk_b_parts = _junk_seed_parts(other)
+            junk_pair = (
+                verdict == "duplicate"
+                and same_author
+                and bool(junk_a_parts or junk_b_parts)
+            )
+            census_pair = (
+                verdict == "duplicate"
+                and same_author
+                and key_a in census_junk
+                and key_b in census_junk
+            )
             basis = None
             if isbn_bound:
                 # Digit-identical spellings (pure producer punctuation
@@ -1142,6 +1257,8 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                     and verdict == "duplicate"
                     and not isbn_conflict
                     and not placeholder_pair
+                    and not junk_pair
+                    and not census_pair
                 )
             ):
                 rec.setdefault("batch_duplicates", []).append(other["file"])
@@ -1156,6 +1273,39 @@ def _screen(files: list[Path], db) -> list[dict[str, object]]:
                 # a basis that names what matched: a placeholder title
                 # and no author evidence on either side.
                 rel_basis = "placeholder title, no author evidence"
+                rec.setdefault("batch_related", []).append(other["file"])
+                other.setdefault("batch_related", []).append(rec["file"])
+                rec.setdefault("batch_related_basis", {})[str(other["file"])] = (
+                    rel_basis
+                )
+                other.setdefault("batch_related_basis", {})[str(rec["file"])] = (
+                    rel_basis
+                )
+            elif junk_pair:
+                # Issue #68 shape A: print-shop junk seeds bind nothing.
+                # The InDesign-path-title / tool-name-author class (the
+                # War Claw decks' print sheet) surfaces as the judged
+                # advisory, its basis naming the junk surfaces the pair
+                # carried, never a refusal.
+                rel_basis = "junk seed: " + " + ".join(
+                    dict.fromkeys(junk_a_parts + junk_b_parts)
+                )
+                rec.setdefault("batch_related", []).append(other["file"])
+                other.setdefault("batch_related", []).append(rec["file"])
+                rec.setdefault("batch_related_basis", {})[str(other["file"])] = (
+                    rel_basis
+                )
+                other.setdefault("batch_related_basis", {})[str(rec["file"])] = (
+                    rel_basis
+                )
+            elif census_pair:
+                # Issue #68 shape B: the template-spill census. Three or
+                # more files on one identical seed with no binding
+                # identifier are volume-1 metadata copied across the set
+                # (the MIRU volumes' "M1_Adventure" / "Kelley Chance"),
+                # not identity. Pairs of identical seeds keep the
+                # refusal: that is the real-duplicate shape.
+                rel_basis = f"identical seeds across {census_size[key_a]} files"
                 rec.setdefault("batch_related", []).append(other["file"])
                 other.setdefault("batch_related", []).append(rec["file"])
                 rec.setdefault("batch_related_basis", {})[str(other["file"])] = (

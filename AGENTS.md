@@ -7,6 +7,47 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 **CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). The 2026-11-13 live audit's two named open follow-ups are closed as of 3.89.0: issue #57 (the compact overview wraps instead of truncating, one "also:" block, the exit legend on the surface) and issue #58 (`topic_details` in `--help json` carries the exit contracts and gate annotations; additive-only, `topics`/`groups` untouched).
 
+## Programmer-facing contract notes (3.92.0 onward, the junk-seed census, issue #68)
+
+- **Two disarms ride the refused state, below the identifier binds.**
+  In `_screen`'s pair loop the title+author refusal disjunct gains
+  `and not junk_pair and not census_pair`, both gated on
+  `verdict == "duplicate" and same_author` exactly like
+  `placeholder_pair`, so they can never shadow the advisory branches
+  (a one-sided junk seed binds nothing special). The ISBN/ASIN binds
+  (the `if`'s first two disjuncts) outrank both, the issue-#50
+  precedent, pinned both ways (junk pair + shared ISBN refuses on the
+  isbn basis; census members are BY CONSTRUCTION identifier-free --
+  `has_key` exempts shaped-ISBN/ASIN records from the groups).
+- **Shape A is vocabulary; shape B is a census.** `_junk_seed_parts`
+  returns the junk surfaces a record carries ("path title" via
+  `_JUNK_TITLE_RE`: drive-letter prefix, any backslash, a
+  `For <name>\` segment, a `.indd`/`.psd`/`.pdf` suffix -- forward
+  slashes and colons are title punctuation, pinned; "tool author" via
+  `_TOOL_AUTHORS`, exact case-folded membership, both curated sets
+  growing as shapes surface). The census groups records by STRICT seed
+  identity (exact case-folded title + first author, never
+  `normalize_title`), keeps groups of >= 3 with no binding-capable
+  identifier, and disarms their pairs with basis `identical seeds
+  across N files`; the junk basis names the surfaces (`junk seed: path
+  title + tool author`, `dict.fromkeys` order-preserving union of both
+  sides' parts). Census membership keys on `str(rec["file"])`, the
+  same string key the basis maps use.
+- **The recorded trade, restated for triage:** a pair of identical
+  real-looking seeds is the genuine-duplicate shape and refuses
+  unchanged; a genuine no-identifier triplicate of one book takes the
+  advisory (judged, never silent -- the library screen and phase 3's
+  byte-identity floor are the backstops). The `run phase1` seam needs
+  no change: `batch_related` + `batch_related_basis` are the issue-#48
+  mirroring's existing surface, and run.py's refused set still derives
+  from `library_hits`/`batch_duplicates` only. Tests in
+  TestScreenDuplicateMatching (test_scripts.py): the War Claw trio,
+  the MIRU trio, the pair-still-refuses boundary, the triplicate
+  trade, the identifier exemption, the junk+ISBN precedence, the
+  one-sided no-op, and the `_junk_seed_parts`/regex vocabulary units;
+  the five disarm-dependent tests fail on the pre-fix module
+  (stash-verified).
+
 ## Programmer-facing contract notes (3.91.0 onward, the cover-ladder batch, issues #67/#69)
 
 - **The ladder is six rungs, and the page-2 arm is a conditional
