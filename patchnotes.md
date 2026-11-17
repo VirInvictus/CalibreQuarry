@@ -1,5 +1,19 @@
 # CalibreQuarry Patch Notes
 
+# 3.89.1 (2026-11-16)
+
+### Tests only: the tty-conditional phase-3 pin runs everywhere (issue #64)
+
+`test_no_answers_and_no_tty_exits_two` verified the no-answer exit by
+leaving `sys.stdin.isatty()` to the environment: on headless CI stdin
+is never a tty, so the pin passed, but under an interactive terminal
+the probe returned True, the run walked into `_prompt_answers`, and the
+suite froze on `input()` waiting for keyboard input. The branch the
+test exists to pin is now mocked shut (`isatty` False), so the exit-2
+contract is verified identically everywhere and an interactive test
+run cannot hang. Zero source changes; the 3.84.1 precedent (a tests-only
+patch release for an environment-dependent pin).
+
 # 3.89.0 (2026-11-16)
 
 ### The CLI-surface batch (issues #57, #58, #59)

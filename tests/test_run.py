@@ -3218,9 +3218,15 @@ class TestRunPhase3(RunCase):
         self.assertEqual(kept, 1)  # book 11 was not in the untagged batch set
 
     def test_no_answers_and_no_tty_exits_two(self):
+        # Issue #64: the isatty branch must be pinned SHUT, not left to
+        # the environment -- under an interactive terminal the unmocked
+        # probe returned True and the test hung on _prompt_answers'
+        # input() waiting for keyboard input (it only ever passed on
+        # headless CI, where stdin is not a tty).
         self._rich_library()
         man_path = self._ready_manifest([10])
-        rc = run_phase3(man_path, self.db_path, answer_file=None)
+        with mock.patch("sys.stdin.isatty", return_value=False):
+            rc = run_phase3(man_path, self.db_path, answer_file=None)
         self.assertEqual(rc, 2)
 
     def test_phase3_refuses_when_calibre_is_running(self):
