@@ -1174,15 +1174,25 @@ def run_phase2(
         )
         return 2
     # metadata_download entries are phase 2's own product (phase 3's
-    # input); every other kind predates the import and blocks it. The
-    # one exception is a lossy_consent the reviewer resolved in-manifest
+    # input); every other kind predates the import and blocks it. Two
+    # exceptions. A lossy_consent the reviewer resolved in-manifest
     # ("resolution": "apply"): that resolution IS the consent, and the
-    # strips are driven below instead of blocking the import.
+    # strips are driven below instead of blocking the import. And a
+    # duplicate decision on a file the mint already refused (issue #60):
+    # the verdict IS the resolution -- duplicate_refused plus the match
+    # named in the decision's detail is the durable record, and the
+    # approved list already excludes the file -- so it is not open work.
+    # A duplicate decision pointing at any other verdict (a stale or
+    # hand-edited pairing) still blocks, fail-closed.
+    dup_refused = {
+        f.get("path") for f in man["files"] if f.get("verdict") == "duplicate_refused"
+    }
     blockers = [
         d
         for d in man["decisions_needed"]
         if d["kind"] != "metadata_download"
         and not (d["kind"] == "lossy_consent" and d.get("resolution") == "apply")
+        and not (d["kind"] == "duplicate" and d.get("file") in dup_refused)
     ]
     if blockers:
         print(

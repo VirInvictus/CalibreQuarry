@@ -2248,6 +2248,24 @@ class TestRunPhase2(RunCase):
         rc, _ = self._import(man_path)
         self.assertEqual(rc, 2)
 
+    def test_duplicate_refusal_is_its_own_resolution(self):
+        # Issue #60: a duplicate decision on a file the mint refused is
+        # not open work -- the verdict IS the resolution, and the
+        # approved list already excludes the file, so the import proceeds
+        # with the rest of the batch. The same decision on any other
+        # verdict still blocks (the test above: its file verdict is
+        # approved_for_import, the fail-closed shape).
+        path = self._make_file("Fifth Head.epub")
+        man_path = self._manifest(path)
+        man = manifest.load(man_path)
+        entry = manifest.file_by_path(man, path)
+        entry["verdict"] = "duplicate_refused"
+        man["approved_for_import"] = []
+        manifest.add_decision(man, "duplicate", file=path, existing_id=1)
+        manifest.save(man, man_path)
+        rc, _ = self._import(man_path)
+        self.assertEqual(rc, 0)
+
     def _lossy_manifest(self, *paths, resolved=False):
         """A signed manifest with one lossy-flagged file and its
         lossy_consent decision (resolved in-manifest on request)."""

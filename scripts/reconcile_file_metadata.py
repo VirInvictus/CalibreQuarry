@@ -114,8 +114,11 @@ slow (tens of minutes for thousands of books). Scope with --sample / --id /
 --format for a quick look; run unscoped once as a one-off reconcile.
 
 Exit codes:
-    0 = no drift found (or --apply completed with no failures)
-    1 = drift found (dry run), or one or more apply/embed operations failed
+    0 = no actionable drift found (or --apply completed with no failures;
+        the azw3/mobi identifiers/series class is format-limited, counted
+        as documented, not actionable)
+    1 = actionable drift found (dry run), or one or more apply/embed
+        operations failed
     2 = setup error (metadata.db or a required external tool not found, or
         the imported cquarry_cli is older than the floor this script needs)
 
@@ -268,6 +271,22 @@ FORMAT_FIELDS: dict[str, tuple[str, ...]] = {
 CALIBREDB_FORMATS = {"EPUB", "AZW3", "MOBI"}
 EXIFTOOL_FORMATS = {"PDF"}
 DJVUSED_FORMATS = {"DJVU"}
+
+# The azw3/mobi writer surface is limited (issue #62): calibredb embeds the
+# record, but the format's metadata block carries only isbn/asin-typed
+# identifiers and never the DB's series, so a read-back that still differs on
+# exactly those fields is the documented permanent class, not actionable
+# drift. The phase-3 skill names the same limitation; classifying it here
+# keeps the summary's "run again with --apply" advice honest.
+FORMAT_LIMITED_FORMATS = {"AZW3", "MOBI"}
+FORMAT_LIMITED_FIELDS = {"identifiers", "series"}
+
+
+def format_limited(fmt: str, drift: list[str]) -> bool:
+    """True for a drifted file whose every differing field is one the
+    azw3/mobi writer provably cannot carry (issue #62)."""
+    return fmt in FORMAT_LIMITED_FORMATS and set(drift) <= FORMAT_LIMITED_FIELDS
+
 
 # Every external call is bounded. A full run is thousands of subprocesses, and
 # one wedged tool on one damaged file used to hang the whole pass with no way to
@@ -1054,25 +1073,40 @@ def main() -> int:
             scope += f" (random sample, seed {args.seed})"
         print(f"{BOLD}Reconciling{RESET} {db_path}  [{scope}]")
     n_drift = len(drift_rows)
+    n_fl = sum(1 for _b, _t, fmt, drift in drift_rows if format_limited(fmt, drift))
+    n_action = n_drift - n_fl
     if n_drift:
         print(f"\n{BOLD}DRIFT{RESET} ({n_drift} file(s))")
         shown = drift_rows if not args.quiet else drift_rows[:40]
         for bid, title, fmt, drift in shown:
+            limited = " (format-limited)" if format_limited(fmt, drift) else ""
             print(f"  {CYAN}#{bid}{RESET} [{fmt}] {title[:48]}")
-            print(f"      differs: {', '.join(drift)}")
+            print(f"      differs: {', '.join(drift)}{limited}")
         if args.quiet and n_drift > len(shown):
             print(f"  ... and {n_drift - len(shown)} more")
-    print(
+    checked = (
         f"\nchecked {n_checked} file(s): {GREEN}{n_insync} in sync{RESET}, "
-        f"{YELLOW}{n_drift} drifted{RESET}, {n_missing} unreadable/missing."
+        f"{YELLOW}{n_action} drifted{RESET}"
     )
+    if n_fl:
+        checked += (
+            f", {YELLOW}{n_fl} format-limited{RESET} (azw3/mobi"
+            " identifiers/series; documented, not actionable)"
+        )
+    checked += f", {n_missing} unreadable/missing."
+    print(checked)
 
     if not args.apply:
-        if n_drift:
+        if n_action:
             print(
                 f"\nRun again with {BOLD}--apply{RESET} to embed the database metadata into the drifted files."
             )
             return 1
+        if n_fl:
+            print(
+                "\nNothing actionable: every drifted file is format-limited "
+                "(azw3/mobi identifiers/series; documented, not fixable by --apply)."
+            )
         return 0
 
     # apply (only drifted)
@@ -1191,6 +1225,13 @@ def main() -> int:
         rows = epub_parse_errors(fpath)
         if rows:
             scars.append((rec, fpath, rows))
+    # Issue #62: the azw3/mobi writer cannot carry identifiers/series, so a
+    # read-back that still differs on exactly those fields is the documented
+    # permanent class. Split it out of the residuals before the failure
+    # accounting: it is a named block and a summary clause, never "run again
+    # with --apply", and it never fails the pass.
+    fl_residuals = [r for r in residuals if format_limited(r[2], r[3])]
+    residuals = [r for r in residuals if not format_limited(r[2], r[3])]
     if residuals:
         ok = False
         print(
@@ -1203,6 +1244,19 @@ def main() -> int:
             print(f"      still differs: {', '.join(drift)}")
         if args.quiet and len(residuals) > len(shown):
             print(f"  ... and {len(residuals) - len(shown)} more")
+
+    if fl_residuals:
+        print(
+            f"\n{YELLOW}{BOLD}FORMAT-LIMITED ({len(fl_residuals)}){RESET}: still "
+            "differs on read-back, but the azw3/mobi writer cannot carry these "
+            "fields (documented, not actionable):"
+        )
+        shown = fl_residuals if not args.quiet else fl_residuals[:40]
+        for bid, title, fmt, drift in shown:
+            print(f"  {CYAN}#{bid}{RESET} [{fmt}] {title[:48]}")
+            print(f"      still differs: {', '.join(drift)}")
+        if args.quiet and len(fl_residuals) > len(shown):
+            print(f"  ... and {len(fl_residuals) - len(shown)} more")
 
     if scars:
         ok = False
@@ -1260,6 +1314,11 @@ def main() -> int:
             f"{len(drifted_pdf)} PDF via exiftool, {len(drifted_djvu)} DJVU via djvused; "
             f"{len(verify_rows)} file(s) verified by read-back."
         )
+        if fl_residuals:
+            done += (
+                f" {len(fl_residuals)} file(s) format-limited (azw3/mobi "
+                "identifiers/series; documented, not actionable)."
+            )
         if normalization_notes:
             done += (
                 f" {len(normalization_notes)} normalization pass(es) were "

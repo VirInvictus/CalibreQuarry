@@ -423,13 +423,16 @@ class TestVerifyWiring(unittest.TestCase):
         ncx_result=True,
         scar_rows=None,
         calls=None,
+        apply=True,
+        fmt="EPUB",
     ):
-        root = self._library(tmp)
+        root = self._library(tmp, fmt=fmt)
         argv = [
             "reconcile_file_metadata.py",
             str(root),
-            "--apply",
         ]
+        if apply:
+            argv.append("--apply")
         out = io.StringIO()
         err = io.StringIO()
 
@@ -506,6 +509,121 @@ class TestVerifyWiring(unittest.TestCase):
         self.assertIn("RESIDUAL", out)
         self.assertIn("pubdate", out)
         self.assertEqual(embeds, 1)
+
+    # --- the azw3/mobi format-limited class (issue #62) -----------------
+
+    _ASIN_DRIFT = file_meta(identifiers="asin:B0000000001")
+
+    def test_format_limited_predicate(self):
+        # azw3/mobi over exactly the writer-uncarryable fields; anything
+        # else (a real field on azw3, or identifiers on EPUB) is drift.
+        self.assertTrue(rfm.format_limited("AZW3", ["identifiers"]))
+        self.assertTrue(rfm.format_limited("MOBI", ["identifiers", "series"]))
+        self.assertFalse(rfm.format_limited("AZW3", ["identifiers", "title"]))
+        self.assertFalse(rfm.format_limited("EPUB", ["identifiers"]))
+
+    def test_azw3_identifier_residual_is_format_limited_not_a_failure(self):
+        # Issue #62's live shape: the azw3 writer embeds, but the format's
+        # metadata block carries only isbn/asin identifiers, so the
+        # read-back still differs on identifiers on every pass. That class
+        # is the documented permanent drift: a FORMAT-LIMITED block, no
+        # RESIDUAL, no failure, DONE at exit 0.
+        drifted = dict(self._ASIN_DRIFT)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _embeds, _norm, _idents, err = self._run_main(
+                tmp, [drifted, drifted], apply=True, fmt="AZW3"
+            )
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("FORMAT-LIMITED (1)", out)
+        self.assertNotIn("RESIDUAL", out)
+        self.assertIn("DONE", out)
+        self.assertIn("1 file(s) format-limited", out)
+        self.assertNotIn("COMPLETED WITH ERRORS", out)
+
+    def test_azw3_only_dry_run_is_not_actionable(self):
+        # The dry-run advice is honest for the same class: no "run again
+        # with --apply" over drift no --apply can close; the run exits 0.
+        drifted = dict(self._ASIN_DRIFT)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _embeds, _norm, _idents, err = self._run_main(
+                tmp, [drifted], apply=False, fmt="AZW3"
+            )
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("format-limited", out)
+        self.assertIn("Nothing actionable", out)
+        self.assertNotIn("Run again with", out)
+
+    def test_epub_residual_and_azw3_format_limited_split(self):
+        # One pass over both classes: the EPUB's real residual still fails
+        # the run while the azw3's permanent drift rides the named block.
+        # The fixture gains a second book (AZW3) beside book 1 (EPUB).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._library(pathlib.Path(tmp))
+            con = sqlite3.connect(root / "metadata.db")
+            # Book 2 mirrors book 1's curated rows (same title, series,
+            # tags, publisher, comments, isbn) in the AZW3 format, so the
+            # ONLY field its drifted file differs on is identifiers --
+            # exactly the issue-#62 live shape.
+            con.execute(
+                "INSERT INTO books (id,title,sort,author_sort,timestamp,pubdate,"
+                "series_index,path,uuid) VALUES (2,'The Hobbit','Hobbit, The','T',"
+                "'2024-01-01','1937-09-21 00:00:00+00:00',1.0,'a/c','u2')"
+            )
+            con.execute("INSERT INTO authors (id,name) VALUES (2,'J.R.R. Tolkien')")
+            con.execute("INSERT INTO books_authors_link (book,author) VALUES (2,2)")
+            con.execute(
+                "INSERT INTO books_languages_link (book,lang_code,item_order)"
+                " VALUES (2,1,0)"
+            )
+            con.execute("INSERT INTO books_series_link (book,series) VALUES (2,1)")
+            con.execute("INSERT INTO books_tags_link (book,tag) VALUES (2,1)")
+            con.execute(
+                "INSERT INTO books_publishers_link (book,publisher) VALUES (2,1)"
+            )
+            con.execute(
+                "INSERT INTO comments (book,text) VALUES (2,'<p>A hobbit''s tale.</p>')"
+            )
+            con.execute(
+                "INSERT INTO identifiers (book,type,val) VALUES (2,'isbn',"
+                "'9780000000001')"
+            )
+            con.execute(
+                "INSERT INTO data (book,format,name,uncompressed_size) "
+                "VALUES (2,'AZW3','Second Book',10)"
+            )
+            con.commit()
+            con.close()
+            second_dir = root / "a" / "c"
+            second_dir.mkdir(parents=True)
+            (second_dir / "Second Book.azw3").write_bytes(b"book")
+            epub_drift = file_meta(published="2010-10-25")
+            azw3_drift = dict(self._ASIN_DRIFT)
+            argv = ["reconcile_file_metadata.py", str(root), "--apply"]
+            out = io.StringIO()
+            err = io.StringIO()
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(rfm, "shutil"),
+                mock.patch.object(
+                    rfm,
+                    "file_metadata",
+                    side_effect=[epub_drift, azw3_drift, epub_drift, azw3_drift],
+                ),
+                mock.patch.object(rfm, "embed_calibredb", return_value=True),
+                mock.patch.object(rfm, "normalize_epub_dates", return_value=True),
+                mock.patch.object(rfm, "normalize_epub_identifiers", return_value=True),
+                mock.patch.object(rfm, "normalize_epub_ncx", return_value=True),
+                mock.patch.object(rfm, "epub_parse_errors", return_value=[]),
+                mock.patch.object(rfm, "calibre_running", return_value=False),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                rc = rfm.main()
+            out_text = out.getvalue()
+            self.assertEqual(rc, 1, out_text + err.getvalue())
+            self.assertIn("RESIDUAL (1)", out_text)
+            self.assertIn("FORMAT-LIMITED (1)", out_text)
+            self.assertIn("1 file(s) still drifted on read-back", out_text)
 
     def test_normalization_targets_the_db_pubdate_at_utc_midnight(self):
         # The dc:date pass runs once per embedded EPUB with the database

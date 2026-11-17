@@ -485,6 +485,110 @@ class TestDeclaredEpubRung(CoverSourceCase):
         self.assertEqual(stored, cover)
 
 
+# --- the own-file rung (issue #61) --------------------------------------
+
+
+#: Minimal sniffable JPEG bytes (sniff_image_format reads the \xff\xd8
+#: signature; nothing downstream decodes the payload in these tests).
+_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+
+
+class TestOwnFileRung(CoverSourceCase):
+    """Issue #61: a coverless book whose own MOBI-family format file
+    carries the publisher's embedded cover donates it through
+    `ebook-meta --get-cover` before any render/sibling rung runs. Book
+    4 is the fixture's coverless MOBI book. No live class: crafting a
+    real azw3 with an embedded cover needs a calibre conversion, and
+    the seam contract (spawn, read the written file, sniff) is what the
+    mocked tests pin; the live drill runs the real binary against a
+    converted fixture in the release pass."""
+
+    @staticmethod
+    def _fake_ebook_meta(payload: bytes | None, record: list | None = None):
+        def _run(cmd, **kwargs):
+            if record is not None:
+                record.append(cmd)
+            if payload is not None:
+                Path(cmd[-1]).write_bytes(payload)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        return _run
+
+    def test_embedded_cover_is_the_plan_candidate(self):
+        calls: list[list[str]] = []
+        with mock.patch(
+            "cquarry_cli.coversource._run_ebook_meta",
+            side_effect=self._fake_ebook_meta(_JPEG, calls),
+        ):
+            _code, out, _ = self.cover(
+                "run", "cover-source", "--ids", "4", "--db", str(self.db_path)
+            )
+        rows = self.plan_rows(out)
+        self.assertEqual(rows[0], (4, "set_cover", "own-file"))
+        # The spawn named the book's own format file; the target is the
+        # last argument (the workdir scratch path).
+        self.assertEqual(calls[0][0], "ebook-meta")
+        self.assertTrue(calls[0][1].endswith("Mobi4.mobi"))
+
+    def test_apply_writes_the_embedded_cover(self):
+        with mock.patch(
+            "cquarry_cli.coversource._run_ebook_meta",
+            side_effect=self._fake_ebook_meta(_JPEG),
+        ):
+            code, out, _ = self.run_cli(
+                "run",
+                "cover-source",
+                "--ids",
+                "4",
+                "--apply",
+                "--backup-dir",
+                str(self.backups),
+                "--db",
+                str(self.db_path),
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("1 applied", out)
+        has_cover, stored = self.db_state(4)
+        self.assertTrue(has_cover)
+        self.assertEqual(stored, _JPEG)
+
+    def test_no_embedded_cover_declines_and_names_the_format(self):
+        with mock.patch(
+            "cquarry_cli.coversource._run_ebook_meta",
+            side_effect=self._fake_ebook_meta(None),
+        ):
+            _code, out, _ = self.cover(
+                "run", "cover-source", "--ids", "4", "--db", str(self.db_path)
+            )
+        self.assertIn("declined", out)
+        self.assertIn("MOBI: no embedded cover in the file", out)
+
+    def test_failed_spawn_declines_with_the_tool_detail(self):
+        def _fail(cmd, **kwargs):
+            return mock.Mock(returncode=1, stdout="", stderr="mobiunpack: bad palmdb")
+
+        with mock.patch("cquarry_cli.coversource._run_ebook_meta", side_effect=_fail):
+            _code, out, _ = self.cover(
+                "run", "cover-source", "--ids", "4", "--db", str(self.db_path)
+            )
+        self.assertIn("declined", out)
+        self.assertIn("ebook-meta failed: mobiunpack: bad palmdb", out)
+
+    def test_non_image_payload_declines(self):
+        with mock.patch(
+            "cquarry_cli.coversource._run_ebook_meta",
+            side_effect=self._fake_ebook_meta(b"not an image"),
+        ):
+            _code, out, _ = self.cover(
+                "run", "cover-source", "--ids", "4", "--db", str(self.db_path)
+            )
+        self.assertIn("declined", out)
+        self.assertIn("extracted payload is not a JPEG/PNG", out)
+
+    def test_family_priority_order_is_pinned(self):
+        self.assertEqual(coversource._OWN_FILE_FORMATS, ("AZW3", "MOBI", "AZW", "PRC"))
+
+
 # --- the page1-render rung ---------------------------------------------
 
 

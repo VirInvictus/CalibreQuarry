@@ -9,7 +9,12 @@ the issue's order, until a rung yields cover bytes:
 1. **declared-epub** -- `coverfind.declared_epub_cover()` over the book's
    EPUB (its own declared cover; catches pre-3.72.0 verb imports that
    predate the phase-2 cover pass).
-2. **page1-render** -- PDFs: `pdftoppm -f 1 -l 1 -r 150 -png -singlefile`,
+2. **own-file** -- the book's own MOBI-family format file (AZW3, MOBI,
+   AZW, PRC, in that order) carries the publisher's embedded cover:
+   `ebook-meta <file> --get-cover` extracts it read-only and the payload
+   must sniff as JPEG/PNG (issue #61: three azw3 imports the ladder used
+   to decline while their own files held 100-125 KB covers).
+3. **page1-render** -- PDFs: `pdftoppm -f 1 -l 1 -r 150 -png -singlefile`,
    then the gates. A render is catalogued only when it survives BOTH:
    the blank gate (stdlib PNG decode; a page whose modal quantized color
    covers 95%+ of the sampled grid is an empty or near-empty sheet or a
@@ -21,12 +26,12 @@ the issue's order, until a rung yields cover bytes:
    right half by a SECOND render cropped in RENDER pixels measured from
    the PNG's IHDR -- the manual pipeline's recorded lesson ("measure the
    render, not the points": a points-based crop landed on the wrong half).
-3. **sibling** -- exactly one other book sharing a case-folded author
+4. **sibling** -- exactly one other book sharing a case-folded author
    whose has_cover is truthy donates its catalogued cover (the indie
    two-volume shape: rules volume + art volume, the art volume's true
    cover living on the sibling's page 1). Zero covered siblings is a
    silent miss; two or more is a declined ambiguity.
-4. **url** -- an explicit --url ID=URL overrides the ladder for that
+5. **url** -- an explicit --url ID=URL overrides the ladder for that
    book (news's explicit-over-curated rule): the URL is fetched (network
    at --apply ONLY; the dry run plans it), direct image bytes are
    sniffed, and an HTML product page has its og:image/twitter:image
@@ -54,7 +59,9 @@ from __future__ import annotations
 import http.client
 import html
 import json
+import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -188,6 +195,57 @@ def _render_page1(pdf: str, workdir: str, crop: tuple[int, int] | None = None):
             return f.read(), ""
     except OSError as e:
         return None, f"render unreadable: {e}"
+
+
+# --- the own-file extract (MOBI-family rung) --------------------------
+
+#: The spawns are module seams: the tests mock this one, the live class
+#: exercises the real binary (skipUnless it is installed; CI has no
+#: calibre tools).
+
+#: The MOBI-family containers whose embedded cover IS the declared art
+#: (the publisher put it there), most-specific first (issue #61).
+_OWN_FILE_FORMATS = ("AZW3", "MOBI", "AZW", "PRC")
+
+
+def _run_ebook_meta(cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace", timeout=120
+    )
+
+
+def _embedded_cover(fmt_path: str, workdir: str) -> tuple[bytes | None, str]:
+    """One own-file extraction: `ebook-meta <file> --get-cover` into the
+    workdir, read back and sniffed (issue #61). (bytes, "") on success;
+    (None, detail) on any miss -- a missing binary, a failed spawn, a
+    file with no embedded cover, or a payload that is not a JPEG/PNG.
+    Read-only over the book's format file; the ladder continues on a
+    miss."""
+    if shutil.which("ebook-meta") is None:
+        return None, "ebook-meta not on PATH"
+    target = os.path.join(workdir, "owncover")
+    try:
+        os.unlink(target)
+    except OSError:
+        pass
+    try:
+        proc = _run_ebook_meta(["ebook-meta", fmt_path, "--get-cover", target])
+    except subprocess.TimeoutExpired:
+        return None, "ebook-meta timed out"
+    except OSError as e:
+        return None, f"ebook-meta failed: {e}"
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        detail = tail[-1] if tail else f"exit {proc.returncode}"
+        return None, f"ebook-meta failed: {' '.join(detail.split())[:160]}"
+    try:
+        with open(target, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None, "no embedded cover in the file"
+    if not data or sniff_image_format(data) is None:
+        return None, "extracted payload is not a JPEG/PNG"
+    return data, ""
 
 
 # --- the blank gate (stdlib PNG walk) --------------------------------
@@ -505,7 +563,28 @@ def _plan_one(db, book: dict, spread: bool, workdir: str) -> dict:
             return row
         row["notes"].append("no declared EPUB cover")
 
-    # Rung 2: the PDF page-1 render behind the blank and wrapper gates.
+    # Rung 2: the book's own MOBI-family file carries the publisher's
+    # embedded cover (issue #61); every family format present is tried,
+    # first extraction that sniffs clean wins.
+    for fmt in _OWN_FILE_FORMATS:
+        own = formats.get(fmt)
+        if own is None:
+            continue
+        data, detail = _embedded_cover(own["path"], workdir)
+        if data is not None:
+            after = f" (after: {'; '.join(row['notes'])})" if row["notes"] else ""
+            row.update(
+                action="set_cover",
+                rung="own-file",
+                detail=(
+                    f"{len(data) >> 10} KB from the {fmt} file's embedded cover{after}"
+                ),
+                data=data,
+            )
+            return row
+        row["notes"].append(f"{fmt}: {detail}")
+
+    # Rung 3: the PDF page-1 render behind the blank and wrapper gates.
     pdf = formats.get("PDF")
     if pdf is not None:
         data, detail = _plan_render(pdf["path"], spread, workdir)
@@ -525,7 +604,7 @@ def _plan_one(db, book: dict, spread: bool, workdir: str) -> dict:
         if detail:
             row["notes"].append(detail)
 
-    # Rung 3: the unique covered sibling donates its cover.
+    # Rung 4: the unique covered sibling donates its cover.
     siblings = _covered_siblings(db, book)
     if len(siblings) == 1:
         data = db.get_cover_bytes(siblings[0]["id"])
