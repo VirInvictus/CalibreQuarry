@@ -7,6 +7,44 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 **CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). Open follow-ups from the 2026-11-13 live audit: issue #57 (top-level help wraps vs truncates inconsistently, doubled "also:" header, no exit line on the surface) and issue #58 (`--help json` carries the flag surface but not the exit contracts and gate annotations that bindery's `--help-json` and lattice's `help --json` both carry; fix additive-only, a new top-level json key, never reshaping `topics`/`groups`).
 
+## Programmer-facing contract notes (3.88.1 onward, the correctness batch, issues #56/#63/#65)
+
+- **The DRM trailer read is anchored, and the fallback is the old
+  window.** `_pdf_has_encrypt_dict` (audit_drm.py) now parses the file's
+  LAST `startxref` from a 64 KiB tail read, then reads a second 64 KiB
+  window AT that offset (so a giant classic xref table whose trailer
+  sits before the tail still judges) and tests /Encrypt membership in
+  the FIRST balanced dict span (nested `<<`/`>>` tracked) after
+  `trailer` (classic) or after `obj` (xref stream, the modern shape,
+  pinned both ways). Any unparseable shape -- no startxref, garbage
+  digits, an offset outside the file, no dict found -- returns None from
+  `_encrypt_at_live_trailer` and the caller falls back to the
+  whole-tail substring, the exact pre-#56 answer, so damaged files
+  never change class and the qpdf-unavailable fallback path (the
+  "encrypted-unclassified" BENIGN verdict) reads the same anchors.
+  `/Encrypt` inside a STALE trailer (the issue's incrementally-decrypted
+  shape) is invisible to the anchored read; the conservative direction
+  is pinned: an appended update whose own trailer still carries
+  /Encrypt still reads DRM.
+- **`_EDITION_TOKEN` matches `_ANN_TOKEN`'s alternation.** The strip in
+  normalize_title carried `\d+` alone (issue #63); it now carries
+  `(\d+|[ivxlcdm]+)`, token-anchored identically, so the colonless
+  roman pairs ("Dune Book I" vs "Dune Book II") strip to equal bases
+  and the annotation gate's volume_sibling verdict fires. Word
+  look-alikes after the token ("book mix") strip like the annotations
+  always accepted them -- the same recorded trade, never a new one; the
+  STRICT grammar (`_ROMAN_FORM`, the 100 cap) stays the property of the
+  BARE trailing-ordinal rule, which has no token anchor to protect it.
+  Mixed-spelling pairs stay no-match (annotations agree on parsed
+  value, the arabic signature's one-sided silence holds).
+- **reconcile's calibre_running is the anchored prefix.** The 2026-10
+  standardization missed this one probe (issue #65): `pgrep -x calibre`
+  can never match the calibre-parallel workers (comm truncates to
+  "calibre-paralle"), so --apply under-refused while a worker touched
+  the DB. The probe is now `pgrep ^calibre`, names only never command
+  lines, with `TestCalibreRunningGuard` pinning the fetch_library_codes
+  guard class's two properties (name-only, worker-reaching prefix).
+
 ## Programmer-facing contract notes (3.88.0 onward, the pipeline-flow batch, issues #60/#61/#62)
 
 - **Phase 2's blockers filter has a third exemption, keyed on the file's

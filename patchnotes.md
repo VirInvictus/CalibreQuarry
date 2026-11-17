@@ -1,5 +1,56 @@
 # CalibreQuarry Patch Notes
 
+# 3.88.1 (2026-11-16)
+
+### The correctness batch (issues #56, #63, #65)
+
+Three bug fixes against documented intent, all verified live in the
+issues and none changing a verdict where the old code judged it
+correctly.
+
+- **The DRM live-vs-residue check anchors on the file's last startxref
+  (issue #56, audit_drm.py).** The check was a whole-tail substring
+  over the last 64 KiB, and a PDF decrypted by an appended incremental
+  update (pypdf-style; qpdf rewrites fully and is unaffected) keeps its
+  OLD trailer, which carries /Encrypt, stranded mid-file inside the
+  window: a decrypted file quarantined as a live lock instead of
+  reading DRM_RESIDUE with its named one-shot heal. The anchored read
+  parses the last startxref, reads the window at that offset, and
+  judges /Encrypt membership in the dict that lives there: the classic
+  shape's trailer dict, or the xref stream object's own dict when no
+  trailer keyword exists (the modern shape, now pinned both ways). Any
+  unparseable shape (no startxref, garbage digits, offset outside the
+  file, no dict found) falls back to the whole-tail substring, the
+  answer the old code always gave, so a damaged file never changes
+  class. The conservative direction is pinned too: an appended update
+  whose own trailer still carries /Encrypt (what a real encryption-aware
+  writer must do, since a reader finds the dict only from the live
+  trailer) still reads DRM.
+- **Colonless Roman volume pairs are volume siblings (issue #63,
+  screen_duplicate.py).** `_EDITION_TOKEN`, the strip that erases
+  volume tokens before the title bases compare, carried the arabic half
+  alone (`\d+`), so "Dune Book I" vs "Dune Book II" kept their volume
+  words inside the base, the bases stayed unequal, and the
+  volume_sibling gate (which requires base equality) never fired, even
+  though the gate's own comment promises "Vol I" vs "Vol II" and the
+  annotation rules (`_ANN_TOKEN`) had been roman-aware since the #55
+  batch. The strip now carries the same arabic-or-roman alternation,
+  token-anchored the same way, so the colonless roman pairs read as the
+  distinct volumes they declare. Mixed-spelling pairs ("Book I" vs
+  "Book 1") stay the recorded no-match: the annotations agree on the
+  parsed value and the arabic signature's one-sided silence holds.
+  Pinned on the issue's live shapes plus the Vol/Part spellings and the
+  mixed guard.
+- **reconcile's Calibre-closed guard reaches the calibre-parallel
+  workers (issue #65, reconcile_file_metadata.py).** The probe was the
+  one `pgrep -x calibre` the 2026-10 codebase-wide standardization
+  missed: the exact-name match can never see the calibre-parallel job
+  workers, whose comm truncates to "calibre-paralle", so `--apply`
+  under-refused while a worker touched the database. The probe is the
+  anchored prefix (`pgrep ^calibre`, names only, never command lines)
+  every other calibre_running() in the tree already used, with the
+  same two properties fetch_library_codes' guard class pins.
+
 # 3.88.0 (2026-11-16)
 
 ### The pipeline-flow batch (issues #60, #61, #62)
