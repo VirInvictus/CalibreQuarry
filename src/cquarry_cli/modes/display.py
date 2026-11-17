@@ -1,3 +1,5 @@
+import json
+
 from cquarry.db import CalibreDB
 from cquarry.helpers import (
     C_DIM,
@@ -10,14 +12,37 @@ from cquarry.helpers import (
 )
 
 
-def show_recent(db: CalibreDB, count: int = 20, *, quiet: bool = False) -> None:
-    """Show most recently added books."""
+def show_recent(
+    db: CalibreDB, count: int = 20, *, quiet: bool = False, fmt: str | None = None
+) -> None:
+    """Show most recently added books. ``fmt == "json"`` emits the same
+    rows as the pretty listing, machine-shaped (issue #59): the slim
+    per-book row a script wants from a list mode, not the --book
+    dossier."""
     books = db.get_all_books()
     by_date = sorted(books, key=lambda b: b["timestamp"] or "", reverse=True)
+    rows = by_date[:count]
+
+    if fmt == "json":
+        payload = [
+            {
+                "id": b["id"],
+                "title": b["title"],
+                "authors": b["authors"] or [],
+                "added": (b["timestamp"] or "")[:10],
+                "rating": calibre_rating_to_stars(b["rating"]),
+                "tags": b["tags"] or [],
+                "series": b["series"] or None,
+                "series_index": b["series_index"],
+            }
+            for b in rows
+        ]
+        print(json.dumps(payload, indent=1, ensure_ascii=False, default=str))
+        return
 
     if not quiet:
         print(f"=== {count} Most Recently Added ===\n")
-    for b in by_date[:count]:
+    for b in rows:
         date = (b["timestamp"] or "")[:10]
         author = normalize_author_display(b["authors"], primary_only=True)
         rating = calibre_rating_to_stars(b["rating"])

@@ -33,6 +33,70 @@ SET_TITLE = (
 
 TOPICS = ("read", "write", "set", "run", "examples", "all", "json")
 
+#: The semantics `--help json` used to leave to the prose pages (issue
+#: #58): the exit contract per topic and the gate annotations that say
+#: what writes and what must be true before it does. Additive-only by
+#: house rule: the existing `topics` name list and `groups` keep their
+#: shapes, and consumers parse them unchanged. The `read` and `run`
+#: exit strings are the SAME literals their prose pages print (pinned
+#: by tests/test_help.py so the two surfaces cannot drift); `write` and
+#: `set` compose their pages' sentences.
+TOPIC_DETAILS = {
+    "read": {
+        "exits": "0 clean, 1 findings (mode-dependent), 2 usage.",
+        "modes": "mutually exclusive: pick exactly one per invocation; "
+        "two modes in one invocation is a usage error (exit 2), the error "
+        "names the flags involved",
+        "writes": "nothing (every read mode is read-only)",
+    },
+    "write": {
+        "exits": "0 clean, 1 a live-Calibre lock refusal, 2 usage.",
+        "gates": [
+            "every write flag commits immediately: no dry run, no --apply, no backup",
+            "Calibre must be closed (a lock is exit 1; a usage problem is exit 2)",
+            "one batch() transaction per invocation; --remove-book cannot "
+            "combine with any other verb and gates behind --confirm-remove",
+        ],
+    },
+    "set": {
+        "exits": "0 clean, 1 a failed pass (committed: false) or a "
+        "live-Calibre refusal, 2 usage.",
+        "gates": [
+            "one target source (--ids, --from-search, --from-untagged, "
+            "--from-manifest), then any number of --batch-* verbs",
+            "dry run by default; --apply demands --backup-dir (outside the "
+            "library) and Calibre closed",
+            "one transaction by default: any per-(book, verb) failure rolls "
+            "the whole pass back; --commit-per-book relaxes it",
+        ],
+    },
+    "run": {
+        "exits": "0 clean; 1 failed apply or a live-Calibre refusal; "
+        "2 usage or trouble-found per verb (each page states which)",
+        "gates": [
+            "library operations execute at --apply (dry run by default); "
+            "the apply verbs (run.apply_verbs) demand a closed Calibre and "
+            "--backup-dir outside the library",
+            "the acquisition-pathway verbs (phase1/sign/approve/phase2/"
+            "phase3) have no --apply; the signed manifest is the gate",
+        ],
+    },
+    "examples": {
+        "exits": None,
+        "gates": [
+            "copy-paste recipes only; exits ride the mode or verb each example uses"
+        ],
+    },
+    "all": {
+        "exits": None,
+        "gates": ["every topic page rendered in sequence; exits ride the named topic"],
+    },
+    "json": {
+        "exits": None,
+        "gates": ["this document; per-topic exits and gates ride topic_details"],
+    },
+}
+
 # The color theme mirrors the CPython 3.14 argparse default (_colorize's
 # argparse theme: bold blue headings and usage, bold magenta prog, bold cyan
 # long options, bold green short options, bold yellow metavars/labels), so
@@ -494,31 +558,34 @@ def _flag_token(action):
     return f"{token} {met}" if met else token
 
 
-def _truncate(help_text, limit):
-    """One line, word-boundary ellipsis."""
-    text = " ".join((help_text or "").split())
-    if len(text) <= limit:
-        return text
-    return text[:limit].rsplit(" ", 1)[0] + " ..."
-
-
-def _flag_rows(actions, detail_limit, pad=26, indent=2, width=88):
-    """Aligned one-line-per-flag block; tokens longer than pad wrap the
-    help underneath instead of breaking the column."""
+def _flag_rows(actions, pad=26, indent=2, width=88):
+    """Aligned one-line-per-flag block. One behavior for every entry
+    (issue #57): a description that fits the detail column rides the
+    flag's line, a longer one wraps beneath it at the same column, and a
+    token longer than pad takes its own line with the help wrapped
+    underneath. Nothing truncates: the full text always existed in the
+    deep dives, so the top level hiding it behind an ellipsis was the
+    one behavior the compact formatter should not have."""
     lines = []
     for action in actions:
         if action.dest == "help":
             continue
         token = _flag_token(action)
+        detail = " ".join((action.help or "").split())
         if len(token) < pad:
-            detail = _truncate(action.help, width - indent - pad)
+            limit = width - indent - pad
             if not detail:
                 lines.append(" " * indent + token)
                 continue
-            lines.append(" " * indent + token.ljust(pad) + detail)
+            if len(detail) <= limit:
+                lines.append(" " * indent + token.ljust(pad) + detail)
+            else:
+                chunks = textwrap.wrap(detail, limit)
+                lines.append(" " * indent + token.ljust(pad) + chunks[0])
+                for chunk in chunks[1:]:
+                    lines.append(" " * (indent + pad) + chunk)
         else:
             lines.append(" " * indent + token)
-            detail = " ".join((action.help or "").split())
             for chunk in textwrap.wrap(detail, width - indent - 4):
                 lines.append(" " * (indent + 4) + chunk)
     return lines
@@ -556,10 +623,10 @@ def overview(parser) -> str:
         "",
     ]
     lines.append(f"{modes.title}:")
-    lines.extend(_flag_rows(modes._group_actions, detail_limit=52))
+    lines.extend(_flag_rows(modes._group_actions))
     lines.append("")
     lines.append(f"{scoping.title}:")
-    lines.extend(_flag_rows(scoping._group_actions, detail_limit=60))
+    lines.extend(_flag_rows(scoping._group_actions))
     lines.append("")
     lines.append("also:")
     lines.append(
@@ -574,9 +641,12 @@ def overview(parser) -> str:
         "  run VERB      the acquisition pathway + headless calibre verbs"
         "   (see: --help run)"
     )
-    lines.append("")
-    lines.append("also:")
     lines.append("  cquarry (no arguments)        the interactive TUI")
+    lines.append("")
+    lines.append(
+        "exit codes: 0 clean, 1 findings (mode-dependent) or a failed"
+        " apply/live-Calibre refusal, 2 usage."
+    )
     lines.append("")
     lines.append("deep dives:")
     lines.append(
@@ -613,10 +683,7 @@ def run_overview() -> str:
         " acquisition-pathway verbs have no --apply), --db, --format json, --quiet"
     )
     lines.append("")
-    lines.append(
-        "exit codes: 0 clean; 1 failed apply or a live-Calibre refusal; "
-        "2 usage or trouble-found per verb (each page states which)"
-    )
+    lines.append(f"exit codes: {TOPIC_DETAILS['run']['exits']}")
     lines.append("")
     lines.append("per-verb detail: cquarry run --help VERB   (e.g. run --help phase1)")
     return "\n".join(lines)
@@ -689,7 +756,7 @@ def topic_read(parser) -> str:
         "                             names the flags involved (a bare --book\n"
         "                             alongside another mode is the one silent\n"
         "                             case: it contributes no id list)\n"
-        "exit codes: 0 clean, 1 findings (mode-dependent), 2 usage."
+        f"exit codes: {TOPIC_DETAILS['read']['exits']}",
     )
     return "\n".join(lines)
 
@@ -868,6 +935,7 @@ def topic_json() -> str:
             "verbs": verbs,
             "apply_verbs": sorted(APPLY_VERBS),
         },
+        "topic_details": TOPIC_DETAILS,
         "help": "cquarry --help TOPIC | cquarry run --help VERB",
     }
     return json.dumps(payload, indent=1, sort_keys=True)

@@ -385,6 +385,48 @@ class TestReadSurfaceExitCodes(_TempDBCase):
             rc = main(["--recent", "-3", "--db", self.db_path])
         self.assertEqual(rc, 2)
 
+    def test_recent_format_json_emits_slim_rows(self):
+        # Issue #59: a list mode and a natural script target; --format
+        # json emits the same rows the pretty listing shows,
+        # machine-shaped.
+        with CalibreDB(self.db_path) as db:
+            total = len(db.get_all_books())
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(
+                ["--recent", str(total + 5), "--format", "json", "--db", self.db_path]
+            )
+        self.assertEqual(rc, 0, out.getvalue() + err.getvalue())
+        rows = json.loads(out.getvalue())
+        self.assertEqual(len(rows), total)
+        for row in rows:
+            self.assertEqual(
+                sorted(row),
+                sorted(
+                    [
+                        "id",
+                        "title",
+                        "authors",
+                        "added",
+                        "rating",
+                        "tags",
+                        "series",
+                        "series_index",
+                    ]
+                ),
+            )
+        added = [row["added"] for row in rows]
+        self.assertEqual(added, sorted(added, reverse=True))
+
+    def test_recent_refuses_non_json_format(self):
+        # The --health guard's shape: a refused flag, never a silent one.
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main(["--recent", "2", "--format", "csv", "--db", self.db_path])
+        self.assertEqual(rc, 2)
+        self.assertIn("--recent supports --format json only", err.getvalue())
+        self.assertEqual(out.getvalue(), "")
+
     def test_corrupt_epoch_does_not_kill_reading_progress(self):
         # A milliseconds-valued epoch used to traceback the whole listing.
         con = sqlite3.connect(self.db_path)

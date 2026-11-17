@@ -352,6 +352,63 @@ class TestJsonTopic(unittest.TestCase):
             self.assertNotIn("\x1b", handle_help(["--help", "json"])[1])
             self.assertIn("\x1b", paint("run VERB --flag FILE"))
 
+    def test_topic_details_carry_every_topic(self):
+        # Issue #58: the semantics the prose pages print ride the machine
+        # surface now, additive-only (topics/groups keep their shapes).
+        import json as jsonlib
+
+        data = jsonlib.loads(handle_help(["--help", "json"])[1])
+        self.assertEqual(sorted(data["topic_details"]), sorted(TOPICS))
+        self.assertEqual(data["topics"], list(TOPICS))
+        for group in data["groups"]:
+            self.assertEqual(
+                set(group), {"title", "description", "flags"}, group["title"]
+            )
+
+    def test_topic_details_exits_match_the_prose_pages(self):
+        # The read and run exit strings are the SAME literals their pages
+        # print (TOPIC_DETAILS is the single source both sides read), so
+        # the two surfaces cannot drift apart.
+        read_page = handle_help(["--help", "read"])[1]
+        run_page = handle_help(["run", "--help"])[1]
+        self.assertIn(
+            helpcli.TOPIC_DETAILS["read"]["exits"],
+            read_page,
+        )
+        self.assertIn(
+            helpcli.TOPIC_DETAILS["run"]["exits"],
+            run_page,
+        )
+
+
+class TestOverviewSurface(unittest.TestCase):
+    """Issue #57's pins: the compact top level wraps instead of
+    truncating, carries ONE also: block, and states the exit contract
+    like every deep dive does."""
+
+    def setUp(self):
+        self.parser = build_parser()
+        self.text = helpcli.overview(self.parser)
+
+    def test_no_mode_help_is_truncated(self):
+        # For every mode flag whose collapsed help would have crossed the
+        # old detail column, its LAST word must still appear on the
+        # surface (the ellipsis always cut before it).
+        modes = next(
+            g for g in self.parser._action_groups if g.title == helpcli.MODES_TITLE
+        )
+        for action in modes._group_actions:
+            collapsed = " ".join((action.help or "").split())
+            if len(collapsed) > 60:
+                self.assertIn(collapsed.split()[-1], self.text, action.dest)
+
+    def test_single_also_block(self):
+        self.assertEqual(self.text.count("also:"), 1)
+
+    def test_exit_legend_on_the_surface(self):
+        self.assertIn("exit codes:", self.text)
+        self.assertIn("2 usage", self.text)
+
 
 class TestDocsPins(unittest.TestCase):
     """The docs audit's structural ask: the hand-written mode tables

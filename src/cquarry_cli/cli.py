@@ -209,7 +209,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=20,
         default=None,
-        help="Show N most recently added books (default: 20)",
+        help="Show N most recently added books (default: 20; --format "
+        "json emits the slim rows)",
     )
     group.add_argument(
         "--series",
@@ -1607,7 +1608,15 @@ def main(argv: list[str] | None = None) -> int:
                         file=sys.stderr,
                     )
                     return 2
-                show_recent(db, args.recent, quiet=args.quiet)
+                if args.format is not None and args.format != "json":
+                    # The --health guard's shape (issue #59): a flag that
+                    # silently does nothing is worse than a refused flag.
+                    print(
+                        "ERROR: --recent supports --format json only.",
+                        file=sys.stderr,
+                    )
+                    return 2
+                show_recent(db, args.recent, quiet=args.quiet, fmt=args.format)
                 return 0
 
             if args.series:
