@@ -5,7 +5,45 @@ Per-project guidance. Overrides the global file where they conflict.
 ## What this is
 A CLI and TUI toolkit for Calibre users who treat their libraries as curated collections. It provides a purely terminal-driven interface for analyzing and exporting from Calibre databases.
 
-**CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). Open follow-ups from the 2026-11-13 live audit: issue #57 (top-level help wraps vs truncates inconsistently, doubled "also:" header, no exit line on the surface) and issue #58 (`--help json` carries the flag surface but not the exit contracts and gate annotations that bindery's `--help-json` and lattice's `help --json` both carry; fix additive-only, a new top-level json key, never reshaping `topics`/`groups`).
+**CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). The 2026-11-13 live audit's two named open follow-ups are closed as of 3.89.0: issue #57 (the compact overview wraps instead of truncating, one "also:" block, the exit legend on the surface) and issue #58 (`topic_details` in `--help json` carries the exit contracts and gate annotations; additive-only, `topics`/`groups` untouched).
+
+## Programmer-facing contract notes (3.89.0 onward, the CLI-surface batch, issues #57/#58/#59)
+
+- **The compact formatter has ONE behavior: wrap, never truncate.**
+  `_flag_rows` (helpcli.py) lost its ellipsis path and its ignored
+  `detail_limit` parameter (the body always truncated at
+  `width - indent - pad` regardless of what the callers passed). A
+  description that fits the detail column rides the flag's line; a
+  longer one starts on the same line (first wrapped chunk after
+  `token.ljust(pad)`) and continues beneath it, aligned at
+  `indent + pad`; a token >= pad keeps its own line with the help
+  wrapped at `indent + 4` (the deep-dive shape, unchanged).
+  `_truncate` is deleted. The overview carries ONE `also:` block (the
+  write/set/run pointers and the TUI line under one header) and the
+  exit legend `exit codes: 0 clean, 1 findings (mode-dependent) or a
+  failed apply/live-Calibre refusal, 2 usage.` The README's "Full help
+  output" block is a paste of this surface and was regenerated in the
+  same pass (its stale "23 run verbs" prose corrected to the pinned
+  24) -- regen it whenever the overview rendering changes.
+- **`--help json` grows `topic_details`; nothing else moves.**
+  `TOPIC_DETAILS` (helpcli.py, module constant) maps every topic in
+  TOPICS to `exits` (string or None) and `gates`/`modes`/`writes`
+  annotations; the payload carries it under the new top-level
+  `topic_details` key. The `read` and `run` exit strings are the same
+  literals the prose pages print: `topic_read` and `run_overview`
+  render `TOPIC_DETAILS[...]["exits"]` directly, and
+  TestHelpJsonTopicDetails pins both substrings, so the machine
+  surface and the human pages cannot drift. `topics` (the name list)
+  and `groups` keep their exact shapes; the additive-only house rule
+  holds.
+- **`--recent` is a json list mode.** `show_recent(db, count, *,
+  quiet, fmt=None)` (modes/display.py) emits the slim row shape (id,
+  title, authors as the raw list, added date, rating as the STAR
+  value, tags, series, series_index) when `fmt == "json"`, and the
+  pretty listing otherwise (the TUI's positional call unchanged). The
+  cli door refuses non-json `--format` at the `--health` guard's
+  shape (`--recent supports --format json only`, exit 2) BEFORE the
+  listing runs.
 
 ## Programmer-facing contract notes (3.88.1 onward, the correctness batch, issues #56/#63/#65)
 

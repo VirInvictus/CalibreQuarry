@@ -70,7 +70,7 @@ This tool reads the SQLite database directly in read-only mode. It ships a near-
 | **Health digest** | `--health` | The audit's finding counts in one short screen (book issues with the top problems, duplicate groups, series gaps, conversion overrides, the metadata-quality trio, filesystem tree, FTS coverage, pending OPF sync); exit 0 unless `--fail-on-findings` turns it into a gate; composes with `--restrict` |
 | **Audit** | `--audit` | Report untagged, unrated, coverless, low-resolution-cover and cover-file-missing books; deprecated-format-only and duplicate books; detect series gaps; list books with manual conversion overrides and pending OPF sync; flag invalid uuids, sentinel pubdates, and non-ISO-639-2 language values (the metadata-quality rows, advisory); and audit the filesystem against the database (missing book dirs and format files, extra/unknown files, extra covers, orphan book/author dirs, malformed paths; root dot-entries and workspace docs whitelisted) |
 | **Identifierless** | `--identifierless` | Books with no identifiers (id and title): the curation queue for Calibre-Companion-style lookups |
-| **Recent** | `--recent N` | Show the N most recently added books (default: 20) |
+| **Recent** | `--recent N` | Show the N most recently added books (default: 20; `--format json` emits the slim rows) |
 | **Series** | `--series` | List all series with completeness status and gap detection |
 | **Analytics** | `--analytics {author,pace,tags,genres,overlap,reading}` | Per-author breakdowns, reading-pace trend, tag-taxonomy tree, genre share breakdown (`--genre-depth N` descends the tag hierarchy), Wing-overlap analysis, and reading analytics (status funnel in the column's enum order, recent finishes, days-from-added-to-finished; strictly read-only) |
 | Pace granularity | `--pace-granularity {month,year}` | Bucket size for `--analytics pace` (default: month) |
@@ -614,7 +614,7 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 overview below, `--help read|write|set|run|examples|all|json` prints the
 focused deep dives (flag tables generated from the live parser, so they
 cannot drift from the real flags), and `run --help VERB` prints a
-per-verb page for each of the 23 run verbs. `--help json` dumps the
+per-verb page for each of the 24 run verbs. `--help json` dumps the
 complete parser surface (every group and flag, every run verb with its
 claimed flags and prose) as machine-readable JSON, generated from the
 live parser and never colored. On a terminal the output is
@@ -631,48 +631,77 @@ usage: cquarry [--db DB] [--restrict SEARCH] MODE [mode flags]
 modes (pick exactly one):
   --catalog                 Build a text catalog
   --all-wings               Generate catalogs for all virtual libraries
-  --all-saved-searches      Generate a catalog per saved search (the --all-wings ...
+  --all-saved-searches      Generate a catalog per saved search (the --all-wings analog;
+                            files land in --outdir, one per search, scoped by --restrict
+                            when given)
   --stats                   Show library statistics
   --analytics {author,pace,tags,genres,overlap,reading}
       Extended analytics and visualizations (reading: status funnel and finish dates
       from #reading_status/#date_read; read-only)
-  --audit                   Report issues (untagged, unrated, series gaps, conversion ...
-  --health                  One-shot health digest: the audit's finding counts in a ...
-  --recent [RECENT]         Show N most recently added books (default: 20)
+  --audit                   Report issues (untagged, unrated, series gaps, conversion
+                            overrides)
+  --health                  One-shot health digest: the audit's finding counts in a
+                            short form (composes with --restrict and --format json;
+                            always exit 0 unless --fail-on-findings)
+  --recent [RECENT]         Show N most recently added books (default: 20; --format json
+                            emits the slim rows)
   --series                  List all series with completeness and gap detection
   --export                  Export library to JSON, CSV, or AI format
-  --search QUERY            Show/export books matching a Calibre search expression ...
-  --fts QUERY               Full-text content search over Calibre's full-text-search.db ...
-  --fts-status              Report FTS index staleness only: never-indexed formats, ...
+  --search QUERY            Show/export books matching a Calibre search expression
+                            (prints to stdout unless --output is given; empty query =
+                            whole library). Supports custom grouped-search terms
+                            (GroupName:query) and annotations: full-text over e-reader
+                            highlights
+  --fts QUERY               Full-text content search over Calibre's full-text-search.db
+                            sidecar (what the books' text actually says, not metadata).
+                            Case- and accent-folded; composes with --restrict. Prints an
+                            index-staleness summary after the matches unless --quiet
+  --fts-status              Report FTS index staleness only: never-indexed formats,
+                            indexed-empty documents, stale entries queued for re-index,
+                            and extraction errors
   --wings                   List all virtual library wings
   --tags                    Dump every tag with its book count
-  --identifierless          List books with no identifiers (id and title; the curation ...
-  --trash                   List the library's .caltrash entries (what run merge moved ...
+  --identifierless          List books with no identifiers (id and title; the curation
+                            queue for Calibre-Companion style lookups)
+  --trash                   List the library's .caltrash entries (what run merge moved
+                            aside): category, book id, age, files; library-shape, so
+                            --restrict does not scope it
   --book [BOOK_ID[,BOOK_ID...]]
       Show the full record for one book or a comma-separated list: identifiers, format
       files, cover, comments, custom columns, annotations, reading progress. --format
       json emits the machine-readable dossier. With --untagged, give no ids to select
       every untagged book (also a standalone mode)
-  --entities KIND           List an entity class with book counts ...
-  --reading-progress        Show per-device reading positions with progress bars, ...
+  --entities KIND           List an entity class with book counts
+                            (authors/series/publishers include sort and link columns)
+  --reading-progress        Show per-device reading positions with progress bars, newest
+                            first
   --columns                 List custom columns: type, editability, enum values
-  --info                    Library dossier: identity, wings + expressions, saved ...
-  --exportlt                Export to LibraryThing CSV format (can be used alone or ...
-  --export-annotations      Dump e-reader highlights/bookmarks/notes as JSON ...
+  --info                    Library dossier: identity, wings + expressions, saved
+                            searches, @Name user categories, grouped search terms,
+                            feeds, sync queues
+  --exportlt                Export to LibraryThing CSV format (can be used alone or with
+                            --search)
+  --export-annotations      Dump e-reader highlights/bookmarks/notes as JSON (optionally
+                            scoped with --id)
   --format-stats            Show per-format book counts and total bytes
 
 scoping:
-  --db DB                   Path to Calibre metadata.db, or the library directory ...
-  --restrict SEARCH         Scope every read mode to books matching this search ...
+  --db DB                   Path to Calibre metadata.db, or the library directory
+                            containing it (auto-detected if omitted)
+  --restrict SEARCH         Scope every read mode to books matching this search
+                            expression (or `vl:Name` for a virtual library): stats,
+                            audit, analytics, exports, catalogs, and the rest compute
+                            over the restricted set only. Refused with write verbs, the
+                            run verbs, and --book/--id
   --wing WING               Filter to a specific virtual library wing
 
 also:
   write verbs   --set-title, --add-tag, ... per-book edits            (see: --help write)
   set writes    --from-search/--ids + --batch-* edits          (see: --help set)
   run VERB      the acquisition pathway + headless calibre verbs   (see: --help run)
-
-also:
   cquarry (no arguments)        the interactive TUI
+
+exit codes: 0 clean, 1 findings (mode-dependent) or a failed apply/live-Calibre refusal, 2 usage.
 
 deep dives:
   cquarry --help read|write|set|run|examples|all|json  (-h works too)

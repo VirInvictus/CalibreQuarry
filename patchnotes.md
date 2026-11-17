@@ -1,5 +1,50 @@
 # CalibreQuarry Patch Notes
 
+# 3.89.0 (2026-11-16)
+
+### The CLI-surface batch (issues #57, #58, #59)
+
+The 2026-11-13 live help audit's three follow-ups, all surface: what
+the compact overview shows, what the machine surface carries, and what
+a list mode does with a format flag. No verb, gate, or write path
+changed.
+
+- **The compact overview wraps instead of truncating, carries one
+  `also:` block, and states the exit contract (issue #57,
+  helpcli.py).** The old `_flag_rows` had two behaviors: a token short
+  enough to share its line got a word-boundary ellipsis (`--audit`
+  read "series gaps, conversion ..."), while a long token's description
+  wrapped in full, so the top level hid text the deep dives always
+  had. One behavior now: a description that fits rides the flag's
+  line; a longer one starts on the same line and continues beneath it,
+  aligned at the detail column; nothing truncates (the dead
+  `_truncate` helper and the ignored `detail_limit` parameter are
+  gone). The two `also:` blocks merged into one, and the surface gains
+  the exit legend the deep dives carry: "exit codes: 0 clean,
+  1 findings (mode-dependent) or a failed apply/live-Calibre refusal,
+  2 usage." Pinned: the last word of every mode description survives
+  onto the surface, one `also:`, the legend line present.
+- **`--help json` carries the semantics the prose pages print (issue
+  #58, additive-only).** New top-level `topic_details` key: every
+  topic maps to its exit contract and, for write/set/run, the gate
+  annotations (what commits immediately, what demands --backup-dir and
+  a closed Calibre, which verbs have no --apply). The `read` and `run`
+  exit strings are the same literals their prose pages print
+  (`TOPIC_DETAILS` is the single source both sides read, pinned so the
+  surfaces cannot drift); `topics` and `groups` keep their shapes and
+  consumers parse them unchanged. An AI consumer parsing the json can
+  now answer "what does exit 1 mean for --audit" and "which verbs can
+  write" without running the seven topic pages and parsing prose.
+- **`--recent` supports `--format json` and refuses the rest (issue
+  #59).** The flag used to vanish silently into the human listing
+  while `--health` and `--book` guarded the same misapplication
+  explicitly; a flag that does nothing is worse than a refused flag.
+  `--format json` emits the slim per-book row a list mode owes a
+  script (id, title, authors, added, rating, tags, series,
+  series_index: the rows the pretty listing shows, machine-shaped),
+  and any non-json `--format` is refused at the door (`--recent
+  supports --format json only`, exit 2, the `--health` guard's shape).
+
 # 3.88.1 (2026-11-16)
 
 ### The correctness batch (issues #56, #63, #65)
