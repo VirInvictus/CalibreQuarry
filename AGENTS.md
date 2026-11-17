@@ -7,6 +7,31 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 **CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). The 2026-11-13 live audit's two named open follow-ups are closed as of 3.89.0: issue #57 (the compact overview wraps instead of truncating, one "also:" block, the exit legend on the surface) and issue #58 (`topic_details` in `--help json` carries the exit contracts and gate annotations; additive-only, `topics`/`groups` untouched).
 
+## Programmer-facing contract notes (3.90.0 onward, the cquarry 1.29.2 floor, issue #66)
+
+- **The floor is `>=1.29.2`, and the empty-name clear is engine
+  behavior this repo only pins.** cquarry 1.29.2 (its audit-fix wave,
+  issues #13/#14/#15) makes `WritableCalibreDB.set_series`/
+  `set_publisher` clear the link on an empty or whitespace-only name
+  (the series row prunes and `series_index` resets to 1.0) instead of
+  INSERTing a ghost entity row. This frontend's `op_set_series`/
+  `op_set_publisher` (writeops.py) pass `name` straight through, so
+  the adoption is the floor bump (pyproject + spec Dependencies line +
+  the 2.1 prose sentence and per-bump bullet, `uv.lock` relocked) plus
+  the version-gated seam pin `TestSetSeriesPublisherEmptyNameClears`
+  driving `--set-series`/`--set-publisher` over the fixture schema:
+  empty-series clear with index reset and no ghost row, the whitespace
+  form, the empty-publisher prune, and the real-name guard. The
+  `--set-series` help's `"" clears` claim was documentation of intent
+  all along; below 1.29.2 the engine ghost-rowed it, and the pin
+  skips there. The cquarry#14 pages-rescan flip (format writes queue
+  the rescan before the FTS-sidecar gate) and the cquarry#13
+  publishers `get_entity_book_ids` fix have no frontend seam (pass-
+  through and zero call sites respectively); recorded in the spec
+  bullet for completeness. The floor-pin test
+  (test_version.py) holds the spec 2.1 prose floor sentence to
+  pyproject.
+
 ## Programmer-facing contract notes (3.89.0 onward, the CLI-surface batch, issues #57/#58/#59)
 
 - **The compact formatter has ONE behavior: wrap, never truncate.**

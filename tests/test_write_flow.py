@@ -1012,5 +1012,115 @@ class TestImportAuthorSortFlipParity(_TempDBCase):
             con.close()
 
 
+@unittest.skipUnless(
+    _cquarry_at_least(1, 29, 2),
+    "needs cquarry >= 1.29.2 (set_series/set_publisher clear on empty names)",
+)
+class TestSetSeriesPublisherEmptyNameClears(_TempDBCase):
+    """Issue #66, the cquarry 1.29.2 adoption (the audit-fix wave,
+    cquarry issue #15): an empty or whitespace-only name CLEARS the
+    entity link (the series row prunes, `series_index` resets to 1.0)
+    instead of INSERTing a ghost entity row with an empty name. These
+    write verbs pass the name straight through to
+    WritableCalibreDB.set_series/set_publisher, so the floor bump is
+    the whole adoption; the flag help already documented `"" clears`
+    and pre-1.29.2 the engine ghost-rowed it instead. Real names are
+    unchanged, and the whitespace mirror is the same single_text
+    collapse the custom-column writers have had since 1.26.2/1.28.1.
+    Model: TestSetPublisherCaseChangeParity above."""
+
+    def _set(self, flag, book, value, *extra):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = main([flag, str(book), value, *extra, "--db", self.db_path])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_empty_series_name_clears_and_resets_the_index(self):
+        rc, out, err = self._set("--set-series", 1, "Expanse", "--series-index", "3")
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self._set("--set-series", 1, "")
+        self.assertEqual(rc, 0, out + err)
+        con = sqlite3.connect(self.db_path)
+        try:
+            # The link is gone, the index reset, and NO ghost row with an
+            # empty name survives in the series table.
+            self.assertEqual(
+                con.execute(
+                    "SELECT COUNT(*) FROM books_series_link WHERE book = 1"
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                con.execute("SELECT series_index FROM books WHERE id = 1").fetchone()[
+                    0
+                ],
+                1.0,
+            )
+            self.assertEqual(
+                con.execute("SELECT COUNT(*) FROM series").fetchone()[0],
+                0,
+            )
+        finally:
+            con.close()
+
+    def test_whitespace_series_name_clears_too(self):
+        rc, out, err = self._set("--set-series", 1, "Expanse")
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self._set("--set-series", 1, "   ")
+        self.assertEqual(rc, 0, out + err)
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute(
+                    "SELECT COUNT(*) FROM books_series_link WHERE book = 1"
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                con.execute("SELECT COUNT(*) FROM series").fetchone()[0],
+                0,
+            )
+        finally:
+            con.close()
+
+    def test_empty_publisher_name_clears_and_prunes(self):
+        rc, out, err = self._set("--set-publisher", 1, "Orbit")
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self._set("--set-publisher", 1, "")
+        self.assertEqual(rc, 0, out + err)
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute(
+                    "SELECT COUNT(*) FROM books_publishers_link WHERE book = 1"
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                con.execute("SELECT COUNT(*) FROM publishers").fetchone()[0],
+                0,
+            )
+        finally:
+            con.close()
+
+    def test_real_names_still_write(self):
+        rc, out, err = self._set("--set-publisher", 1, "Orbit")
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self._set("--set-series", 2, "Expanse")
+        self.assertEqual(rc, 0, out + err)
+        con = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                con.execute("SELECT name FROM publishers").fetchall(),
+                [("Orbit",)],
+            )
+            self.assertEqual(
+                con.execute("SELECT name FROM series").fetchall(),
+                [("Expanse",)],
+            )
+        finally:
+            con.close()
+
+
 if __name__ == "__main__":
     unittest.main()

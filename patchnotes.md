@@ -1,5 +1,43 @@
 # CalibreQuarry Patch Notes
 
+# 3.90.0 (2026-11-16)
+
+### Adopt cquarry 1.29.2: the audit-fix wave (issue #66)
+
+The #52/#49/#42/#35/#14 adoption precedent: cquarry v1.29.2 (PyPI
+live, CI green) fixes three bugs from its 2026-11-16 audit wave, and
+this repo consumes two of them through its write wrappers, so the
+floor bump is how the fixes reach the workflow. The floor moves to
+`cquarry >= 1.29.2` (pyproject + spec Dependencies line + the 2.1
+prose sentence and per-bump bullet), `uv.lock` relocked in the same
+pass, and the full suite verified green against 1.29.2 before the
+bump landed.
+
+- **`set_series`/`set_publisher` clear on empty/whitespace names
+  (cquarry#15).** `op_set_series`/`op_set_publisher` (writeops.py)
+  pass the name straight through to `WritableCalibreDB`; under 1.29.2
+  an empty or whitespace-only name CLEARS the link (the series row
+  prunes, `series_index` resets to 1.0) instead of INSERTing a ghost
+  entity row with an empty name. The `--set-series` flag help already
+  documented `"" clears`: documented intent became truth. The
+  whitespace mirror is the same NBSP-preserving `single_text` collapse
+  the custom-column writers have had since 1.26.2/1.28.1; real names
+  and `None` are unchanged. Pinned at the verb seam by
+  `TestSetSeriesPublisherEmptyNameClears` (version-gated, skipped
+  below 1.29.2): the empty-series clear with index reset and no ghost
+  row, the whitespace form, the empty-publisher clear with the row
+  pruned, and the real-name guard.
+- **Format writes queue the pages rescan without an FTS sidecar
+  (cquarry#14).** `op_add_format`/`action_add_format` ride
+  `add_format`; under 1.29.2 the pages-rescan flip happens BEFORE the
+  sidecar gate, so a library without `full-text-search.db` still gets
+  the rescan queued on every format add/change (only the extraction
+  queue degrades to a no-op, matching `remove_format`'s unconditional
+  rescan). Engine-pinned; this repo's wrappers pass through.
+- **`get_entity_book_ids("publishers", ...)` fixed (cquarry#13).** No
+  call site exists in this repo (verified zero usage); recorded for
+  completeness.
+
 # 3.89.1 (2026-11-16)
 
 ### Tests only: the tty-conditional phase-3 pin runs everywhere (issue #64)
