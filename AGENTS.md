@@ -7,6 +7,56 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 **CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). Open follow-ups from the 2026-11-13 live audit: issue #57 (top-level help wraps vs truncates inconsistently, doubled "also:" header, no exit line on the surface) and issue #58 (`--help json` carries the flag surface but not the exit contracts and gate annotations that bindery's `--help-json` and lattice's `help --json` both carry; fix additive-only, a new top-level json key, never reshaping `topics`/`groups`).
 
+## Programmer-facing contract notes (3.88.0 onward, the pipeline-flow batch, issues #60/#61/#62)
+
+- **Phase 2's blockers filter has a third exemption, keyed on the file's
+  verdict.** The filter (run.py, `run_phase2`) exempted
+  `metadata_download` decisions and a resolved `lossy_consent` ("resolution":
+  "apply"); it now also exempts a `duplicate` decision whose `file` appears
+  in the manifest's `files` with verdict `duplicate_refused` (issue #60: the
+  verdict IS the resolution; the decision and its match detail stay in
+  `decisions_needed` as the durable record, never consumed or removed). The
+  exemption is keyed by path equality against the refused set built from
+  the CURRENT manifest; a duplicate decision naming any other verdict (a
+  hand-edited or stale pairing) still blocks, fail-closed. The phase-3
+  answer gates are untouched.
+- **The cover ladder is five rungs; rung 2 is own-file.** Order:
+  declared-epub, own-file, page1-render, sibling, url. Rung 2 (issue #61)
+  walks `_OWN_FILE_FORMATS` (`AZW3`, `MOBI`, `AZW`, `PRC`, that priority)
+  over the book's own format rows: each present file goes through
+  `_embedded_cover(path, workdir)`, which spawns
+  `ebook-meta <file> --get-cover <workdir>/owncover` (the `_run_ebook_meta`
+  module seam, 120s), reads the written file, and accepts it only when
+  non-empty AND `sniff_image_format` says JPEG/PNG; any miss (no binary on
+  PATH, spawn failure with the tool's last stderr line, no file written,
+  non-image payload) contributes a `{FMT}: {reason}` note and the ladder
+  continues exactly as before. The rung sits above page1-render on purpose:
+  the publisher's embedded cover is the declared art, not a reconstruction,
+  so it outranks any render; the gates (blank/wrapper/landscape) are
+  render-rung machinery and do not apply. Row detail names the format:
+  `{N} KB from the {FMT} file's embedded cover`. No live suite class: a
+  real azw3 needs a calibre conversion to craft, and the seam contract is
+  pinned by the mocked class (`TestOwnFileRung`).
+- **reconcile knows the azw3/mobi permanent-drift class, and the summary
+  no longer lies about it.** `format_limited(fmt, drift)` (issue #62) is
+  True iff fmt is in `FORMAT_LIMITED_FORMATS` ({AZW3, MOBI}) and every
+  drifted field is in `FORMAT_LIMITED_FIELDS` ({identifiers, series}) --
+  the fields the calibredb azw3/mobi writer provably cannot carry. The dry
+  run splits the checked line ("N format-limited (azw3/mobi
+  identifiers/series; documented, not actionable)" only when N > 0), marks
+  such rows "(format-limited)" in the DRIFT block, prints the
+  "Run again with --apply" advice only when actionable drift remains, and
+  a class-only pass exits 0 with a "Nothing actionable" note. On --apply,
+  `fl_residuals` split out of `verify_embedded`'s residuals BEFORE the
+  failure accounting: they print as the FORMAT-LIMITED block, never set
+  `ok = False`, never join the summary's failed counts, and a class-only
+  apply is DONE at exit 0 with the count appended. Exit contract: 0 means
+  no ACTIONABLE drift; a real residual (EPUB identifiers, wrong title,
+  anything outside the class) fails the run exactly as before, and the
+  mixed-pass split is pinned. The classification is per-ROW, never
+  per-batch: one scarred EPUB beside three format-limited azw3 rows still
+  exits 1.
+
 ## Programmer-facing contract notes (3.87.0 onward, the battery-and-mirror batch, issues #53/#54/#55)
 
 - **The PDF DRM verdict is three-valued, and the trailer is the

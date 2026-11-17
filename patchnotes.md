@@ -1,5 +1,62 @@
 # CalibreQuarry Patch Notes
 
+# 3.88.0 (2026-11-16)
+
+### The pipeline-flow batch (issues #60, #61, #62)
+
+Three fixes from the 2026-11-13 live import runs, one per phase: the
+gate that blocks, the ladder that declines, and the verify that
+overstates. Each changes what the operator sees or what a verb accepts;
+none changes where anything gated correctly before.
+
+- **A duplicate decision on a refused file no longer blocks phase 2
+  (issue #60, run.py).** The live 24-file batch carried a held-edition
+  duplicate (DJVU held, EPUB incoming of the same ISBN) whose screen
+  verdict already IS the resolution: the file stands outside the
+  approved list and the decision's detail names the match. The gate
+  refused to see it that way and blocked the whole import behind a
+  decision with no resolution vocabulary, so the only exit was a hand
+  edit plus a re-sign. The blockers filter now exempts a duplicate
+  decision whose file's manifest verdict is `duplicate_refused`; the
+  verdict, the match detail, and the approved exclusion remain the
+  durable record. A duplicate decision pointing at any other verdict
+  still blocks, fail-closed. Pinned by
+  `test_duplicate_refusal_is_its_own_resolution` beside the standing
+  open-decision pin.
+- **The cover ladder asks the book's own file before it renders
+  anything (issue #61, coversource.py).** Three azw3 imports were
+  declined by the ladder ("no declared EPUB cover, no PDF to render,
+  no covered sibling") while their own files carried publisher-supplied
+  covers that `ebook-meta --get-cover` extracts cleanly. New rung 2
+  (declared-epub, then own-file, then page1-render, sibling, url): for
+  AZW3/MOBI/AZW/PRC formats present on the book, in that priority
+  order, the binary extracts the embedded cover read-only and the
+  payload must sniff as JPEG/PNG; a miss contributes its reason to the
+  notes and the ladder continues exactly as before. The spawn is a
+  module seam (`_run_ebook_meta`); the mocked class pins the candidate,
+  the apply, the three decline shapes (no embedded cover, failed spawn,
+  non-image payload), and the format priority order; the live drill ran
+  the real binary against a converted azw3 and the written cover was
+  byte-identical to the source JPEG.
+- **reconcile classifies the azw3/mobi identifiers/series drift as
+  format-limited instead of advising an --apply that cannot work
+  (issue #62, reconcile_file_metadata.py).** calibredb embeds the
+  record, but the format's metadata block cannot carry the database's
+  identifier set (only isbn/asin types survive) or the series, so those
+  files re-diffed on every pass while the summary advised an action
+  with no effect and every azw3-bearing batch ended on a scary
+  "COMPLETED WITH ERRORS ... run again". The class is keyed on format
+  in {AZW3, MOBI} with every differing field within {identifiers,
+  series}: the checked line counts it separately ("N format-limited
+  (azw3/mobi identifiers/series; documented, not actionable)"), the
+  dry run's "run again with --apply" advice fires only for actionable
+  drift (a class-only pass exits 0 with a "Nothing actionable" note),
+  and on --apply the class lands in its own FORMAT-LIMITED block
+  instead of the RESIDUAL failure set; an apply over only this class is
+  DONE at exit 0 with the count named. Real residuals are untouched: an
+  EPUB that still drifts fails the run exactly as before, pinned
+  alongside the mixed-pass split.
+
 # 3.87.0 (2026-11-13)
 
 ### The phase-1 battery reads the file it is looking at (issues #53, #54, #55)

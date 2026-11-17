@@ -309,7 +309,9 @@ VERB_PROSE: dict[str, str] = {
     "cover-source": (
         "Source covers for every coverless book (the default target;\n"
         "--search/--ids narrow it) through one ladder, in order: the EPUB's\n"
-        "declared cover; a gated PDF page-1 render (150 DPI; declined when\n"
+        "declared cover; the book's own AZW3/MOBI file's embedded cover\n"
+        "(ebook-meta --get-cover; the payload must sniff JPEG/PNG); a gated\n"
+        "PDF page-1 render (150 DPI; declined when\n"
         "blank, when a document-mill banner marker sits on page 1, or when\n"
         "the render is landscape -- a likely cover spread -- unless\n"
         "--spread-crop takes the right half, measured from the render's\n"
