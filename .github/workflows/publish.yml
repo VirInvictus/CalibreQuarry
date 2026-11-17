@@ -90,9 +90,12 @@ jobs:
         # step (v3.87.0, 2026-11-13), and `gh release create` refuses with
         # HTTP 422 "Release.tag_name already exists". An existing Release
         # is a success here, not a failure -- the tag's verbatim message is
-        # either already rendered as the body or about to be.
+        # either already rendered as the body or about to be. The probe
+        # carries no --verify-tag: that flag belongs to `gh release
+        # create` and is unknown to `gh release view`, so the 2026-11-13
+        # guard always fell through and the v3.93.0 mint 422'd anyway.
         run: |
-          if gh release view "$GITHUB_REF_NAME" --verify-tag > /dev/null 2>&1; then
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             echo "Release $GITHUB_REF_NAME already exists; nothing to mint."
             exit 0
           fi
