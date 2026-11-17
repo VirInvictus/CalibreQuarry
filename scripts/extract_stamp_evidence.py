@@ -13,7 +13,11 @@ isbn_snips widened and copyright_snips added 3.76.0, issue #41):
   opf_ids                -- the EPUB OPF's dc:identifier values (<= 8)
   front                  -- the first pages' text: the first 4 spine
                             documents for an EPUB, `pdftotext` pages 1-4
-                            for a PDF; other formats carry no front
+                            for a PDF -- widened to pages 1-12 when that
+                            window carries no ISBN and no copyright
+                            evidence (issue #70: a print-scan's copyright
+                            leaf sorts at pages 5-10); other formats
+                            carry no front
   isbn_snips             -- ISBN-shaped snippets, labeled AND bare,
                             from the FULL text of those front documents
                             (<= 6); `front` stays the size-capped sample
@@ -171,9 +175,9 @@ def _run_ebook_meta(path: Path) -> subprocess.CompletedProcess:
     )
 
 
-def _run_pdftotext(path: Path) -> subprocess.CompletedProcess:
+def _run_pdftotext(path: Path, last: int = 4) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["pdftotext", "-f", "1", "-l", "4", str(path), "-"],
+        ["pdftotext", "-f", "1", "-l", str(last), str(path), "-"],
         capture_output=True,
         text=True,
         errors="replace",
@@ -255,6 +259,29 @@ def _pdf_front(path: Path) -> str:
     return re.sub(r"\s+", " ", proc.stdout)
 
 
+#: The widen arm's window (issue #70): a print-scan's copyright leaf
+#: sorts past the pages-1-4 window (live 2026-11-17: pages 5-10 in all
+#: five scans of the batch), so the empty-evidence read re-asks for
+#: pages 1-12. Poppler clamps a `-l` past the last page silently, so a
+#: shorter PDF is simply read whole.
+_PDF_WIDEN_LAST_PAGE = 12
+
+
+def _widen_pdf_front(path: Path) -> tuple[str | None, str | None]:
+    """(text, error) for the widen arm: pages 1-12's collapsed text, or
+    (None, reason) when the spawn fails -- the caller keeps the 1-4
+    window and names the reason in the row's error field."""
+    try:
+        proc = _run_pdftotext(path, _PDF_WIDEN_LAST_PAGE)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"pdftotext: {e}"
+    if proc.returncode != 0:
+        return None, (
+            f"pdftotext exited {proc.returncode}: {(proc.stderr or '').strip()[:120]}"
+        )
+    return re.sub(r"\s+", " ", proc.stdout), None
+
+
 def _seed(path: Path) -> tuple[dict | None, str | None]:
     """The ebook-meta display fields as the research seed. A read calibre
     itself refuses (a nonzero exit, or its own filename guess plus a
@@ -323,6 +350,19 @@ def _row(path: Path) -> dict:
             row["front"], row["opf_ids"], full_front = _epub_front(path)
         elif fmt == "pdf":
             full_front = _pdf_front(path)
+            # Issue #70: a print-scan's copyright leaf sorts past the
+            # 1-4 window. When that window carries no ISBN and no
+            # copyright evidence, one widen spawn re-reads pages 1-12
+            # and the scans below run over the wider text; a failed
+            # widen keeps the 1-4 window and names itself in the error.
+            if not _isbn_snips(full_front) and not _copyright_snips(full_front):
+                widened, reason = _widen_pdf_front(path)
+                if widened is None:
+                    row["error"] = (
+                        row["error"] + "; " if row["error"] else ""
+                    ) + f"widen: {reason}"
+                else:
+                    full_front = widened
             row["front"] = full_front[:_PDF_FRONT_CHARS]
     except Exception as e:  # one unreadable file never kills the run
         row["error"] = (row["error"] + "; " if row["error"] else "") + f"front: {e}"

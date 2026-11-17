@@ -1,5 +1,48 @@
 # CalibreQuarry Patch Notes
 
+# 3.93.0 (2026-11-17)
+
+### The evidence extractor widens past a late copyright leaf (issue #70)
+
+The 10-file cookbook batch (all z-lib scans/epubs) broke the
+stamp-research evidence feeder a different way than issue #41 did: all
+five print-scan PDFs came back `isbn_snips: []` because their copyright
+leaves sort past the extractor's `pdftotext` pages-1-4 window (live:
+pages 5, 8, 8, 8, 10), the thin-front census fired, and claw's research
+pass hunted each leaf by hand. The EPUBs were fine (the OPF/spine docs
+carry the metadata), so the gap was purely the PDF window. The fix is
+the audit_isbns doctrine (the window is not the verdict) applied to the
+feeder:
+
+- The pages-1-4 window stays the default read. When it yields no
+  `isbn_snips` AND no `copyright_snips`, one widen spawn re-reads
+  pages 1-12 and both snip scans run over the wider text; the `front`
+  sample still caps at 3000 characters from its head, so a rescued row
+  shows the leaf text that used to be invisible. Poppler clamps a `-l`
+  past the last page silently (verified live over a crafted 2-page
+  PDF), so a short PDF's widen is simply a whole-file read.
+- The both-empty gate is the recorded shape (the issue's own
+  condition): either evidence class in the window keeps it. A window
+  carrying only a First Edition line or only an ISBN never widens, so
+  books whose pages-1-4 evidence is complete cannot grow later-page
+  noise.
+- A failed widen is never a lost row: the 1-4 window stands (exactly
+  the pre-3.93.0 evidence) and the row's `error` names the arm
+  (`widen: pdftotext exited N: ...`), the same composition the front
+  failures use.
+- The row shape is untouched: the bare-list contract, the thin-front
+  census (which judges the post-widen front and quiets for the rows
+  the widen rescues), and every field keep their semantics. EPUBs
+  never widen; evidence past page 12 and the S&S rear-copyright spine
+  shape (taught in the phase-1 skill since the 2026-11-06 Angel Down
+  case) stay the named hand-scan classes.
+
+Tests: `TestExtractStampEvidence` gains the widen win (both spawn
+signatures pinned), the two no-widen guards (evidence in the window
+keeps it, either class alone), and the widen-failure degrade;
+`TestLivePdfWiden` drives real poppler over a crafted 8-page PDF whose
+leaf sorts at page 6 (skipUnless: CI has no pdftotext).
+
 # 3.92.0 (2026-11-17)
 
 ### The duplicate screen learns print-shop junk seeds (issue #68)

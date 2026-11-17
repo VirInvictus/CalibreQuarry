@@ -6481,6 +6481,182 @@ class TestExtractStampEvidence(unittest.TestCase):
             fresh = _load("extract_stamp_evidence")
         self.assertNotIn("_PROVENANCE_PATTERNS", fresh.__dict__)
 
+    def test_pdf_widen_fires_when_the_window_carries_no_evidence(self):
+        # Issue #70's live shape (the 2026-11-17 cookbook batch): a
+        # print-scan PDF whose copyright leaf sorts past the pages-1-4
+        # window (live: pages 5-10). When the first window yields no
+        # ISBN and no copyright evidence, one widen spawn re-reads
+        # pages 1-12 and the snip scans run over the wider text.
+        p = self.wave / "Late Leaf.pdf"
+        p.write_bytes(b"%PDF-1.4 stub")
+        empty = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="half title " * 30, stderr=""
+        )
+        leaf = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="half title " * 30 + "Copyright (c) 2024. First Edition: June 2024. "
+            "ISBN 978-0-306-40615-7. LCCN 2023948985",
+            stderr="",
+        )
+        with mock.patch.object(
+            extract_stamp_evidence, "_run_pdftotext", side_effect=[empty, leaf]
+        ) as m:
+            rc, out = self._run_main()
+        self.assertEqual(
+            [c.args for c in m.call_args_list],
+            [(p,), (p, extract_stamp_evidence._PDF_WIDEN_LAST_PAGE)],
+        )
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        self.assertIn("First Edition: June 2024", row["front"])
+        self.assertEqual(row["isbn_snips"], ["978-0-306-40615-7"])
+        self.assertIn("LCCN 2023948985", row["copyright_snips"])
+        self.assertIsNone(row["error"])
+
+    def test_pdf_no_widen_when_the_window_already_carries_evidence(self):
+        # Evidence in pages 1-4: one spawn, byte-identical to the
+        # pre-#70 contract (the window stays the default read).
+        (self.wave / "Rich Window.pdf").write_bytes(b"%PDF-1.4 stub")
+        rich = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="front matter " * 30 + "ISBN 978-0-306-40615-7",
+            stderr="",
+        )
+        with mock.patch.object(
+            extract_stamp_evidence, "_run_pdftotext", return_value=rich
+        ) as m:
+            rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(m.call_count, 1, "evidence in the window: no widen")
+        (row,) = self._rows()
+        self.assertEqual(row["isbn_snips"], ["978-0-306-40615-7"])
+        self.assertIsNone(row["error"])
+
+    def test_pdf_no_widen_on_a_copyright_only_window(self):
+        # The both-empty gate: either evidence class present in the
+        # window keeps it (the issue's condition is BOTH lists empty).
+        (self.wave / "Edition Only.pdf").write_bytes(b"%PDF-1.4 stub")
+        edition = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="front matter " * 30 + "First Edition: June 2024",
+            stderr="",
+        )
+        with mock.patch.object(
+            extract_stamp_evidence, "_run_pdftotext", return_value=edition
+        ) as m:
+            rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(m.call_count, 1)
+        (row,) = self._rows()
+        self.assertEqual(row["copyright_snips"], ["First Edition: June 2024"])
+
+    def test_pdf_widen_failure_keeps_the_window_and_names_itself(self):
+        # A failed widen is never a lost row: the 1-4 window stands
+        # (exactly the pre-#70 evidence) and the error names the arm.
+        (self.wave / "Widen Boom.pdf").write_bytes(b"%PDF-1.4 stub")
+        empty = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="half title " * 30, stderr=""
+        )
+        boom = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="Syntax Error: no trailer\n"
+        )
+        with mock.patch.object(
+            extract_stamp_evidence, "_run_pdftotext", side_effect=[empty, boom]
+        ):
+            rc, out = self._run_main()
+        self.assertEqual(rc, 0)
+        (row,) = self._rows()
+        self.assertIn("half title", row["front"])
+        self.assertEqual(row["isbn_snips"], [])
+        self.assertIn("widen:", row["error"])
+        self.assertIn("pdftotext exited 1", row["error"])
+
+
+class TestLivePdfWiden(unittest.TestCase):
+    """The widen arm over the real poppler (issue #70): a crafted 8-page
+    PDF whose copyright leaf sorts at page 6, past the pages-1-4
+    window. skipUnless: CI has no pdftotext."""
+
+    SEED = "Title            : Stub\nAuthor(s)        : Stub Author\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.wave = Path(self.tmp.name) / "wave"
+        self.wave.mkdir()
+        self.out_dir = Path(self.tmp.name) / "out"
+        self.out_dir.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _make_pdf(path, page_texts):
+        """A minimal N-page PDF (poppler rebuilds the missing xref);
+        page texts must be paren-free (PDF string literals)."""
+        n = len(page_texts)
+        font_id = 3 + 2 * n
+        objs = [
+            "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+            f"2 0 obj<</Type/Pages/Kids[{' '.join(f'{3 + i} 0 R' for i in range(n))}]"
+            f"/Count {n}>>endobj",
+        ]
+        for i, text in enumerate(page_texts):
+            stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET"
+            objs.append(
+                f"{3 + i} 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+                f"/Contents {3 + n + i} 0 R/Resources<</Font<</F1 {font_id} 0 R>>>>>>endobj"
+            )
+            objs.append(
+                f"{3 + n + i} 0 obj<</Length {len(stream)}>>stream\n"
+                f"{stream}\nendstream\nendobj"
+            )
+        objs.append(
+            f"{font_id} 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj"
+        )
+        path.write_text(
+            "%PDF-1.4\n"
+            + "\n".join(objs)
+            + f"\ntrailer<</Root 1 0 R/Size {font_id + 1}>>\n%%EOF\n"
+        )
+
+    @unittest.skipUnless(shutil.which("pdftotext"), "pdftotext not installed")
+    def test_widen_rescues_a_late_copyright_leaf(self):
+        pad = "prose to keep the census quiet. " * 8
+        texts = [f"page {i} filler. {pad}" for i in range(1, 9)]
+        texts[5] = (
+            "page 6 copyright leaf. First Edition: June 2024. "
+            "ISBN 978-0-306-40615-7. " + pad
+        )
+        self._make_pdf(self.wave / "Late Leaf.pdf", texts)
+        argv = [
+            "extract_stamp_evidence",
+            str(self.wave),
+            "--out",
+            str(self.out_dir / "evidence.json"),
+        ]
+        seed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=self.SEED, stderr=""
+        )
+        buf = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.object(
+                extract_stamp_evidence, "_run_ebook_meta", return_value=seed
+            ),
+            contextlib.redirect_stdout(buf),
+            contextlib.redirect_stderr(buf),
+        ):
+            rc = extract_stamp_evidence.main()
+        self.assertEqual(rc, 0, buf.getvalue())
+        (row,) = json.loads((self.out_dir / "evidence.json").read_text())
+        self.assertEqual(row["isbn_snips"], ["978-0-306-40615-7"])
+        self.assertIn("First Edition: June 2024", row["copyright_snips"])
+        self.assertIn("page 6 copyright leaf", row["front"])
+        self.assertIsNone(row["error"])
+
 
 drive_stamps = _load("drive_stamps")
 

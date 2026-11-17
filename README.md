@@ -1029,7 +1029,9 @@ Exit codes: `0` completed, `1` aborted after repeated network failure or a write
 One JSON row per file for the phase-1 research pass (the feeder the
 research briefs and slice files read): `file`/`path`/`fmt`, `seed` (the
 raw `ebook-meta` display fields, ISBN/identifiers included), `opf_ids`,
-`front` (first 4 EPUB spine documents or `pdftotext` pages 1-4),
+`front` (first 4 EPUB spine documents or `pdftotext` pages 1-4; a PDF
+window that carries no ISBN and no copyright evidence widens once to
+pages 1-12, because print-scan copyright leaves sort at pages 5-10),
 `isbn_snips` (copyright-page ISBN shapes), `provenance` (the same seeder
 phase 1 uses), and a per-file `error` that never stops the run. The OPF
 manifest parses with ElementTree, so `<item>` attribute order cannot

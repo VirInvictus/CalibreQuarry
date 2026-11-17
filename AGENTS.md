@@ -7,6 +7,38 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 **CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). The 2026-11-13 live audit's two named open follow-ups are closed as of 3.89.0: issue #57 (the compact overview wraps instead of truncating, one "also:" block, the exit legend on the surface) and issue #58 (`topic_details` in `--help json` carries the exit contracts and gate annotations; additive-only, `topics`/`groups` untouched).
 
+## Programmer-facing contract notes (3.93.0 onward, the PDF front-window widen, issue #70)
+
+- **The pages-1-4 window stays the default, and the widen arm fires
+  only on a both-empty evidence window.** `_row`'s PDF branch scans
+  the 1-4 text first; when `_isbn_snips(text)` and
+  `_copyright_snips(text)` are BOTH empty,
+  `_widen_pdf_front(path)` re-runs the `_run_pdftotext` seam
+  (parameterized: `_run_pdftotext(path, last=4)`, so the pre-existing
+  argv pin still holds) with `_PDF_WIDEN_LAST_PAGE` (12), and the
+  widened text becomes the full front the snip scans and the
+  3000-char display sample read. Either evidence class present in
+  the window keeps it (the issue's own condition, pinned): a
+  copyright-only or ISBN-only window never widens, so complete 1-4
+  evidence cannot grow later-page noise.
+- **The widen failure is a kept window, not a lost row.**
+  `_widen_pdf_front` returns `(text, error)`; on any failure (a
+  nonzero rc, OSError, TimeoutExpired) the caller keeps the 1-4 text
+  and appends `widen: <reason>` to the row's error with the same
+  composition the front failures use. Poppler clamps a `-l` past the
+  last page silently (verified live over a crafted 2-page PDF), so a
+  short PDF's widen is simply a whole-file read.
+- **The row shape is untouched.** The bare-list contract, the
+  thin-front census (which judges the post-widen front and quiets
+  for rescued rows), EPUBs (never widened; the S&S rear-copyright
+  spine shape stays the phase-1 skill's hand-scan class), and every
+  field keep their semantics. Named deferred shapes: evidence past
+  page 12 stays hand-scan. Tests: `TestExtractStampEvidence`'s widen
+  win (both spawn signatures pinned through the `(path, last)` seam),
+  the two no-widen guards, the widen-failure degrade, and
+  `TestLivePdfWiden` over real poppler (skipUnless: CI has no
+  pdftotext).
+
 ## Programmer-facing contract notes (3.92.0 onward, the junk-seed census, issue #68)
 
 - **Two disarms ride the refused state, below the identifier binds.**
