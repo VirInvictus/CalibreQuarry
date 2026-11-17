@@ -27,8 +27,9 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   `_embedded_cover(path, workdir)`, which spawns
   `ebook-meta <file> --get-cover <workdir>/owncover` (the `_run_ebook_meta`
   module seam, 120s), reads the written file, and accepts it only when
-  non-empty AND `sniff_image_format` says JPEG/PNG; any miss (no binary on
-  PATH, spawn failure with the tool's last stderr line, no file written,
+  non-empty AND `sniff_image_format` says JPEG/PNG; any miss (a failed
+  spawn -- a missing binary lands here, the render rung's shape, there is
+  NO which() guard -- the tool's last stderr line, no file written,
   non-image payload) contributes a `{FMT}: {reason}` note and the ladder
   continues exactly as before. The rung sits above page1-render on purpose:
   the publisher's embedded cover is the declared art, not a reconstruction,

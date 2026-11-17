@@ -32,12 +32,15 @@ none changes where anything gated correctly before.
   AZW3/MOBI/AZW/PRC formats present on the book, in that priority
   order, the binary extracts the embedded cover read-only and the
   payload must sniff as JPEG/PNG; a miss contributes its reason to the
-  notes and the ladder continues exactly as before. The spawn is a
-  module seam (`_run_ebook_meta`); the mocked class pins the candidate,
-  the apply, the three decline shapes (no embedded cover, failed spawn,
-  non-image payload), and the format priority order; the live drill ran
-  the real binary against a converted azw3 and the written cover was
-  byte-identical to the source JPEG.
+  notes and the ladder continues exactly as before (the spawn itself is
+  the only binary check, the render rung's shape: a machine without
+  ebook-meta declines with the OSError detail, it never crashes and CI
+  never needs the binary). The spawn is a module seam
+  (`_run_ebook_meta`); the mocked class pins the candidate, the apply,
+  the four decline shapes (missing binary, failed spawn, no embedded
+  cover, non-image payload), and the format priority order; the live
+  drill ran the real binary against a converted azw3 and the written
+  cover was byte-identical to the source JPEG.
 - **reconcile classifies the azw3/mobi identifiers/series drift as
   format-limited instead of advising an --apply that cannot work
   (issue #62, reconcile_file_metadata.py).** calibredb embeds the

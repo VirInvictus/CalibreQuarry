@@ -61,7 +61,6 @@ import html
 import json
 import os
 import re
-import shutil
 import struct
 import subprocess
 import sys
@@ -199,9 +198,10 @@ def _render_page1(pdf: str, workdir: str, crop: tuple[int, int] | None = None):
 
 # --- the own-file extract (MOBI-family rung) --------------------------
 
-#: The spawns are module seams: the tests mock this one, the live class
-#: exercises the real binary (skipUnless it is installed; CI has no
-#: calibre tools).
+#: The spawns are module seams: the tests mock this one (CI has no
+#: calibre binaries, and the spawn itself is the only binary check --
+#: the render rung's shape; a missing ebook-meta is a decline detail,
+#: never a crash).
 
 #: The MOBI-family containers whose embedded cover IS the declared art
 #: (the publisher put it there), most-specific first (issue #61).
@@ -217,12 +217,10 @@ def _run_ebook_meta(cmd: list[str]) -> subprocess.CompletedProcess:
 def _embedded_cover(fmt_path: str, workdir: str) -> tuple[bytes | None, str]:
     """One own-file extraction: `ebook-meta <file> --get-cover` into the
     workdir, read back and sniffed (issue #61). (bytes, "") on success;
-    (None, detail) on any miss -- a missing binary, a failed spawn, a
-    file with no embedded cover, or a payload that is not a JPEG/PNG.
-    Read-only over the book's format file; the ladder continues on a
-    miss."""
-    if shutil.which("ebook-meta") is None:
-        return None, "ebook-meta not on PATH"
+    (None, detail) on any miss -- a failed spawn (a missing binary lands
+    here, the render rung's shape), a file with no embedded cover, or a
+    payload that is not a JPEG/PNG. Read-only over the book's format
+    file; the ladder continues on a miss."""
     target = os.path.join(workdir, "owncover")
     try:
         os.unlink(target)

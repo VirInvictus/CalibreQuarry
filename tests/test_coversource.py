@@ -585,6 +585,20 @@ class TestOwnFileRung(CoverSourceCase):
         self.assertIn("declined", out)
         self.assertIn("extracted payload is not a JPEG/PNG", out)
 
+    def test_missing_binary_declines_like_the_render_rung(self):
+        # CI has no calibre binaries; the spawn itself is the only
+        # binary check (the render rung's shape): the OSError arm names
+        # it as a decline detail and the ladder never crashes.
+        with mock.patch(
+            "cquarry_cli.coversource._run_ebook_meta",
+            side_effect=FileNotFoundError(2, "No such file or directory"),
+        ):
+            _code, out, _ = self.cover(
+                "run", "cover-source", "--ids", "4", "--db", str(self.db_path)
+            )
+        self.assertIn("declined", out)
+        self.assertIn("ebook-meta failed: [Errno 2]", out)
+
     def test_family_priority_order_is_pinned(self):
         self.assertEqual(coversource._OWN_FILE_FORMATS, ("AZW3", "MOBI", "AZW", "PRC"))
 
