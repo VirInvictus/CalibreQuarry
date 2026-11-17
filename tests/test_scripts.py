@@ -955,6 +955,30 @@ class TestScreenDuplicateClassify(unittest.TestCase):
         # works; the same trailing-ordinal semantics now cover romans.
         self._check("Foo: Bar I", "Foo: Bar II", "volume_sibling")
 
+    def test_colonless_roman_volume_tokens_are_volume_siblings(self):
+        # Issue #63: _EDITION_TOKEN stripped the arabic half alone, so a
+        # COLONLESS roman pair kept its volume words inside the base, the
+        # two bases stayed unequal, and the annotation gate (which needs
+        # base equality) never fired -- exactly the pair the gate's own
+        # comment promises ("Vol I" vs "Vol II"). The strip now matches
+        # _ANN_TOKEN's arabic-or-roman alternation, so the bases strip
+        # equal and the gate reads what it says.
+        self._check("Dune Book I", "Dune Book II", "volume_sibling")
+        self._check(
+            "Moral Letters to Lucilius. Volume I",
+            "Moral Letters to Lucilius. Volume II",
+            "volume_sibling",
+        )
+        self._check("The Sweep Vol. II", "The Sweep Vol. III", "volume_sibling")
+        self._check("Saga Part IV", "Saga Part V", "volume_sibling")
+
+    def test_mixed_arabic_roman_volume_spellings_stay_silent(self):
+        # Same-value spellings stay the recorded no-match: the
+        # annotations agree on the parsed value, and the arabic
+        # signature's one-sided silence (the Wandering-Inn flood guard)
+        # keeps the pair quiet.
+        self._check("Dune Book I", "Dune Book 1", None)
+
     def test_one_sided_base_ordinal_stays_silent(self):
         # One-sided declarations are the gap-fill silence the signature
         # gate keeps (the Wandering-Inn flood guard): the bare-base

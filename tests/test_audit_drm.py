@@ -175,6 +175,113 @@ class PdfTests(unittest.TestCase):
         self.assertEqual(v.status, drm.DRM)
         self.assertEqual(v.kind, "Adobe ADEPT")
 
+    def _incrementally_decrypted(
+        self, name="incr.pdf", encrypt_old=True, encrypt_new=False
+    ):
+        """The issue-#56 fixture: an encrypted-shape body (handler dict +
+        trailer WITH /Encrypt) followed by a small appended update (new
+        object, new xref, its own trailer, last startxref naming the
+        NEW xref). pypdf-style script decryptors append like this;
+        qpdf rewrites fully and is unaffected. The old trailer sits
+        mid-file, inside any tail window; the NEW trailer's /Encrypt is
+        what a live lock's reader would find."""
+        part1 = (
+            b"%PDF-1.6\n"
+            b"5 0 obj<< /Filter /EBX_HANDLER /V 2 >>endobj\n"
+            b"4 0 obj<< /Type /Catalog >>endobj\n"
+        )
+        xref1_off = len(part1)
+        old_encrypt = b" /Encrypt 5 0 R" if encrypt_old else b""
+        part2 = (
+            b"xref\n0 5\n0000000000 65535 f \n"
+            b"trailer<< /Size 5 /Root 4 0 R%s >>\n"
+            % old_encrypt
+            + b"startxref\n%d\n%%%%EOF\n" % xref1_off
+        )
+        part3 = b"6 0 obj<< /Type /Catalog >>endobj\n"
+        xref2_off = len(part1) + len(part2) + len(part3)
+        new_encrypt = b" /Encrypt 5 0 R" if encrypt_new else b""
+        part4 = (
+            b"xref\n0 6\n0000000000 65535 f \n"
+            b"trailer<< /Size 6 /Root 6 0 R%s >>\n"
+            % new_encrypt
+            + b"startxref\n%d\n%%%%EOF\n" % xref2_off
+        )
+        return self._pdf(name, part1 + part2 + part3 + part4)
+
+    def test_incrementally_decrypted_file_is_residue(self):
+        # Issue #56's live shape: the file was decrypted by an appended
+        # incremental update, so the OLD /Encrypt trailer survives
+        # mid-file. The whole-tail window (the pre-#56 check) read the
+        # stale reference and quarantined a healable file as a live
+        # lock; the anchored read judges the dict the LAST startxref
+        # names, which carries no /Encrypt, so the verdict is the
+        # residue heal.
+        p = self._incrementally_decrypted()
+        v = drm.classify_pdf(p)
+        self.assertEqual(v.status, drm.DRM_RESIDUE)
+        self.assertFalse(v.is_drm)
+
+    def test_appended_update_on_a_live_lock_stays_drm(self):
+        # The conservative direction must not move: a real
+        # encryption-aware writer keeps /Encrypt in the appended
+        # update's own trailer (a reader finds the dict only from the
+        # live trailer), and the anchored read still says DRM.
+        p = self._incrementally_decrypted(encrypt_new=True, name="live.pdf")
+        v = drm.classify_pdf(p)
+        self.assertEqual(v.status, drm.DRM)
+
+    def test_xref_stream_encrypt_is_drm(self):
+        # The modern shape: no ``trailer`` keyword anywhere; the
+        # encryption reference rides the xref STREAM object's own dict,
+        # which is what the anchored read finds when ``trailer``
+        # misses.
+        body = (
+            b"%PDF-1.7\n"
+            b"5 0 obj<< /Filter /EBX_HANDLER >>endobj\n"
+            b"4 0 obj<< /Type /Catalog >>endobj\n"
+            b"7 0 obj<< /Type /XRef /Size 8 /Root 4 0 R /Encrypt 5 0 R"
+            b" /W [1 1 1] /Length 12>>stream\n0000000000ff\n"
+            b"endstream\nendobj\nstartxref\n118\n%%EOF\n"
+        )
+        # Point startxref at the real "7 0 obj" offset.
+        off = body.index(b"7 0 obj")
+        body = body.replace(b"startxref\n118", b"startxref\n%d" % off)
+        p = self._pdf("xrefstream.pdf", body)
+        v = drm.classify_pdf(p)
+        self.assertEqual(v.status, drm.DRM)
+
+    def test_xref_stream_decrypted_is_residue(self):
+        # The same shape after a pypdf-style full decrypt that left the
+        # handler dict unreferenced: no /Encrypt in the live xref
+        # stream's dict -> residue, not a lock.
+        body = (
+            b"%PDF-1.7\n"
+            b"5 0 obj<< /Filter /EBX_HANDLER >>endobj\n"
+            b"4 0 obj<< /Type /Catalog >>endobj\n"
+            b"7 0 obj<< /Type /XRef /Size 8 /Root 4 0 R"
+            b" /W [1 1 1] /Length 12>>stream\n0000000000ff\n"
+            b"endstream\nendobj\nstartxref\n118\n%%EOF\n"
+        )
+        off = body.index(b"7 0 obj")
+        body = body.replace(b"startxref\n118", b"startxref\n%d" % off)
+        p = self._pdf("xrefstream2.pdf", body)
+        v = drm.classify_pdf(p)
+        self.assertEqual(v.status, drm.DRM_RESIDUE)
+
+    def test_damaged_startxref_falls_back_to_the_window(self):
+        # A garbage startxref (offset outside the file) defeats the
+        # anchored parse by contract: the whole-tail substring answers,
+        # exactly what the pre-#56 code always said, so a damaged file
+        # never changes class.
+        p = self._pdf(
+            "damaged.pdf",
+            b"%PDF-1.6\n/Filter /EBX_HANDLER\ntrailer<< /Encrypt 5 0 R >>\n"
+            b"startxref\n99999999\n%%EOF",
+        )
+        v = drm.classify_pdf(p)
+        self.assertEqual(v.status, drm.DRM)
+
     def test_orphaned_adept_dict_is_residue(self):
         # Issue #53's live shape (the Tea book, 2026-11-11): a complete
         # ADEPT encryption dictionary survives in the xref space but the

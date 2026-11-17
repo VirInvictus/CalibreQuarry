@@ -649,10 +649,16 @@ def diff_fields(db: dict, fm: dict[str, str], fmt: str) -> list[str]:
 
 
 def calibre_running() -> bool:
+    # The anchored prefix covers the GUI, calibre-debug, and the
+    # calibre-parallel job workers, whose comm truncates to
+    # "calibre-paralle" -- a full-name -x match cannot ever see them, so it
+    # under-refused while a worker touched the DB (issue #65; this probe
+    # was missed when the shape was standardized across the codebase).
+    # Names only, never command lines (-f once false-positived on args).
     try:
         return (
             subprocess.run(
-                ["pgrep", "-x", "calibre"], capture_output=True, timeout=PGREP_TIMEOUT
+                ["pgrep", "^calibre"], capture_output=True, timeout=PGREP_TIMEOUT
             ).returncode
             == 0
         )

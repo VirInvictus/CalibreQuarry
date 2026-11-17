@@ -354,7 +354,17 @@ def _fold(text: str) -> str:
     return "".join(c for c in lowered if not unicodedata.combining(c)).casefold()
 
 
-_EDITION_TOKEN = re.compile(r"\b(vol|volume|part|pt|book|bd)\.?\s*\d+\b", re.IGNORECASE)
+#: The strip runs wherever the annotations could fire: same token words,
+#: same arabic-or-roman alternation as _ANN_TOKEN (the token word anchors
+#: the match, so word look-alikes stay out the same way). _EDITION_TOKEN
+#: carried the arabic half alone until issue #63: "Dune Book I" vs
+#: "Dune Book II" stripped nothing, their bases stayed unequal, and the
+#: annotation rules' volume_sibling verdict (which needs base equality)
+#: never fired -- the comment above the gate promised "Vol I" vs "Vol II"
+#: and the strip made it false.
+_EDITION_TOKEN = re.compile(
+    r"\b(vol|volume|part|pt|book|bd)\.?\s*(\d+|[ivxlcdm]+)\b", re.IGNORECASE
+)
 # The store-front tags classics rips carry in the title (issue #13).
 # Paren-scoped on purpose: an imprint named in prose is not a tag. The
 # set grows as new rips surface new tags. Every title comparison in the

@@ -824,6 +824,33 @@ class TestVerifyWiring(unittest.TestCase):
         self.assertEqual(rec["identifiers"]["isbn"], "9780000000001")
 
 
+class TestCalibreRunningGuard(unittest.TestCase):
+    """Issue #65: this script's calibre_running probe was the one
+    calibre_running() the 2026-10 standardization missed -- an exact-name
+    `-x calibre` can never match the calibre-parallel job workers, whose
+    comm truncates to "calibre-paralle", so --apply under-refused while a
+    worker touched the DB. The anchored prefix is the fetch_library_codes
+    shape; these tests pin the same two properties its guard class pins:
+    names only, never command lines, and the prefix that reaches the
+    workers."""
+
+    def test_probe_is_name_only_never_args(self):
+        with mock.patch.object(
+            rfm.subprocess, "run", return_value=mock.Mock(returncode=1)
+        ) as run:
+            self.assertFalse(rfm.calibre_running())
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[0], "pgrep")
+        self.assertNotIn("-f", argv)
+
+    def test_probe_pattern_reaches_the_parallel_workers(self):
+        with mock.patch.object(
+            rfm.subprocess, "run", return_value=mock.Mock(returncode=0)
+        ) as run:
+            self.assertTrue(rfm.calibre_running())
+        self.assertTrue(run.call_args.args[0][-1].startswith("^calibre"))
+
+
 class TestVersionFloor(unittest.TestCase):
     """Issue #20's strong fix: main() refuses on an imported cquarry_cli
     below the floor the script's EPUB passes assume (3.75.0, the NCX

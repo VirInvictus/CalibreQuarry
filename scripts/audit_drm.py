@@ -64,6 +64,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import csv
 import os
+import re
 import shutil
 import sqlite3
 import struct
@@ -373,15 +374,91 @@ def classify_pdf(path: Path) -> Verdict:
 
 
 def _pdf_has_encrypt_dict(path: Path) -> bool:
-    """Cheap check for a trailer /Encrypt reference near the file's end."""
+    """Cheap check for a trailer /Encrypt reference at the xref the file
+    actually ends on (issue #56).
+
+    The previous check was a whole-tail substring over the last 64 KiB,
+    and an INCREMENTALLY-decrypted file defeats it: the decryption
+    appended a small update (new xref, new trailer without /Encrypt), so
+    the OLD trailer -- which still carries /Encrypt -- sits mid-file
+    inside the window and the decrypted file read as a live lock. The
+    anchored read parses the file's LAST ``startxref``, reads the window
+    AT that offset, and judges /Encrypt membership in the dict that
+    lives there: the classic shape's ``trailer`` dict, or the xref
+    stream object's own dict when no ``trailer`` keyword exists. Any
+    unparseable shape (no startxref, garbage offset, offset outside the
+    file, no dict found) falls back to the whole-tail substring, the
+    answer the pre-#56 code always gave, so a damaged file never
+    classifies differently than it did before."""
     try:
         with path.open("rb") as f:
             f.seek(0, os.SEEK_END)
             size = f.tell()
             f.seek(max(0, size - (64 << 10)))
-            return b"/Encrypt" in f.read()
+            tail = f.read()
     except OSError:
         return False
+    verdict = _encrypt_at_live_trailer(path, size, tail)
+    if verdict is not None:
+        return verdict
+    return b"/Encrypt" in tail
+
+
+def _encrypt_at_live_trailer(path: Path, size: int, tail: bytes) -> bool | None:
+    """/Encrypt at the dict the last ``startxref`` names: True, False, or
+    None when the shape defeats the parse (the caller falls back to the
+    whole-tail substring)."""
+    idx = tail.rfind(b"startxref")
+    if idx < 0:
+        return None
+    m = re.match(rb"\s*(\d+)", tail[idx + len(b"startxref") :])
+    if not m:
+        return None
+    try:
+        offset = int(m.group(1))
+    except ValueError:
+        return None
+    if not 0 <= offset < size:
+        return None
+    try:
+        with path.open("rb") as f:
+            f.seek(offset)
+            window = f.read(64 << 10)
+    except OSError:
+        return None
+    # Classic shape: the xref table is followed by the trailer dict.
+    # Xref-stream shape: no ``trailer`` keyword exists; the dict belongs
+    # to the stream object whose header sits at the offset.
+    for marker in (b"trailer", b"obj"):
+        pos = window.find(marker)
+        if pos >= 0:
+            span = _first_dict_span(window[pos + len(marker) :])
+            if span:
+                return b"/Encrypt" in span
+    return None
+
+
+def _first_dict_span(data: bytes) -> bytes:
+    """The first balanced ``<< ... >>`` dictionary span (nested dicts
+    tracked), or b"" when the data carries none."""
+    start = data.find(b"<<")
+    if start < 0:
+        return b""
+    depth = 0
+    i = start
+    while i + 1 < len(data):
+        pair = data[i : i + 2]
+        if pair == b"<<":
+            depth += 1
+            i += 2
+        elif pair == b">>":
+            depth -= 1
+            i += 2
+            if depth == 0:
+                return data[start:i]
+        else:
+            i += 1
+    return b""
 
 
 # --------------------------------------------------------------------------- #
