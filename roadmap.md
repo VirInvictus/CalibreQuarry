@@ -346,7 +346,8 @@ never a core read API here.
       workspace catalog. Its AGENTS.md carries the lane rules and the one-way
       import rule. The monorepo is also the lane's first dogfood source: `cquarry
       plugin add` against its own git URL installs all three POCs, the flow every
-      third-party source repeats after it.
+      third-party source repeats after it. Each POC manifest carries the floor
+      declarations, the field's first consumers.
 
 ### The host: the plugin system core (the x.0 headline; ships before any POC)
 
@@ -366,10 +367,18 @@ rather than merely convenient.
 - [ ] **The manifest contract**: every plugin declares itself in a manifest at its
       package root (name, version, api_version, license, capabilities:
       read|write|network, entry point, a human description, and upstream
-      provenance for derived plugins: source repo, derived files, attribution).
-      api_version is a host floor the engine refuses fail-closed naming both
-      versions (the cquarry floor idiom), which is also how the host survives its
-      own API evolution: a stale plugin from an updated repo degrades to a
+      provenance for derived plugins: source repo, derived files, attribution)
+      PLUS the dependency floors ruled into the contract (Brandon, 2026-11-21):
+      a minimum supported cquarry version and a minimum supported calibrequarry
+      version, declared explicitly, never inherited or defaulted. ALL THREE
+      version gates check fail-closed at install, update, and load, each naming
+      the version found, the floor required, and the fix (the floor_refusal
+      idiom): api_version is the host plugin-API contract; the cquarry floor is
+      judged against the ENGINE THE PROCESS ACTUALLY IMPORTED (sys.modules
+      __version__ first, the version_guard.py honest-source rule, never dist
+      metadata that can lag a checkout); the calibrequarry floor against the
+      running host. Together they are how the host survives its own API
+      evolution: a stale plugin from an updated repo degrades to a
       refused-with-reason line, never a traceback.
 - [ ] **`cquarry plugin add <git-url-or-path>`**: clones the repo into the cache
       (a local path registers without cloning), discovers manifests, and
@@ -386,14 +395,19 @@ rather than merely convenient.
 - [ ] **`cquarry plugin list [--format json]`**: the registry rendered: sources
       with their upstream URL and last-synced commit; per plugin the version,
       capabilities, approval state, payload-hash prefix, and providing source; per
-      source the update state (up to date / behind / unreachable). The
+      source the update state (up to date / behind / unreachable). A plugin
+      whose floors exceed the running host or engine renders BLOCKED with the
+      reason, visible and explainable, never installed-and-broken. The
       machine-surface house rule applies.
 - [ ] **`cquarry plugin update [name ... | --all]`**: per source: fetch, name the
       commit delta, re-read manifests, compare payload hashes per plugin. An
       unchanged plugin is a no-op line; a changed READ-ONLY plugin updates in
       place with the version delta named; a changed WRITE-CAPABLE plugin re-runs
       the verify harness and STOPS at the approval gate (the registry's re-gating
-      rule IS the update-safety mechanism; no flag bypasses it). Plugins newly
+      rule IS the update-safety mechanism; no flag bypasses it). A changed plugin
+      whose raised floors exceed the running host or engine refuses THAT plugin
+      alone naming the upgrade path (cquarry first, then calibrequarry), the rest
+      unaffected (the floor refusal at the update door). Plugins newly
       appearing in a known multi source are reported as available, never
       auto-installed. Per-source failure isolation: one dead repo never blocks
       the rest, the survivors complete, exit 1 names the failures (the news
@@ -566,6 +580,15 @@ rather than merely convenient.
   and the POCs are 1:1 parity ports: every crosswalk row ports, GUI idioms map to
   named CLI twins, row deletion and the saved-regex search joined scope behind the
   gates, and deviations are recorded, never silent.
+- **The plugin-lane rulings, amended 2026-11-21 (the version-floor ruling):** a
+  plugin manifest declares its minimum supported cquarry AND calibrequarry
+  versions explicitly beside api_version, never inherited or defaulted; all
+  three gates check fail-closed at install, update, and load naming found,
+  floor, and fix (the floor_refusal idiom), the cquarry floor judged against
+  the engine the process actually imported (the version_guard.py honest-source
+  rule, never dist metadata), updates that raise floors past the running stack
+  refusing that plugin alone with the upgrade path named, and plugin list
+  rendering floor-blocked plugins as blocked-with-reason.
 
 - **The "Author - Title" stamp convention** (decided 2026-09-10; cited by
   tests/test_run.py): the stamp parser reads "Author - Title", the direction the real
