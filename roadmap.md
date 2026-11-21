@@ -6,7 +6,8 @@ What's done, what's next. Updated as of v3.93.0.
 sweeps, and every audit wave are shipped; their full findings-ledger text is
 preserved in git at the tree of commit 0d9b45f (the last full ledger) and the
 release-by-release record is `patchnotes.md`. This file keeps the ledger, the
-open work, the records that live nowhere else, and Phase 20.
+open work, the records that live nowhere else, and the open phase blocks
+(Phase 20, Phase 21).
 
 Standing rules, unchanged:
 
@@ -264,7 +265,199 @@ out-of-tree backups where rows change, dry-run default, the exit 0/1/2 contract)
       open box (Brandon's hands), and the TUI set-write batch session stays
       GATED.
 
+## Phase 21: the CQ plugin system lane (opened 2026-11-21)
+
+Brandon opened the plugin program on 2026-11-21 with the release ruling: the next
+x.0's headline feature is a **plugin system for CalibreQuarry**, and the three named
+calibre plugins are the proof-of-concept ports that prove it. One upstream carries all
+three: kiwidude68/calibre_plugins (Quality Check, Extract ISBN, Find Duplicates;
+GPL-3 per its LICENSE.md; author kiwidude, Grant Drake; Charles Haley's
+cbhaley/my_calibre_plugins holds only a Quality Check fork he maintained and returned
+to kiwidude68, slated for deletion upstream, so it is not a source of truth). In this
+lane "plugin" means a CQ plugin; calibre's own plugins stay orchestration targets
+through the Phase 20 `run customize` verb.
+
+**The licensing compromise (Brandon's ruling, 2026-11-21):** the host stays MIT; the
+plugins ship as GPL-3 packages in their own monorepo, VirInvictus/cquarry-plugins
+(never inside this repo: GPL code here would force the whole repo GPL). Inside a
+GPL-3 plugin, deriving from upstream GPL-3 code is legal with attribution carried, so
+the POCs are ports, not clean-room reimplementations. The import boundary is one-way:
+plugins depend on the host API; the core never imports plugin code; no GPL bytes ever
+enter the MIT repos.
+
+**The capability model (Brandon's ruling, 2026-11-21):** plugins declare capabilities
+(read is the default; write; network declared-and-logged), and the engine runs a test
+run at install time, custom-written so the operator tests what they want, and asks
+approval before a writing plugin is added. The NON-NEGOTIABLES and the write rails
+are enforced host-side at the seams (cquarry.write / writeops), so they hold at every
+door, plugins included. **Trust-boundary honesty, on the record from day one:** Python
+plugins load in-process; the gate is procedural (approval, the hash-pinned approvals
+registry, the rails, the records), not a security sandbox.
+
+**Lane rules:** each box ships its own release (house style); the host core ships
+before any POC; extract-isbn ships first (Brandon's ship-order ruling). The
+frontend-only split is unchanged: matchers, checks, and fixes are plugin-side code
+consuming host-passed reads; anything a plugin needs that only the engine can supply
+becomes a cquarry adoption box (the 1.29.x precedent), never a core read API here.
+
+### Pre-work (before any plugin code)
+
+- [ ] **Reference clone**: clone kiwidude68/calibre_plugins into ~/.gitrepos/ under
+      the read-only-by-policy convention (never edit; the hyprland-wiki precedent)
+      and add its workspace-catalog row. Record in the clone's sync notes: the three
+      folders, current versions (find_duplicates v1.10.11 and extract_isbn v1.6.7
+      per the calibre plugin index as of 2026-11-21; quality_check's current
+      kiwidude version re-verified live; the returned chaley fork sat at 1.12.0),
+      and each plugin's declared calibre floor.
+- [ ] **Source inventory crosswalk**: read the three folders and enumerate every
+      check, matcher, option, and fix into one crosswalk table (the parity-ledger
+      idiom), each row disposed as POC scope, deferred, or declined with a reason.
+      Pin verbatim as compatibility targets: Extract ISBN's scan shape (PDFs: first
+      10 pages then last 5 in reverse; other formats: leading files, then trailing
+      in reverse, then the rest; ISBN-13 prefixes 977/978/979 with the
+      config-extensible list; first hit stops; the identical-or-missing failure
+      class) and Find Duplicates' surface (per-field matcher ladder
+      Identical/Similar/Soundex/Fuzzy/Ignore, Binary Compare over byte-identical
+      formats, Identifier compare, the cross-library mode, per-library exemptions,
+      bulk rename of metadata variations). Quality Check's battery recorded by
+      family (cover size/dimensions; the ~30 ePub structure checks; ePub style;
+      MOBI/AZW EXTH checks; metadata quality; the saved-regex content search) with
+      its fix list and per-check exclusion lists.
+- [ ] **Licensing record**: the exact conventions every derived plugin must carry
+      (upstream copyright notice, the GPL-3 text, per-file headers where upstream
+      has them, a provenance note naming the derived files), and the one-way import
+      statement, in the monorepo's README and spec from day one.
+- [ ] **Repo bootstrap**: create VirInvictus/cquarry-plugins (GPL-3, the house
+      layout: README, spec, roadmap, patchnotes, LICENSE, single-source VERSION),
+      scaffold the three empty plugin packages, and register the repo in the
+      workspace catalog. Its AGENTS.md carries the lane rules and the one-way
+      import rule.
+
+### The host: the plugin system core (the x.0 headline; ships before any POC)
+
+- [ ] **Discovery and manifest**: a plugin is a directory or installed package
+      carrying a manifest (name, version, api_version, license, capabilities:
+      read|write|network, entry point, upstream provenance for derived plugins).
+      api_version is a host floor the engine refuses fail-closed naming both
+      versions (the cquarry floor idiom). `cquarry plugin list` reports what is
+      installed, from where, with capabilities and approval state; `cquarry plugin
+      remove` unregisters (the approvals entry stays as history).
+- [ ] **The capability gates**: read passes the host read API (the opened
+      ?mode=ro CalibreDB, the library root, a book id to format-paths resolver).
+      write passes ONLY the WriteGate: the sanctioned cquarry.write seams behind
+      the standing rails (dry-run default, out-of-tree timestamped backups, the
+      closed-Calibre pgrep guard, one batch() per pass, FORBIDDEN_COLUMNS refused
+      by label). network is declared and every fetch lands in the run report. No
+      raw connections and no subprocess writes through the gate: the seams are the
+      only write path, enforced host-side, so an honest or dishonest plugin cannot
+      skip them.
+- [ ] **The verify-and-approve harness** (Brandon's ruling verbatim: the engine
+      runs a test run, custom-written so the operator tests what they want, and
+      asks approval before a writing plugin is added): `cquarry plugin verify
+      <name>` runs the plugin's declared behaviors in dry-run/observe mode against
+      a scratch fixture library (tests/_fixtures build_library; the live-seam drill
+      recipe supplies the calibredb-built scratch), renders the report; the custom
+      half is an operator-suppliable per-plugin test spec (declared probes plus
+      assertions, defaulting to the host's generated probe set). Approval is
+      interactive and recorded in a plugin-approvals registry keyed by name,
+      version, capability set, and payload sha256 (the HMAC-sealed-manifest
+      idiom); any hash, version, or capability change re-gates. Read-only plugins
+      install without the prompt; write-capable ones cannot be added without a
+      recorded approval.
+- [ ] **Verb registration and the machine surface**: plugin verbs register
+      namespaced, collisions refused; `--help json` carries them with their gates
+      in topic_details, additive-only per the house rule; the exit 0/1/2 contract
+      and the human help pages extend unchanged.
+- [ ] **The TEST-ONLY fixture plugin**: a tiny example plugin shipped under tests/
+      (never a product plugin) exercising every gate: discovery, the read API, the
+      write gate's dry-run and apply, the approvals registry's re-hash refusal,
+      and the api_version floor. tests/test_plugins.py beside the suite; the
+      fixture is the template every POC's own test seams reuse.
+
+### POC 1: extract-isbn (first, by the ship-order ruling; read + write)
+
+- [ ] **The read side is the repo's own**: the plugin reuses audit_isbns/
+      extract_stamp_evidence's machinery through the host read API (importing this
+      repo's MIT code into the GPL plugin is legal and strictly better than
+      upstream's scan: the corroborated bare matcher, the whole-file rescan, the
+      typographic dashes, the checksum gates; upstream's window is the subset
+      audit_isbns already covers). Upstream's config surface (the extensible
+      prefix list) carried; upstream attribution kept where upstream code is
+      actually taken (expected: little to none on this plugin).
+- [ ] **The write adoption verb** (exact surface named at implementation):
+      confirmed printed ISBNs adopt into the isbn identifier through the
+      WriteGate. Policy is upstream's own dialog rule carried over: a stored
+      identical isbn skips; a stored DIFFERENT isbn skips and reports (a conflict
+      is reviewer-visible, never auto-overwritten); an absent isbn writes. Rails
+      standard: dry-run default, backup, closed-Calibre guard, exit 0/1/2. The
+      POC's real deliverable is the end-to-end approval drill (verify, approve,
+      dry run, apply, then the re-hash refusal after a payload change) proving
+      the write gate with the smallest possible surface.
+
+### POC 2: find-duplicates (read first; merge behind both gates)
+
+- [ ] **The matcher ladder port**: per-field Identical/Similar/Soundex/Fuzzy with
+      Ignore, Binary Compare (byte-identical format files), and Identifier
+      compare over the host read API; the matchers are plugin-side code (the lane
+      rule). Groups render as the plugin's report (CSV/JSON plus id lists, the
+      set-verb pipe shape); upstream's ephemeral marked:duplicates highlighting is
+      GUI machinery with no CLI twin, so the report replaces it.
+- [ ] **Exemptions**: per-library exemption storage in the host's persistent
+      config; the crosswalk records upstream's storage shape so the GUI plugin's
+      and the CQ plugin's exemption stories are decided (coexist or not) on the
+      record at implementation.
+- [ ] **The merge action (write-capable)**: calibre's merge semantics ported
+      through the WriteGate (move formats into the kept row, merge the chosen
+      metadata fields, remove the absorbed rows), behind BOTH gates: the plugin
+      approval harness and the standing rails. The charter's "no book deletion in
+      set mode" non-goal governs the CORE set verbs and stands unchanged (the
+      interpretation is in Records kept); delete-without-merge stays out of scope.
+
+### POC 3: quality-check (the battery; read-heavy, fixes behind the gate)
+
+- [ ] **The metadata-quality family**: missing fields, author formats (commas,
+      initials, casing, non-alphabetic), title case, excess tags, HTML in
+      comments, invalid title/author sorts, duplicate ISBN, duplicate series
+      name+index, series gaps, pubdate-unchanged-since-import: the plugin's audit
+      report in the --health idiom (findings, exit 1 on findings,
+      --fail-on-findings adjacency), exclusions carried per check.
+- [ ] **The ePub structure family**: jackets, manifest consistency (missing and
+      unmanifested files), unused CSS and images, broken image/NCX/guide links,
+      cruft files (iTunes artifacts, calibre bookmarks, .DS_Store/Thumbs.db), HTML
+      over 260KB, DRM presence: plugin-local stdlib zip/XML parsing, no new core
+      read APIs (the lane rule). The bindery relationship recorded, not coupled:
+      Brandon's 2026-11-21 note is that bindery may itself become a plugin later;
+      until then this family stays self-contained in the quality_check plugin.
+- [ ] **The cover and MOBI/AZW families**: cover size/dimension checks beside the
+      existing cover-quality audit surface; the MOBI EXTH checks (ASIN, EBOK
+      cdetype, sharing, clipping) as read checks, their repairs (ASIN/cdetype
+      insert) write-gated verbs.
+- [ ] **Fixes behind the gate**: author name swap/reorder, initials format, ascii
+      rename, stored-size repair, the MOBI repairs: each a WriteGate verb with the
+      standard rails. The saved-regex content search is disposed by the crosswalk
+      against --fts (a redundancy becomes a declined row, not a port).
+
+### Future candidates (opened by the same ruling; not committed)
+
+- [ ] **bindery as a calibre plugin and a CQ plugin** (Brandon's 2026-11-21 note);
+      the host API above is the surface it would ride; sequenced after the POC
+      trio proves the system.
+- [ ] **Upstream sync cadence for cquarry-plugins**: watch
+      kiwidude68/calibre_plugins releases per plugin (the upstream-triage shape);
+      the GPL obligation is carrying upstream changes cleanly or recording the
+      divergence in the derived plugin's provenance note.
+
 ## Records kept (decisions that live only here)
+
+- **The plugin-lane rulings (Brandon, 2026-11-21):** the MIT host takes a plugin
+  system as the next x.0's headline; the kiwidude68 calibre plugins port as GPL-3
+  plugins in their own monorepo (VirInvictus/cquarry-plugins), derived from upstream
+  with attribution, one-way imports, no GPL bytes in the MIT repos; plugins declare
+  capabilities, the engine runs a custom-written test run at install, and a writing
+  plugin is added only on recorded approval; extract-isbn ships first; and the
+  charter's "no book deletion in set mode" non-goal governs the core set verbs only
+  (a plugin's write actions ride the plugin approval gate plus the standing rails
+  instead), which is what puts the find-duplicates merge inside the lane's law.
 
 - **The "Author - Title" stamp convention** (decided 2026-09-10; cited by
   tests/test_run.py): the stamp parser reads "Author - Title", the direction the real
