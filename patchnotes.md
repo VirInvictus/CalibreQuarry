@@ -2,6 +2,21 @@
 
 # CalibreQuarry Patch Notes
 
+# 3.94.2 (2026-11-23)
+
+### `plugin run`'s verb tail passes verbatim (REMAINDER), host flags first
+
+The dogfood drill caught it live: argparse never hands an unknown
+option-like token to a `nargs="*"` positional, so the plugin verb tail's
+own flags (`--ids`, `--search`, `--prefixes`) errored at the host parser
+no matter where they sat. The tail is now `nargs=argparse.REMAINDER`: it
+passes verbatim, and the HOST's flags (`--apply`, `--db`) precede the
+plugin NAME (`cquarry plugin run --apply --db X name verb --ids 2`), the
+convention the help page and the verb help now state. Pinned by the
+parser test driving the pass-through tail and the bare tail.
+
+# CalibreQuarry Patch Notes
+
 # 3.94.1 (2026-11-23)
 
 ### The WriteGate's plan output carries the label pairs run_write_batch consumes

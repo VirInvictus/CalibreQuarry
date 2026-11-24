@@ -1076,8 +1076,10 @@ def build_parser() -> argparse.ArgumentParser:
     prun_p.add_argument("plugin_name", help="the installed plugin's name")
     prun_p.add_argument(
         "plugin_args",
-        nargs="*",
-        help="[verb] [args...] (bare: list the plugin's verbs)",
+        nargs=argparse.REMAINDER,
+        help="[verb] [args...] passed verbatim to the plugin (bare: list the "
+        "verbs); the host's --apply/--db precede the plugin NAME because the "
+        "tail is the plugin's own flag space",
     )
     prun_p.add_argument(
         "--db",

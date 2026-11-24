@@ -7,6 +7,7 @@ hash-compare and re-gate classes are exactly the layer mocks cannot cover
 isolated CQUARRY_PLUGIN_HOME per test.
 """
 
+import contextlib
 import io
 import json
 import os
@@ -338,7 +339,7 @@ class TestVerbs(PluginHomeCase):
         main(["plugin", "add", str(EXAMPLE)])
         buffer = io.StringIO()
         with redirect_stdout(buffer):
-            code = main(["plugin", "run", "example_echo", "--db", "unused"])
+            code = main(["plugin", "run", "--db", "unused", "example_echo"])
         self.assertEqual(code, 0)
         self.assertIn("verbs for example_echo: hello", buffer.getvalue())
 
@@ -367,19 +368,19 @@ class TestVerbs(PluginHomeCase):
                 [
                     "plugin",
                     "run",
-                    "writer_repo",
-                    "hello",
                     "--apply",
                     "--db",
                     str(scratch),
+                    "writer_repo",
+                    "hello",
                 ]
             )
             self.assertEqual(code, 1)
             # The dry run is unaffected by the re-gate: no --apply, no refusal.
             buffer = io.StringIO()
-            with redirect_stdout(buffer):
+            with contextlib.redirect_stdout(buffer):
                 code = main(
-                    ["plugin", "run", "writer_repo", "hello", "--db", str(scratch)]
+                    ["plugin", "run", "--db", str(scratch), "writer_repo", "hello"]
                 )
             self.assertEqual(code, 0)
 
@@ -563,6 +564,23 @@ class TestSurfaceWiring(unittest.TestCase):
         parser = build_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args(["plugin"])
+
+    def test_run_tail_passes_unknown_flags_verbatim(self) -> None:
+        # REMAINDER: the verb tail is the plugin's flag space (--ids is not
+        # the host's), and the host flags precede the plugin name.
+        parser = build_parser()
+        args = parser.parse_args(
+            ["plugin", "run", "--apply", "--db", "/tmp/x", "p", "scan", "--ids", "2"]
+        )
+        self.assertTrue(args.apply)
+        self.assertEqual(args.db, "/tmp/x")
+        self.assertEqual(args.plugin_name, "p")
+        self.assertEqual(args.plugin_args, ["scan", "--ids", "2"])
+
+    def test_run_tail_bare(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["plugin", "run", "p"])
+        self.assertEqual(args.plugin_args, [])
 
     def test_unknown_plugin_install_is_usage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
