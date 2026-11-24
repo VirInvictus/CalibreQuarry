@@ -39,6 +39,12 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   sys.modules and would bind one plugin's load to another's file (the
   cross-test ENOENT class). Entry modules are single files resolved under
   the plugin dir.
+- **The WriteGate plans action pairs too (3.95.1).** plan_add_format
+  (the FILE copy stays the plugin's), plan_remove_format,
+  plan_rename_entity, and plan_remove_book (confirm forced -- the
+  approval + dry-run/apply layers ARE the confirmation). The scratch
+  and canonical fixture schemas carry books_delete_trg; without it a
+  removed book's data row strands.
 - **`plugin run`'s tail is REMAINDER.** The verb tail passes verbatim
   (argparse never hands unknown option-likes to a `nargs="*"`); the
   host's `--apply`/`--library` precede the plugin NAME (3.94.2, the drill

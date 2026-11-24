@@ -2,6 +2,28 @@
 
 # CalibreQuarry Patch Notes
 
+# 3.95.1 (2026-11-24)
+
+### The WriteGate grows the action seams: formats, entity renames, book removal
+
+The find_duplicates actions half needs more than identifier writes, so the
+gate grows four plan methods, each returning the same (label, action) pair
+`run_write_batch` consumes: `plan_add_format` (registering a format row;
+the FILE stays the plugin's responsibility -- copy it into the keeper's
+directory before the batch), `plan_remove_format`, `plan_rename_entity`
+(authors/series/publishers/tags through cquarry's own rename_entity), and
+`plan_remove_book` -- which forces the confirm flag by construction: the
+layers above the gate (the plugin approval, the dry-run default, the
+apply refusal on a re-gated payload) ARE the confirmation, so no plugin
+code ever passes one by hand. `TestWriteGateApply.test_action_gate_pairs`
+drives all four through one batch over the scratch library and reads every
+mutation back; the scratch and the canonical fixture schema now carry
+Calibre's `books_delete_trg` cascade trigger, without which the removed
+book's data rows strand (found live by this very test -- on a real library
+the trigger is upstream's own).
+
+# CalibreQuarry Patch Notes
+
 # 3.95.0 (2026-11-24)
 
 ### The plugin API contract grows to 2: the per-plugin config seam

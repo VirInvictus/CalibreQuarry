@@ -43,6 +43,19 @@ CREATE TABLE preferences (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
 CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT UNIQUE, name TEXT,
     datatype TEXT, mark_for_delete BOOL DEFAULT 0, is_multiple BOOL NOT NULL
     DEFAULT 0);
+
+CREATE TRIGGER books_delete_trg AFTER DELETE ON books
+BEGIN
+    DELETE FROM books_authors_link WHERE book = OLD.id;
+    DELETE FROM books_publishers_link WHERE book = OLD.id;
+    DELETE FROM books_ratings_link WHERE book = OLD.id;
+    DELETE FROM books_series_link WHERE book = OLD.id;
+    DELETE FROM books_tags_link WHERE book = OLD.id;
+    DELETE FROM books_languages_link WHERE book = OLD.id;
+    DELETE FROM data WHERE book = OLD.id;
+    DELETE FROM comments WHERE book = OLD.id;
+    DELETE FROM identifiers WHERE book = OLD.id;
+END;
 CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
 CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code
     INT, UNIQUE (book, lang_code));

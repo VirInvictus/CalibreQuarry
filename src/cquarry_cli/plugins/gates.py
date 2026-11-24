@@ -146,6 +146,30 @@ class WriteGate:
         action = writeops.action_set_identifier(book_id, id_type, value)
         return f"set identifier {id_type}={value} on book {book_id}", action
 
+    def plan_add_format(
+        self, book_id: int, fmt: str, name: str, size: int
+    ) -> tuple[str, object]:
+        """Register a format row (the FILE is the plugin's responsibility:
+        copy it into the keeper's directory before the batch runs)."""
+        action = writeops.action_add_format(book_id, fmt, name, size)
+        return f"add format {fmt} ({name}) on book {book_id}", action
+
+    def plan_remove_format(self, book_id: int, fmt: str) -> tuple[str, object]:
+        action = writeops.action_remove_format(book_id, fmt)
+        return f"remove format {fmt} from book {book_id}", action
+
+    def plan_rename_entity(self, kind: str, old: str, new: str) -> tuple[str, object]:
+        action = writeops.action_rename_entity(kind, old, new)
+        return f"rename {kind} {old!r} -> {new!r}", action
+
+    def plan_remove_book(self, book_id: int) -> tuple[str, object]:
+        """Remove a book row. The gate forces the confirm flag: the layers
+        above it (the plugin approval, the dry-run default, the apply
+        refusal on a re-gated payload) ARE the confirmation, so no plugin
+        code ever passes one by hand."""
+        action = writeops.action_remove_book(book_id, confirm=True)
+        return f"remove book {book_id}", action
+
     def apply(self, db_path: str, actions: list, *, quiet: bool = False) -> int:
         return writeops.run_write_batch(db_path, actions, quiet=quiet)
 

@@ -78,6 +78,18 @@ CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT UNIQUE, name TEX
     display TEXT DEFAULT '{}', normalized BOOL, mark_for_delete BOOL DEFAULT 0);
 CREATE TABLE metadata_dirtied (id INTEGER PRIMARY KEY, book INTEGER NOT NULL,
     UNIQUE(book));
+CREATE TRIGGER books_delete_trg AFTER DELETE ON books
+BEGIN
+    DELETE FROM books_authors_link WHERE book = OLD.id;
+    DELETE FROM books_publishers_link WHERE book = OLD.id;
+    DELETE FROM books_ratings_link WHERE book = OLD.id;
+    DELETE FROM books_series_link WHERE book = OLD.id;
+    DELETE FROM books_tags_link WHERE book = OLD.id;
+    DELETE FROM books_languages_link WHERE book = OLD.id;
+    DELETE FROM data WHERE book = OLD.id;
+    DELETE FROM comments WHERE book = OLD.id;
+    DELETE FROM identifiers WHERE book = OLD.id;
+END;
 """
 
 

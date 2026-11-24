@@ -646,6 +646,56 @@ class TestWriteGateApply(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_action_gate_pairs(self) -> None:
+        """The action-class gates: every plan_* returns the (label, action)
+        pair and every action runs through run_write_batch."""
+        from cquarry_cli.plugins.gates import PluginContext, _WRITE_GATE
+        from cquarry_cli.plugins.scratch import build_scratch
+
+        tmp = tempfile.mkdtemp(prefix="cq-gate2-")
+        try:
+            scratch = build_scratch(Path(tmp) / "lib")
+            context = PluginContext(
+                plugin_name="p",
+                capabilities=("read", "write"),
+                db_path=str(scratch),
+                dry_run=False,
+            )
+            gate = context.write
+            add = gate.plan_add_format(2, "EPUB", "merged2", 4096)
+            remove_fmt = gate.plan_remove_format(1, "EPUB")
+            rename = gate.plan_rename_entity("authors", "Scratch, Author", "New Name")
+            remove_book = gate.plan_remove_book(2)
+            self.assertTrue(
+                all(
+                    isinstance(p, tuple) for p in (add, remove_fmt, rename, remove_book)
+                )
+            )
+            code = _WRITE_GATE.apply(
+                str(scratch), [add, remove_fmt, rename, remove_book]
+            )
+            self.assertEqual(code, 0)
+            import sqlite3
+
+            conn = sqlite3.connect(scratch)
+            rows = conn.execute(
+                "SELECT book FROM data WHERE format = 'EPUB'"
+            ).fetchall()
+            books = conn.execute("SELECT id FROM books ORDER BY id").fetchall()
+            author = conn.execute(
+                "SELECT name FROM authors WHERE name = 'New Name'"
+            ).fetchall()
+            old_author = conn.execute(
+                "SELECT name FROM authors WHERE name = 'Scratch, Author'"
+            ).fetchall()
+            conn.close()
+            self.assertEqual(rows, [])  # book 2's added row cascaded away
+            self.assertEqual([b[0] for b in books], [1])  # book 2 removed
+            self.assertEqual(len(author), 1)
+            self.assertEqual(old_author, [])  # the old spelling is gone
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 class TestConfigSeam(unittest.TestCase):
     """Contract 2: the per-plugin config seam (load/save, isolated dir)."""
