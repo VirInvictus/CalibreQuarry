@@ -133,8 +133,9 @@ def check_floors(manifest: Manifest) -> None:
 
 #: The plugin-API contract this host speaks. It increments when the gate or
 #: entry surface changes shape; plugins declaring a higher api_version refuse
-#: above. First contract.
-_HOST_API_VERSION = 1
+#: above. Contract 2 adds the per-plugin config seam
+#: (PluginContext.load_config/save_config).
+_HOST_API_VERSION = 2
 
 
 def load_manifest(path: Path) -> Manifest:

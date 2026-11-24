@@ -647,5 +647,52 @@ class TestWriteGateApply(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class TestConfigSeam(unittest.TestCase):
+    """Contract 2: the per-plugin config seam (load/save, isolated dir)."""
+
+    def test_round_trip_and_isolation(self) -> None:
+        import json as _json
+        from cquarry_cli.plugins.gates import PluginContext
+        from cquarry_cli.plugins.store import plugin_config_dir
+
+        home = Path(tempfile.mkdtemp(prefix="cq-cfg-"))
+        old = os.environ.get("CQUARRY_PLUGIN_HOME")
+        os.environ["CQUARRY_PLUGIN_HOME"] = str(home)
+        try:
+            a = PluginContext(plugin_name="alpha", capabilities=("read",))
+            a.save_config({"libraries": {"u1": {"bookExemptions": [[1, 2]]}}})
+            b = PluginContext(plugin_name="beta", capabilities=("read",))
+            self.assertEqual(b.load_config(), {})
+            self.assertEqual(
+                a.load_config(), {"libraries": {"u1": {"bookExemptions": [[1, 2]]}}}
+            )
+            self.assertNotEqual(plugin_config_dir("alpha"), plugin_config_dir("beta"))
+            self.assertTrue(a.config_path().exists())
+            self.assertEqual(_json.loads(a.config_path().read_text()), a.load_config())
+        finally:
+            if old is None:
+                os.environ.pop("CQUARRY_PLUGIN_HOME", None)
+            else:
+                os.environ["CQUARRY_PLUGIN_HOME"] = old
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_contract_2_accepted_contract_3_refused(self) -> None:
+        from cquarry_cli.plugins.manifest import FloorError, check_floors, load_manifest
+
+        manifest = load_manifest(EXAMPLE / "cquarry-plugin.toml")
+        self.assertEqual(manifest.api_version, 1)
+        check_floors(manifest)  # contract 1 plugins stay welcome
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin = _write_plugin(Path(tmp), "future_api")
+            path = plugin / "cquarry-plugin.toml"
+            path.write_text(
+                _manifest_text("future_api").replace(
+                    "api_version = 1", "api_version = 3"
+                )
+            )
+            with self.assertRaises(FloorError):
+                check_floors(load_manifest(path))
+
+
 if __name__ == "__main__":
     unittest.main()

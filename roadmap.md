@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.94.2.
+What's done, what's next. Updated as of v3.95.0.
 
 **Minimized 2026-09-29 (the cquarry precedent).** Phases 1-19, the maintenance
 sweeps, and every audit wave are shipped; their full findings-ledger text is
@@ -515,7 +515,11 @@ rather than merely convenient.
       floor, and update's hash-delta classification. It doubles as the documented
       starting point for plugin authors (the spec's plugin-system section links
       it), because a powerful tool people can build on needs a copy-pasteable
-      skeleton from day one. *(Shipped 3.94.0: tests/example_echo (manifest + one read verb counting
+      skeleton from day one. The contract ride-along (3.95.0): the
+      plugin-API contract is 2 -- PluginContext.load_config/save_config
+      give every plugin its own config directory under the plugin home
+      (the seam the find_duplicates exemptions storage rides); api_version
+      1 plugins stay welcome. *(Shipped 3.94.0: tests/example_echo (manifest + one read verb counting
       the library) is the template; the plugin suite's 40 tests drive REAL
       git repositories through add, update's hash-compare and write re-gate,
       and the approval re-hash refusal end to end.)*

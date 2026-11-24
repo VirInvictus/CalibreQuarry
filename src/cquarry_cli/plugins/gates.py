@@ -74,6 +74,26 @@ class PluginContext:
             if detail.get("path")
         }
 
+    # -- the config seam -------------------------------------------------
+
+    def config_path(self) -> Path:
+        """This plugin's persistent config file (per-plugin dir, created now)."""
+        from cquarry_cli.plugins.store import plugin_config_dir
+
+        directory = plugin_config_dir(self.plugin_name)
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / "config.json"
+
+    def load_config(self) -> dict:
+        from cquarry_cli.plugins.store import load_json
+
+        return load_json(self.config_path(), {})
+
+    def save_config(self, data: dict) -> None:
+        from cquarry_cli.plugins.store import save_json
+
+        save_json(self.config_path(), data)
+
     # -- the write gate -------------------------------------------------
 
     @property

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,28 @@ def approvals_path() -> Path:
 
 def cache_root() -> Path:
     return plugin_home() / "cache"
+
+
+def plugin_config_dir(name: str) -> Path:
+    """One config directory per plugin (its exemptions, options, caches)."""
+    return plugin_home() / "config" / name
+
+
+def load_json(path: Path, default):
+    """Load JSON or return the default; a corrupt file reads as the default
+    with the path named on stderr (a torn config must not kill a verb)."""
+    if not Path(path).exists():
+        return default
+    try:
+        with Path(path).open(encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"NOTE: ignoring unreadable config {path}: {e}", file=sys.stderr)
+        return default
+
+
+def save_json(path: Path, data) -> None:
+    _write_json(Path(path), data)
 
 
 def _now() -> str:

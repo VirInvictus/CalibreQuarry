@@ -46,6 +46,11 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   top-level `--db` re-declared with SUPPRESS: CI caught that clobbering
   the parent namespace value on Python 3.14; `args.library or args.db`
   is version-proof.
+- **The config seam is contract 2.** PluginContext.load_config/
+  save_config give each plugin an isolated config file under
+  `CQUARRY_PLUGIN_HOME/config/<name>/` (atomic, unreadable-reads-empty
+  with the path named); the plugin-API contract is 2, api_version 1
+  plugins still welcome (3.95.0, the find_duplicates exemptions seam).
 - **The WriteGate plans label pairs.** plan_identifier returns the
   `(label, action)` tuple run_write_batch iterates (3.94.1: the gate
   owns the label because the batch results print it; the bare-closure

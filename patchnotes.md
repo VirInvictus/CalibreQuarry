@@ -2,6 +2,22 @@
 
 # CalibreQuarry Patch Notes
 
+# 3.95.0 (2026-11-24)
+
+### The plugin API contract grows to 2: the per-plugin config seam
+
+The find_duplicates port needs durable per-library state (its duplicate
+exemptions), so the host gives every plugin its own config directory under
+the plugin home (`CQUARRY_PLUGIN_HOME/config/<name>/config.json`, atomic
+replace, an unreadable file reading as empty with the path named on
+stderr) through `PluginContext.load_config()` / `save_config()`. The
+plugin-API contract increments to 2; plugins declaring api_version 1 stay
+welcome (the check is an upper bound), plugins declaring above 2 refuse
+naming the fix. Pinned by the seam round-trip (isolated dirs per plugin)
+and the contract-refusal test.
+
+# CalibreQuarry Patch Notes
+
 # 3.94.2 (2026-11-23)
 
 ### `plugin run`'s verb tail passes verbatim (REMAINDER), host flags first
