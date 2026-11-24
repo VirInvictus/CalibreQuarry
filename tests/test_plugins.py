@@ -731,7 +731,7 @@ class TestConfigSeam(unittest.TestCase):
         against the plugin dir under the unique per-plugin package name."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            plugin = _write_plugin(root, "packaged")
+            _write_plugin(root, "packaged")
             (root / "packaged" / "packaged_helper.py").write_text(
                 "HELLO = 'from the helper'\n"
             )

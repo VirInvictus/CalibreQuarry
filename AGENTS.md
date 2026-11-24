@@ -45,6 +45,10 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   fill/union half of a plugin merge. LANE RULE RE-PROVEN: the gates
   were written but left uncommitted when the dependent plugin tagged;
   commit the host BEFORE the dependent's tag.
+- **The loader loads multi-file plugins (3.96.0).** The entry module
+  gets submodule_search_locations = the plugin dir, so
+  `from . import sibling` resolves under the unique per-plugin package
+  name; single-file plugins unchanged, sys.modules protections intact.
 - **The gate has two faces: plan and write (contract 3, 3.95.2).**
   `context.plan.X(...)` builds label/action pairs and is legal in dry
   runs (planning is label construction); `context.write.apply(...)`
