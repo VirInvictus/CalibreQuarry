@@ -313,18 +313,36 @@ never a core read API here.
 
 ### Pre-work (before any plugin code)
 
-- [ ] **Reference clone**: clone kiwidude68/calibre_plugins into ~/.gitrepos/ under
+- [x] **Reference clone**: clone kiwidude68/calibre_plugins into ~/.gitrepos/ under
       the read-only-by-policy convention (never edit; the hyprland-wiki precedent)
       and add its workspace-catalog row. Record in the clone's sync notes: the three
       folders, current versions (find_duplicates v1.10.11 and extract_isbn v1.6.7
       per the calibre plugin index as of 2026-11-21; quality_check's current
       kiwidude version re-verified live; the returned chaley fork sat at 1.12.0),
-      and each plugin's declared calibre floor.
+      and each plugin's declared calibre floor. *(Done 2026-11-23: cloned at
+      upstream e14a679, the catalog row + dated header clause added; versions
+      pinned from the live clone's CHANGELOGs and plugin metadata -- extract_isbn
+      1.6.7 (calibre 2.0+), find_duplicates 1.10.11 (calibre 2.0+, schema 1.7),
+      quality_check 1.15.0 (calibre 3.48+, schema 1.9); sync windows live in
+      cquarry-plugins/docs/upstream-sync.md.)*
 - [ ] **Source inventory crosswalk**: read the three folders and enumerate every
       check, matcher, option, and fix into one crosswalk table (the parity-ledger
       idiom), each row disposed under the parity directive: ported, with its CLI
       twin named; GUI-only surface recorded as the recorded deviation, never a
-      silent drop.
+      silent drop. *(Done 2026-11-23: the three-agent Flash Explore wave over the
+      clone (shared ledger, per-plugin path:line reports) harvested into
+      cquarry-plugins/docs/crosswalk.md at a2af2a5 -- every check, matcher,
+      option, and fix disposed ported/substituted/extension/declined. The named
+      parity facts: upstream's merge is GUI delegation with no merge API and its
+      delete is the GUI's Delete key, so both land as the recorded EXTENSION
+      class behind the gates; exemptions persist in the library DB's namespaced
+      prefs (FindDuplicatesPlugin/settings, QualityCheckPlugin's
+      exclusionsByCheck), so the host-config stores are the recorded substitution
+      and the GUI/CQ exemption sets stay independent; quality_check's 11
+      missing-data checks are literally saved-search expressions carried verbatim;
+      two upstream quirks recorded as deliberate corrections (the tags matcher
+      reading the publisher soundex length; the check_no_html_comments
+      missing-comma pattern bug).)*
       Pin verbatim as compatibility targets: Extract ISBN's scan shape (PDFs: first
       10 pages then last 5 in reverse; other formats: leading files, then trailing
       in reverse, then the rest; ISBN-13 prefixes 977/978/979 with the
@@ -336,10 +354,15 @@ never a core read API here.
       family (cover size/dimensions; the ~30 ePub structure checks; ePub style;
       MOBI/AZW EXTH checks; metadata quality; the saved-regex content search) with
       its fix list and per-check exclusion lists.
-- [ ] **Licensing record**: the exact conventions every derived plugin must carry
+- [x] **Licensing record**: the exact conventions every derived plugin must carry
       (upstream copyright notice, the GPL-3 text, per-file headers where upstream
       has them, a provenance note naming the derived files), and the one-way import
-      statement, in the monorepo's README and spec from day one.
+      statement, in the monorepo's README and spec from day one. *(Done 2026-11-23:
+      the conventions live in cquarry-plugins' spec.md (the manifest contract with
+      the `[upstream]` provenance block and derivation class), AGENTS.md (the
+      one-way import rule and lane rules), the repo README (the licensing shape),
+      and each plugin's provenance README; LICENSE is the canonical GNU GPL-3
+      text.)*
 - [ ] **Repo bootstrap**: create VirInvictus/cquarry-plugins (GPL-3, the house
       layout: README, spec, roadmap, patchnotes, LICENSE, single-source VERSION),
       scaffold the three empty plugin packages, and register the repo in the
@@ -347,7 +370,13 @@ never a core read API here.
       import rule. The monorepo is also the lane's first dogfood source: `cquarry
       plugin add` against its own git URL installs all three POCs, the flow every
       third-party source repeats after it. Each POC manifest carries the floor
-      declarations, the field's first consumers.
+      declarations, the field's first consumers. *(Done 2026-11-23: the repo is
+      live at github.com/VirInvictus/cquarry-plugins, v0.1.0 -- bootstrap 3a648ad,
+      crosswalk a2af2a5, CI green on both (SHA-pinned actions, pinned ruff
+      0.15.20, the manifest lint + version-sync suite, 9 tests); the three
+      packages scaffolded with manifests declaring capabilities, api_version 1,
+      and floors cquarry >=1.29.2 / calibrequarry >=3.94.0 (the re-pin note in
+      each manifest); the workspace-catalog repo row added.)*
 
 ### The host: the plugin system core (the x.0 headline; ships before any POC)
 
