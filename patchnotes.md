@@ -2,6 +2,21 @@
 
 # CalibreQuarry Patch Notes
 
+# 3.96.1 (2026-11-24)
+
+### Re-tag at green: the v3.96.0 tag carried a red-CI lint miss
+
+v3.96.0's own commit shipped a red CI run: the packaged-plugin test's
+unused variable (F841) missed the local gates because the carrier script
+died mid-run on an anchor assert AFTER the code writes but BEFORE the
+commit, so the commit went out on a stale grep chain. The code was
+correct; the lint miss and a missing AGENTS paragraph landed on main
+immediately after (6893277, CI green). This release re-tags that state
+per the house erratum rule; the v3.96.0 tag stays as history with no
+Release minted (the publish workflow refused it at red, correctly).
+
+# CalibreQuarry Patch Notes
+
 # 3.96.0 (2026-11-24)
 
 ### Multi-file plugins: the loader's package half
