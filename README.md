@@ -613,7 +613,7 @@ The `--show-id` flag outputs Calibre book IDs, making it straightforward to pipe
 ## Full help output
 
 `--help` is two-level by design: the bare flag prints the compact
-overview below, `--help read|write|set|run|examples|all|json` prints the
+overview below, `--help read|write|set|run|plugin|examples|all|json` prints the
 focused deep dives (flag tables generated from the live parser, so they
 cannot drift from the real flags), and `run --help VERB` prints a
 per-verb page for each of the 24 run verbs. `--help json` dumps the

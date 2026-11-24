@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.93.0.
+What's done, what's next. Updated as of v3.94.0.
 
 **Minimized 2026-09-29 (the cquarry precedent).** Phases 1-19, the maintenance
 sweeps, and every audit wave are shipped; their full findings-ledger text is
@@ -393,7 +393,7 @@ git library). "Plugin" in the verb names below means the registry surface; the
 capability gates and the approval harness beneath them are what make that powerful
 rather than merely convenient.
 
-- [ ] **The manifest contract**: every plugin declares itself in a manifest at its
+- [x] **The manifest contract**: every plugin declares itself in a manifest at its
       package root (name, version, api_version, license, capabilities:
       read|write|network, entry point, a human description, and upstream
       provenance for derived plugins: source repo, derived files, attribution)
@@ -408,8 +408,13 @@ rather than merely convenient.
       metadata that can lag a checkout); the calibrequarry floor against the
       running host. Together they are how the host survives its own API
       evolution: a stale plugin from an updated repo degrades to a
-      refused-with-reason line, never a traceback.
-- [ ] **`cquarry plugin add <git-url-or-path>`**: clones the repo into the cache
+      refused-with-reason line, never a traceback. *(Shipped 3.94.0: plugins/manifest.py validates every field
+      fail-closed (schema 1, name equal to its directory, X.Y.Z, positive
+      api_version, the capability subset, the module:function entry, both
+      >=X.Y.Z floors, the [upstream] provenance block); plugins/discovery.py
+      classifies single (root manifest) vs multi (manifests one level deep)
+      BY DISCOVERY, duplicate names refused.)*
+- [x] **`cquarry plugin add <git-url-or-path>`**: clones the repo into the cache
       (a local path registers without cloning), discovers manifests, and
       classifies the source BY DISCOVERY, never by configuration: exactly one
       manifest at the repo root is a single-plugin source; several manifests (one
@@ -420,15 +425,19 @@ rather than merely convenient.
       write-capable ones cannot pass add without the verify-and-approve gate.
       `--plugin NAME` (repeatable) selects a subset of a multi source;
       `--no-install` registers the source alone; re-adding a known source is a
-      no-op unless `--force` re-discovers.
-- [ ] **`cquarry plugin list [--format json]`**: the registry rendered: sources
+      no-op unless `--force` re-discovers. *(Shipped 3.94.0: plugins/verbs.py cmd_add; the clone cache under
+      ~/.local/share/cquarry/plugins/, local paths register without cloning;
+      installation runs the floor gates and the approval gate per plugin.)*
+- [x] **`cquarry plugin list [--format json]`**: the registry rendered: sources
       with their upstream URL and last-synced commit; per plugin the version,
       capabilities, approval state, payload-hash prefix, and providing source; per
       source the update state (up to date / behind / unreachable). A plugin
       whose floors exceed the running host or engine renders BLOCKED with the
       reason, visible and explainable, never installed-and-broken. The
-      machine-surface house rule applies.
-- [ ] **`cquarry plugin update [name ... | --all]`**: per source: fetch, name the
+      machine-surface house rule applies. *(Shipped 3.94.0: cmd_list renders sources, per-plugin capability and
+      approval state, the LIVE payload hash (drift shows as RE-GATED), and
+      the floor check per plugin; --format json is the machine payload.)*
+- [x] **`cquarry plugin update [name ... | --all]`**: per source: fetch, name the
       commit delta, re-read manifests, compare payload hashes per plugin. An
       unchanged plugin is a no-op line; a changed READ-ONLY plugin updates in
       place with the version delta named; a changed WRITE-CAPABLE plugin re-runs
@@ -440,13 +449,18 @@ rather than merely convenient.
       appearing in a known multi source are reported as available, never
       auto-installed. Per-source failure isolation: one dead repo never blocks
       the rest, the survivors complete, exit 1 names the failures (the news
-      verb's per-recipe idiom).
-- [ ] **`cquarry plugin install <name>` / `remove <name>` / `remove --source
+      verb's per-recipe idiom). *(Shipped 3.94.0: gitops.sync is fetch + hard reset to FETCH_HEAD (a
+      bare fetch never touches the checked-out tree, so the hash compare
+      would read a stale clone); cmd_update classifies unchanged / changed
+      read-only / changed write-capable per the box, reports-not-installs
+      new plugins, and isolates dead sources.)*
+- [x] **`cquarry plugin install <name>` / `remove <name>` / `remove --source
       <url>`**: install from an already-registered source (write-capable through
       the gate); remove unregisters the plugin while its approvals entry stays as
       history (the audit trail); removing a source forgets its plugins with the
-      source named in the report.
-- [ ] **The capability gates**: read passes the host read API (the opened
+      source named in the report. *(Shipped 3.94.0: cmd_install re-discovers registered sources and
+      gate-installs; cmd_remove keeps approvals as history.)*
+- [x] **The capability gates**: read passes the host read API (the opened
       ?mode=ro CalibreDB, the library root, a book id to format-paths resolver).
       write passes ONLY the WriteGate: the sanctioned cquarry.write seams behind
       the standing rails (dry-run default, out-of-tree timestamped backups, the
@@ -455,8 +469,12 @@ rather than merely convenient.
       git fetches above are the HOST's own network acts, reported per verb). No
       raw connections and no subprocess writes through the gate: the seams are
       the only write path, enforced host-side, so an honest or dishonest plugin
-      cannot skip them.
-- [ ] **The verify-and-approve harness** (Brandon's ruling verbatim: the engine
+      cannot skip them. *(Shipped 3.94.0: plugins/gates.py: PluginContext.db hands the opened
+      ?mode=ro CalibreDB, format_paths the engine's format index; the
+      WriteGate wraps writeops' action factories and run_write_batch (the
+      same seams the CLI's own verbs ride); the network log is declared-only;
+      PermissionError is the host-raised refusal shape.)*
+- [x] **The verify-and-approve harness** (Brandon's ruling verbatim: the engine
       runs a test run, custom-written so the operator tests what they want, and
       asks approval before a writing plugin is added): `cquarry plugin verify
       <name>` runs the plugin's declared behaviors in dry-run/observe mode against
@@ -469,21 +487,35 @@ rather than merely convenient.
       idiom); any hash, version, or capability change re-gates. Read-only plugins
       install without the prompt; write-capable ones cannot be added, updated, or
       re-enabled without a recorded approval. `add` and `update` route through
-      this same harness; it is the one gate.
-- [ ] **Verb registration and the machine surface**: plugin verbs register
+      this same harness; it is the one gate. *(Shipped 3.94.0: plugins/harness.py: verify = manifest checks + floor
+      gates + load/register + the manifest's [verify] probes plus any --spec
+      JSON probes, each a dry run against a scratch library built from the
+      canonical schema (no calibre binaries, rebuilt every run); approvals
+      record name/version/capabilities/payload sha256 with atomic replace;
+      the payload hash excludes __pycache__ and *.pyc so a load cannot
+      change it; non-interactive prompts refuse with the --yes hint instead
+      of hanging.)*
+- [x] **Verb registration and the machine surface**: plugin verbs register
       namespaced, collisions refused; `--help json` carries them with their gates
       in topic_details ALONG WITH the providing plugin's name, version, and
       capabilities, so an AI operator reading the machine surface sees exactly
       what third-party surface is loaded (the AI-first house rule); the exit
-      0/1/2 contract and the human help pages extend unchanged.
-- [ ] **The example plugin (fixture and authoring template in one)**: a small
+      0/1/2 contract and the human help pages extend unchanged. *(Shipped 3.94.0: the family wires into cli.py before find_db (the
+      library-free verbs; the subparser's --db carries SUPPRESS so it can
+      never clobber the top-level value); `plugin run <name> [verb...]`
+      dry-run default with --apply behind the approval; the additive plugin
+      help topic carries its exits and gates in topic_details.)*
+- [x] **The example plugin (fixture and authoring template in one)**: a small
       plugin shipped in-repo, exercised by tests/test_plugins.py over every gate:
       discovery, the single/multi classification, the read API, the write gate's
       dry-run and apply, the approvals ledger's re-hash refusal, the api_version
       floor, and update's hash-delta classification. It doubles as the documented
       starting point for plugin authors (the spec's plugin-system section links
       it), because a powerful tool people can build on needs a copy-pasteable
-      skeleton from day one.
+      skeleton from day one. *(Shipped 3.94.0: tests/example_echo (manifest + one read verb counting
+      the library) is the template; the plugin suite's 40 tests drive REAL
+      git repositories through add, update's hash-compare and write re-gate,
+      and the approval re-hash refusal end to end.)*
 
 ### POC 1: extract-isbn (first, by the ship-order ruling; read + write)
 

@@ -980,6 +980,116 @@ def build_parser() -> argparse.ArgumentParser:
         "news (fetch news editions through Calibre's builtin recipes; "
         "curated free defaults, --recipe overrides, network at --apply)",
     )
+    # --- The plugin system (Phase 21): git-sourced plugins over a registry ---
+    plugin_p = sub.add_parser(
+        "plugin",
+        help="The plugin system: add/list/install/remove/update/verify/run "
+        "over git-sourced plugins; write-capable ones pass the "
+        "verify-and-approve gate",
+    )
+    psub = plugin_p.add_subparsers(dest="plugin_command", required=True)
+    add_p = psub.add_parser(
+        "add",
+        help="register a source (git URL or local path), discover its "
+        "manifests, and install the plugins (write-capable through the gate)",
+    )
+    add_p.add_argument("url", help="a git URL or a local directory path")
+    add_p.add_argument(
+        "--plugin",
+        action="append",
+        metavar="NAME",
+        help="install only this plugin from a multi-plugin source (repeatable)",
+    )
+    add_p.add_argument(
+        "--no-install",
+        action="store_true",
+        help="register the source alone; install later with `plugin install`",
+    )
+    add_p.add_argument(
+        "--force",
+        action="store_true",
+        help="re-discover an already-registered source (git sources fetch first)",
+    )
+    add_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="record the write approval without the interactive prompt",
+    )
+    list_p = psub.add_parser(
+        "list", help="the registry rendered; --format json is the machine surface"
+    )
+    list_p.add_argument(
+        "--format", default=None, help="json only (text is the default)"
+    )
+    install_p = psub.add_parser(
+        "install", help="install one plugin from an already-registered source"
+    )
+    install_p.add_argument("name", help="the plugin's manifest name")
+    install_p.add_argument(
+        "--yes", action="store_true", help="record the approval without the prompt"
+    )
+    remove_p = psub.add_parser(
+        "remove", help="unregister a plugin, or forget a whole source with --source"
+    )
+    remove_p.add_argument(
+        "name", nargs="?", default=None, help="the installed plugin's name"
+    )
+    remove_p.add_argument(
+        "--source",
+        default=None,
+        help="forget this source (url or slug) and its plugins",
+    )
+    update_p = psub.add_parser(
+        "update",
+        help="fetch the sources, hash-compare every installed plugin, and "
+        "re-gate write-capable changes (the old payload stays installed "
+        "otherwise)",
+    )
+    update_p.add_argument(
+        "names", nargs="*", help="installed plugin names (their sources are what sync)"
+    )
+    update_p.add_argument(
+        "--all", dest="all", action="store_true", help="sync every registered source"
+    )
+    update_p.add_argument(
+        "--yes", action="store_true", help="record re-approvals without the prompt"
+    )
+    verify_p = psub.add_parser(
+        "verify",
+        help="the test run (manifest checks, floors, load, probes) against a "
+        "scratch library, then the approval prompt for write-capable plugins",
+    )
+    verify_p.add_argument("name", help="the plugin's manifest name")
+    verify_p.add_argument(
+        "--spec",
+        default=None,
+        help='a JSON test spec: {"probes": ["<verb> <args>", ...]} (the custom '
+        "half of the harness)",
+    )
+    verify_p.add_argument(
+        "--yes", action="store_true", help="record the approval without the prompt"
+    )
+    prun_p = psub.add_parser(
+        "run",
+        help="invoke a registered plugin verb (dry-run default; --apply executes)",
+    )
+    prun_p.add_argument("plugin_name", help="the installed plugin's name")
+    prun_p.add_argument(
+        "plugin_args",
+        nargs="*",
+        help="[verb] [args...] (bare: list the plugin's verbs)",
+    )
+    prun_p.add_argument(
+        "--db",
+        default=argparse.SUPPRESS,
+        help="the library the verb reads (the saved default when omitted; "
+        "SUPPRESS so the top-level --db value is never clobbered)",
+    )
+    prun_p.add_argument(
+        "--apply",
+        action="store_true",
+        help="allow writes (the recorded approval must match the live payload)",
+    )
     for flag, help_text in (
         ("--search", "target set: books matching a search expression"),
         ("--ids", "target set: explicit book ids (ID[,ID...])"),
@@ -1413,6 +1523,13 @@ def main(argv: list[str] | None = None) -> int:
             from cquarry_cli.run import dispatch_run
 
             return dispatch_run(args)
+        if getattr(args, "plugin_command", None):
+            # The plugin family dispatches before find_db: add/list/update/
+            # verify are library-free, and `plugin run` binds its own library
+            # (the fixture scratch under verify, the found one at run time).
+            from cquarry_cli.plugins import dispatch_plugin
+
+            return dispatch_plugin(args)
         if (
             args.series_index is not None
             and not args.set_series

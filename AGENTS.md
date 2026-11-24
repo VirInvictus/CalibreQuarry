@@ -7,6 +7,43 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
 
 **CLI surface contract:** this workspace's CLI machine-surface contract lives in `~/.gitrepos/CLAUDE.md` (Throughlines). The 2026-11-13 live audit's two named open follow-ups are closed as of 3.89.0: issue #57 (the compact overview wraps instead of truncating, one "also:" block, the exit legend on the surface) and issue #58 (`topic_details` in `--help json` carries the exit contracts and gate annotations; additive-only, `topics`/`groups` untouched).
 
+## Programmer-facing contract notes (3.94.0 onward, the plugin system host)
+
+- **The plugin family dispatches BEFORE find_db, and `plugin run` binds its
+  own library.** cli.py's main() routes `plugin <cmd>` right after the run
+  dispatch; add/list/install/remove/update/verify are library-free, and
+  `plugin run` resolves `--db` itself (cquarry.helpers.find_db when the
+  flag is absent). The `plugin run` subparser's `--db` carries
+  `default=argparse.SUPPRESS` so it can never clobber the top-level --db
+  value (the argparse subparser-default clobber class).
+- **Three version gates, fail-closed, honest sources.** manifest.py's
+  check_floors refuses an api_version above the host contract (1), a
+  cquarry floor above the IMPORTED engine's version (the module's own
+  `__version__` / config.VERSION; dist metadata last because it lags
+  checkouts), and a calibrequarry floor above this package's own version.
+  Every refusal names found, floor, and fix.
+- **The approval gate is the payload hash.** Approvals.approves is true
+  only when the ACTIVE ledger entry's payload sha256 equals the live
+  payload's hash (harness.payload_hash: sorted rel paths + bytes;
+  `__pycache__` and `*.pyc` excluded so a load cannot change the hash).
+  install, update's write path, and `plugin run --apply` all consult it; no
+  flag bypasses.
+- **git sync is fetch + reset --hard FETCH_HEAD.** A bare fetch never
+  touches the working tree, so update's hash compare would read a stale
+  clone; registry clones hold no local work of their own, so gitops.sync
+  hard-resets to FETCH_HEAD and returns the new HEAD. All git ops spawn the
+  binary through the errors="replace" seam (the AST tripwire's blanket).
+- **Plugin module loads are per-plugin unique.** harness.load_plugin uses
+  spec_from_file_location under the name
+  `cquarry_plugin_<plugin>_<module>` -- never find_spec, which consults
+  sys.modules and would bind one plugin's load to another's file (the
+  cross-test ENOENT class). Entry modules are single files resolved under
+  the plugin dir.
+- **The scratch library is the verify fixture.** plugins/scratch.py builds
+  the canonical schema (the tests/_fixtures shape, kept in step with it and
+  documented as such; two seeded books) with no calibre binaries; verify
+  rebuilds it every run.
+
 ## Programmer-facing contract notes (3.93.0 onward, the PDF front-window widen, issue #70)
 
 - **The pages-1-4 window stays the default, and the widen arm fires

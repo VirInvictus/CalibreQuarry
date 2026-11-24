@@ -1,6 +1,6 @@
 # CalibreQuarry Application Specification
 
-**Version:** 3.93.0  
+**Version:** 3.94.0  
 **Language:** Python 3.14+  
 **Dependencies:** `cquarry` (>= 1.29.2), `vir-tui`, `tqdm` (stdlib sqlite3, json, csv, argparse, re, unicodedata, datetime)  
 **License:** MIT
@@ -309,3 +309,45 @@ The `scripts/` directory holds standalone maintenance tools that are **not** par
 | `version_guard.py` | Shared import for the other scripts (not run directly): the `toolchain:` announcement every entry point prints (imported-module `__version__` preferred, dist metadata fallback, `absent` for a package that is not installed) and the floor-refusal helper `reconcile_file_metadata.py` uses to refuse an imported `cquarry_cli` older than the identifier pass's 3.63.5 behavior (exit 2, both versions named, fail-closed on an unreadable version); a lone deployed copy without this file beside it runs unchanged (the announcement falls back to a no-op, and reconcile's skipped floor check says so on stderr) | No | none |
 
 Write capability is the reason these live outside the package: `compress_pdf.py`, `stamp_pdf.py --apply`, `stamp_epub.py --apply`, `reconcile_file_metadata.py --apply`, and `fetch_library_codes.py --apply` mutate things, which the `cquarry` core forbids. Keeping them adjacent but separate preserves the toolkit's read-only promise.
+
+## 6. The plugin system (3.94.0)
+
+`cquarry plugin` manages git-sourced plugins over a registry. A plugin
+declares itself in a `cquarry-plugin.toml` manifest: schema 1; a name equal
+to its directory; an X.Y.Z version; an api_version targeting this host's
+plugin-API contract (integer, currently 1); a license; capabilities a
+non-empty subset of `read`/`write`/`network`; a `module:function` entry
+resolved as a single file under the plugin directory (relative imports are
+out); a description; `[requires]` floors for cquarry and calibrequarry
+(each `>=X.Y.Z`); and an `[upstream]` provenance block. A source with one
+manifest at its root is a single-plugin source; several manifests one level
+deep make a multi-plugin source. Classification is by discovery, never by
+configuration.
+
+- The registry (`~/.config/cquarry/plugins.json`) and the approvals ledger
+  (`~/.config/cquarry/plugin-approvals.json`) are the durable records; the
+  clone cache lives under `~/.local/share/cquarry/plugins/`. The base
+  directory moves with `CQUARRY_PLUGIN_HOME` (the suite's isolation seam).
+- Three version gates check fail-closed at add, install, update, verify,
+  and run, each naming the version found, the floor required, and the fix:
+  `api_version` against the host contract, `requires.cquarry` against the
+  engine the process actually imported (its `__version__`; dist metadata is
+  the last resort because it lags a checkout), and `requires.calibrequarry`
+  against this host.
+- Write-capable plugins install, update, and run `--apply` only on a
+  recorded approval whose payload sha256 matches the live payload (any
+  change re-gates; no flag bypasses it). `plugin verify` is the test run:
+  manifest checks, floor gates, load, and the manifest's `[verify]` probes
+  plus any `--spec` JSON probes, each a dry run against a scratch library
+  built from the canonical schema without calibre binaries.
+- Plugin writes ride the same seams as this CLI's own verbs (the WriteGate
+  over the writeops action factories and `run_write_batch`: dry-run
+  default, backups, the closed-Calibre guard, FORBIDDEN_COLUMNS refused by
+  label). Reads get the opened read-only database, the library root, and
+  the engine's format-path index. Network is declared and logged. The
+  trust boundary is procedural, not a sandbox (Python plugins load
+  in-process); the gates make accidents hard and the records complete.
+- Exit contract: 0 clean; 1 a refused gate (an unapproved or re-gated write
+  plugin, a floor block, a failed verify or probe, a dead source); 2 usage.
+  The proof-of-concept ports live in the GPL-3 `cquarry-plugins`
+  repository, which this MIT host never imports (the Phase 21 lane law).

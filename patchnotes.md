@@ -1,5 +1,68 @@
 # CalibreQuarry Patch Notes
 
+# 3.94.0 (2026-11-23)
+
+### The plugin system host (Phase 21): git-sourced plugins over a registry
+
+The next x.0's headline feature lands: the `cquarry plugin` verb family
+(add, list, install, remove, update, verify, run) over plugins that live in
+git repositories. A plugin declares itself in a `cquarry-plugin.toml`
+manifest (name equal to its directory, X.Y.Z version, api_version, license,
+capabilities read/write/network, a module:function entry point, a
+description, `[requires]` version floors for cquarry AND calibrequarry, and
+an `[upstream]` provenance block). A source carrying one manifest at its
+root is a single-plugin source and several (one per package dir) a
+multi-plugin source, classified by discovery, never by configuration. The
+registry (`~/.config/cquarry/plugins.json`) and the approvals ledger
+(`plugin-approvals.json`) are the durable records; the clone cache lives
+under `~/.local/share/cquarry/plugins/` (`CQUARRY_PLUGIN_HOME` moves all of
+it for tests).
+
+The gates, precisely. Three version gates check fail-closed at add, install,
+update, verify, and run, each naming found, floor, and fix: api_version
+against this host's plugin API contract, `requires.cquarry` against the
+engine the process actually imported (the module's own `__version__`; dist
+metadata is the last resort because it lags a checkout), and
+`requires.calibrequarry` against this host. Write-capable plugins cannot be
+added, updated, or run with `--apply` except on a recorded approval whose
+payload sha256 matches the live payload (any change re-gates; no flag
+bypasses it). The approval is the verify-and-approve ruling:
+`plugin verify <name>` runs the manifest's `[verify]` probes plus any
+`--spec` JSON probes as dry runs against a throwaway scratch library (the
+canonical schema, two seeded books, no calibre binaries), renders the
+report, and prompts for the approval (`--yes` for scripts; non-interactive
+input refuses with the hint instead of hanging). Read-only plugins install
+without the prompt.
+
+Plugin writes ride the same writeops seams the CLI's own verbs write through
+(the WriteGate over the action factories and `run_write_batch`: dry-run
+planning, backups, the closed-Calibre guard, FORBIDDEN_COLUMNS by label);
+reads get the opened read-only database, the library root, and a book-id to
+format-paths resolver; network is declared-and-logged. The trust boundary is
+procedural, not a sandbox (Python plugins load in-process): the gates make
+accidents hard and the records complete. `plugin run <name> [verb...]`
+invokes a registered verb (dry-run default; bare lists the verbs); `plugin
+list --format json` is the machine surface; the new `plugin` help topic
+carries the exit contract plus gates in `--help json`'s topic_details
+(additive-only) and the README help block regenerated in the same pass.
+
+The update flow is the safety story: per source, fetch plus a hard reset to
+FETCH_HEAD (a bare fetch never touches the checked-out tree, so the hash
+compare would read a stale clone), then per-plugin hash compare: unchanged
+is a no-op line, changed read-only updates in place, changed write-capable
+re-verifies and re-approves (the old payload stays installed otherwise),
+plugins newly appearing in a known source are reported and never
+auto-installed, and one dead source never blocks the rest (exit 1 names the
+failures). The git seam is the binary through the standard spawn seam
+(errors="replace"; the AST tripwire blanket; no git library). Plugin module
+loads are per-plugin unique (`spec_from_file_location` under a
+`cquarry_plugin_<plugin>_<module>` name, never `find_spec`, whose
+`sys.modules` consultation would bind one plugin's load to another's file).
+Shipped with the authoring template: `tests/example_echo/`, the smallest
+read-plugin (manifest + one verb), exercised end to end by
+tests/test_plugins.py (40 tests driving real git repositories through add,
+update, and the re-gate).
+
 # 3.93.0 (2026-11-17)
 
 ### The evidence extractor widens past a late copyright leaf (issue #70)

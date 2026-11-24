@@ -31,7 +31,7 @@ SET_TITLE = (
     "set writes (dry-run by default; --apply requires --backup-dir and Calibre closed)"
 )
 
-TOPICS = ("read", "write", "set", "run", "examples", "all", "json")
+TOPICS = ("read", "write", "set", "run", "plugin", "examples", "all", "json")
 
 #: The semantics `--help json` used to leave to the prose pages (issue
 #: #58): the exit contract per topic and the gate annotations that say
@@ -79,6 +79,30 @@ TOPIC_DETAILS = {
             "--backup-dir outside the library",
             "the acquisition-pathway verbs (phase1/sign/approve/phase2/"
             "phase3) have no --apply; the signed manifest is the gate",
+        ],
+    },
+    "plugin": {
+        "exits": "0 clean; 1 a refused gate (an unapproved or re-gated write "
+        "plugin, a floor block, a failed verify or probe, a dead source); "
+        "2 usage.",
+        "gates": [
+            "plugins come from registered sources (git URL or local path); "
+            "the registry (~/.config/cquarry/plugins.json) and the approvals "
+            "ledger (plugin-approvals.json) are the durable records",
+            "three version gates check fail-closed at add, install, update, "
+            "verify, and run: api_version against this host's plugin API, "
+            "requires.cquarry against the engine the process actually "
+            "imported, requires.calibrequarry against this host",
+            "write-capable plugins install, update, and run --apply only on a "
+            "recorded approval whose payload sha256 matches the live payload; "
+            "any change re-gates and no flag bypasses it",
+            "plugin writes ride the same writeops seams as the CLI's own "
+            "verbs (dry-run default, backups, the closed-Calibre guard, "
+            "FORBIDDEN_COLUMNS refused by label); network is "
+            "declared-and-logged",
+            "trust boundary: procedural, not a security sandbox (Python "
+            "plugins load in-process); the gates make accidents hard and "
+            "records complete",
         ],
     },
     "examples": {
@@ -866,6 +890,58 @@ def topic_all(parser) -> str:
     return "\n".join(lines)
 
 
+def topic_plugin() -> str:
+    """The plugin-system page: the verb family, its gates, the exit contract."""
+    lines = [
+        "plugin - the CQ plugin system: git-sourced plugins over a registry",
+        "",
+        "  cquarry plugin add <git-url-or-path>",
+        "      clone (or register a local path), discover the manifests,",
+        "      classify single- vs multi-plugin BY DISCOVERY, and install;",
+        "      write-capable plugins pass the verify-and-approve gate first.",
+        "      --plugin NAME (repeatable) selects a subset of a multi source;",
+        "      --no-install registers the source alone; --force re-discovers",
+        "      a known source; --yes approves without the prompt.",
+        "",
+        "  cquarry plugin list [--format json]",
+        "      the registry: sources with their last-synced commit; per plugin",
+        "      the version, capabilities, live payload hash, approval state,",
+        "      and any floor block. --format json is the machine surface.",
+        "",
+        "  cquarry plugin install <name>",
+        "      install from a registered source (write-capable through the gate).",
+        "",
+        "  cquarry plugin remove <name> | remove --source <url-or-slug>",
+        "      unregister; the approvals entries stay as history.",
+        "",
+        "  cquarry plugin update <name...> | update --all",
+        "      fetch each source, name the commit delta, hash-compare per",
+        "      plugin: unchanged = no-op line; changed read-only = update in",
+        "      place; changed write-capable = re-verify and re-approve (the",
+        "      old payload stays installed otherwise). Plugins newly appearing",
+        "      in a known source are reported, never auto-installed. One dead",
+        "      source never blocks the rest; exit 1 names the failures.",
+        "",
+        "  cquarry plugin verify <name> [--spec FILE]",
+        "      the test run against a scratch library: the manifest's [verify]",
+        "      probes plus any --spec JSON probes, each a dry run. The",
+        "      approval prompt follows for write-capable plugins (--yes for",
+        "      scripts). Read-only plugins install without the prompt.",
+        "",
+        "  cquarry plugin run <name> [verb] [args...]",
+        "      invoke a registered plugin verb (bare: list the verbs).",
+        "      Dry-run default; --apply executes writes behind the approval;",
+        "      --db names the library.",
+        "",
+        f"exit codes: {TOPIC_DETAILS['plugin']['exits']}",
+        "",
+        "gates:",
+    ]
+    for gate in TOPIC_DETAILS["plugin"]["gates"]:
+        lines.append(f"  - {gate}")
+    return "\n".join(lines)
+
+
 def topic_json() -> str:
     """The complete parser surface as machine-readable JSON, generated from
     the live parser (the same anti-rot principle as the flag tables: a new
@@ -954,6 +1030,8 @@ def render_topic(topic: str) -> str:
         return topic_set(parser)
     if topic == "run":
         return topic_run()
+    if topic == "plugin":
+        return topic_plugin()
     if topic == "examples":
         return topic_examples()
     if topic == "all":

@@ -42,7 +42,7 @@ class TestIntercept(unittest.TestCase):
     def test_unknown_topic_is_a_usage_error_naming_the_topics(self):
         code, text = handle_help(["--help", "nope"])
         self.assertEqual(code, 2)
-        self.assertIn("read, write, set, run, examples, all", text)
+        self.assertIn("read, write, set, run, plugin, examples, all, json", text)
 
     def test_topic_beats_following_flags(self):
         # help exits first, exactly like argparse's own action

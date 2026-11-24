@@ -1,0 +1,22 @@
+schema = 1
+name = "example_echo"
+version = "0.1.0"
+api_version = 1
+license = "MIT"
+capabilities = ["read"]
+entry = "example_plugin:register"
+description = "The authoring template: one read verb counting the library's books."
+
+[requires]
+cquarry = ">=1.29.2"
+calibrequarry = ">=3.90.0"
+
+[upstream]
+source = "https://github.com/VirInvictus/CalibreQuarry"
+plugin = "example_echo"
+version = "0.1.0"
+license = "MIT"
+derivation = "original"
+
+[verify]
+probes = ["hello"]
