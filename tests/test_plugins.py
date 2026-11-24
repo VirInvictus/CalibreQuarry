@@ -589,8 +589,10 @@ class TestWriteGateApply(unittest.TestCase):
         try:
             scratch = build_scratch(Path(tmp) / "lib")
             context = PluginContext(
-                plugin_name="p", capabilities=("read", "write"),
-                db_path=str(scratch), dry_run=False,
+                plugin_name="p",
+                capabilities=("read", "write"),
+                db_path=str(scratch),
+                dry_run=False,
             )
             pair = context.write.plan_identifier(2, "isbn", "9780140445688")
             self.assertIsInstance(pair, tuple)
