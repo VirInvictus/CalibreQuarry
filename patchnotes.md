@@ -2,6 +2,25 @@
 
 # CalibreQuarry Patch Notes
 
+# 3.96.0 (2026-11-24)
+
+### Multi-file plugins: the loader's package half
+
+The quality_check port's battery is too big for one file, so the loader
+grows the package half: the entry module loads with
+`submodule_search_locations` pointed at the plugin directory, which makes
+`from . import sibling` resolve against the plugin dir under the entry's
+unique per-plugin package name (the single-file contract, the
+sys.modules-staleness protections, and every gate are unchanged;
+single-file plugins never notice). Pinned by a two-file fixture plugin
+whose entry imports a sibling and registers through it. The same release
+grows the WriteGate a `plan_refresh_format_size` seam (cquarry's
+`format_metadata(update_db=True)` -- the stored-size repair the
+quality_check fix battery rides) as a writeops action factory wrapped by
+the gate like every other seam.
+
+# CalibreQuarry Patch Notes
+
 # 3.95.3 (2026-11-24)
 
 ### The WriteGate carries the merge-field seams the actions half needs

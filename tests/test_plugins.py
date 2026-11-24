@@ -726,6 +726,37 @@ class TestConfigSeam(unittest.TestCase):
                 os.environ["CQUARRY_PLUGIN_HOME"] = old
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_multi_file_package_plugin_loads(self) -> None:
+        """The loader's package half: `from . import sibling` resolves
+        against the plugin dir under the unique per-plugin package name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin = _write_plugin(root, "packaged")
+            (root / "packaged" / "packaged_helper.py").write_text(
+                "HELLO = 'from the helper'\n"
+            )
+            plugin_py = root / "packaged" / "plugin.py"
+            plugin_py.write_text(
+                "from . import plugin_helper as _helper\n\n\n"
+                "def register(context):\n"
+                "    def hello(ctx, argv):\n"
+                "        print(_helper.HELLO)\n"
+                "        return 0\n"
+                "    return {'hello': hello}\n"
+            )
+            from cquarry_cli.plugins.gates import PluginContext
+            from cquarry_cli.plugins.harness import load_plugin
+            from cquarry_cli.plugins.manifest import load_manifest
+
+            manifest = load_manifest(root / "packaged" / "cquarry-plugin.toml")
+            context = PluginContext(
+                plugin_name="packaged", capabilities=("read",), dry_run=True
+            )
+            _module, _register, verbs = load_plugin(manifest, context)
+            # the sibling import resolved: the module imported cleanly, so
+            # registration succeeded and the verbs dict carried hello
+            self.assertIn("hello", verbs)
+
     def test_plan_seam_allows_dry_planning(self) -> None:
         """Contract 3: planning (label building) is allowed in dry runs;
         execution still demands the write capability."""

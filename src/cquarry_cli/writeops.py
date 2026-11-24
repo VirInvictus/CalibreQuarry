@@ -446,6 +446,19 @@ def action_remove_format(book_id, fmt, *, quiet=False):
     return _do
 
 
+def action_refresh_format_size(book_id, fmt, *, quiet=False):
+    def _do(wdb):
+        meta = wdb.format_metadata(book_id, fmt, update_db=True, commit=True)
+        size = meta.get("size") if isinstance(meta, dict) else None
+        if not quiet:
+            print(
+                f"Refreshed stored size of {fmt.upper()} on book {book_id} ({size} bytes)."
+            )
+        return 0, "applied"
+
+    return _do
+
+
 def action_set_cover(book_id, has_cover, *, quiet=False):
     def _do(wdb):
         changed = wdb.set_has_cover(book_id, has_cover)

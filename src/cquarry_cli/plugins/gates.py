@@ -201,6 +201,17 @@ class WriteGate:
         action = writeops.action_set_comments(book_id, value)
         return f"set comments on book {book_id}", action
 
+    def plan_refresh_format_size(self, book_id: int, fmt: str) -> tuple[str, object]:
+        """Re-hash a format's on-disk size into the stored row (upstream's
+        stored-size repair: format_metadata(update_db=True))."""
+
+        def _do(wdb):
+            meta = wdb.format_metadata(book_id, fmt, update_db=True, commit=True)
+            size = meta.get("size") if isinstance(meta, dict) else None
+            return 0, f"refreshed ({size} bytes)" if size else "applied"
+
+        return f"refresh stored size of {fmt} on book {book_id}", _do
+
     def plan_remove_book(self, book_id: int) -> tuple[str, object]:
         """Remove a book row. The gate forces the confirm flag: the layers
         above it (the plugin approval, the dry-run default, the apply

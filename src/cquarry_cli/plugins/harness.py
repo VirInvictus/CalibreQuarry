@@ -66,8 +66,16 @@ def load_plugin(manifest: Manifest, context: PluginContext):
     # A unique per-plugin module name: two plugins may ship the same module
     # basename, and a stale sys.modules entry must never bind one plugin's
     # load to another's file (the cross-test ENOENT class).
+    #
+    # submodule_search_locations makes the entry module a package whose
+    # __path__ is the plugin dir, so multi-file plugins work:
+    # `from . import sibling` inside plugin code resolves against the
+    # plugin directory (the loader contract's package half; single-file
+    # plugins never notice).
     spec = importlib.util.spec_from_file_location(
-        f"cquarry_plugin_{manifest.name}_{module_name}", module_file
+        f"cquarry_plugin_{manifest.name}_{module_name}",
+        module_file,
+        submodule_search_locations=[str(module_file.parent)],
     )
     if spec is None or spec.loader is None:
         raise ImportError(f"could not build a loader for {module_file}")
