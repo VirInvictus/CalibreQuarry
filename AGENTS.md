@@ -39,6 +39,13 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   sys.modules and would bind one plugin's load to another's file (the
   cross-test ENOENT class). Entry modules are single files resolved under
   the plugin dir.
+- **`plugin run`'s tail is REMAINDER.** The verb tail passes verbatim
+  (argparse never hands unknown option-likes to a `nargs="*"`); the
+  host's `--apply`/`--library` precede the plugin NAME (3.94.2, the drill
+  find). The library is the subparser's OWN `--library` flag, never the
+  top-level `--db` re-declared with SUPPRESS: CI caught that clobbering
+  the parent namespace value on Python 3.14; `args.library or args.db`
+  is version-proof.
 - **The WriteGate plans label pairs.** plan_identifier returns the
   `(label, action)` tuple run_write_batch iterates (3.94.1: the gate
   owns the label because the batch results print it; the bare-closure

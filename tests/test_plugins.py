@@ -339,7 +339,7 @@ class TestVerbs(PluginHomeCase):
         main(["plugin", "add", str(EXAMPLE)])
         buffer = io.StringIO()
         with redirect_stdout(buffer):
-            code = main(["plugin", "run", "--db", "unused", "example_echo"])
+            code = main(["plugin", "run", "--library", "unused", "example_echo"])
         self.assertEqual(code, 0)
         self.assertIn("verbs for example_echo: hello", buffer.getvalue())
 
@@ -369,7 +369,7 @@ class TestVerbs(PluginHomeCase):
                     "plugin",
                     "run",
                     "--apply",
-                    "--db",
+                    "--library",
                     str(scratch),
                     "writer_repo",
                     "hello",
@@ -380,7 +380,7 @@ class TestVerbs(PluginHomeCase):
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
                 code = main(
-                    ["plugin", "run", "--db", str(scratch), "writer_repo", "hello"]
+                    ["plugin", "run", "--library", str(scratch), "writer_repo", "hello"]
                 )
             self.assertEqual(code, 0)
 
@@ -570,10 +570,20 @@ class TestSurfaceWiring(unittest.TestCase):
         # the host's), and the host flags precede the plugin name.
         parser = build_parser()
         args = parser.parse_args(
-            ["plugin", "run", "--apply", "--db", "/tmp/x", "p", "scan", "--ids", "2"]
+            [
+                "plugin",
+                "run",
+                "--apply",
+                "--library",
+                "/tmp/x",
+                "p",
+                "scan",
+                "--ids",
+                "2",
+            ]
         )
         self.assertTrue(args.apply)
-        self.assertEqual(args.db, "/tmp/x")
+        self.assertEqual(args.library, "/tmp/x")
         self.assertEqual(args.plugin_name, "p")
         self.assertEqual(args.plugin_args, ["scan", "--ids", "2"])
 

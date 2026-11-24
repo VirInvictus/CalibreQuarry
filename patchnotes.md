@@ -10,10 +10,15 @@ The dogfood drill caught it live: argparse never hands an unknown
 option-like token to a `nargs="*"` positional, so the plugin verb tail's
 own flags (`--ids`, `--search`, `--prefixes`) errored at the host parser
 no matter where they sat. The tail is now `nargs=argparse.REMAINDER`: it
-passes verbatim, and the HOST's flags (`--apply`, `--db`) precede the
-plugin NAME (`cquarry plugin run --apply --db X name verb --ids 2`), the
-convention the help page and the verb help now state. Pinned by the
-parser test driving the pass-through tail and the bare tail.
+passes verbatim, and the HOST's flags (`--apply`, `--library`) precede
+the plugin NAME (`cquarry plugin run --apply --library X name verb --ids
+2`), the convention the help page and the verb help now state. The
+library flag is the subparser's own `--library` (never the top-level
+`--db` re-declared): CI caught the SUPPRESS-default subparser flag
+clobbering the parent namespace's value on Python 3.14, which sent an
+explicitly-named scratch to find_db; `args.library or args.db` is
+version-proof. Pinned by the parser test driving the pass-through tail
+and the bare tail.
 
 # CalibreQuarry Patch Notes
 

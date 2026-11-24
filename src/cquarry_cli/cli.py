@@ -1082,10 +1082,11 @@ def build_parser() -> argparse.ArgumentParser:
         "tail is the plugin's own flag space",
     )
     prun_p.add_argument(
-        "--db",
-        default=argparse.SUPPRESS,
-        help="the library the verb reads (the saved default when omitted; "
-        "SUPPRESS so the top-level --db value is never clobbered)",
+        "--library",
+        default=None,
+        help="the library the verb reads (path to metadata.db; the saved "
+        "default when omitted; a separate flag from --db so the subparser "
+        "can never clobber the top-level value)",
     )
     prun_p.add_argument(
         "--apply",

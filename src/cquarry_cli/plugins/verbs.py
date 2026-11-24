@@ -476,7 +476,7 @@ def cmd_run(args) -> int:
             "cquarry plugin verify <name> re-gates it"
         )
         return 1
-    db_path = args.db
+    db_path = getattr(args, "library", None) or args.db
     if db_path is None:
         from cquarry.helpers import find_db
 
