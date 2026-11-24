@@ -1,6 +1,51 @@
 # CalibreQuarry Patch Notes
 
-# CalibreQuarry Patch Notes
+# 3.96.2 (2026-11-24)
+
+### The documentation audit pass: the role-split reorg, the drift fixes, and the quarry-wall logo
+
+- **The 2026-11-24 docs audit** (doc-drift + dead-reference census over
+  README/spec/roadmap/patchnotes/AGENTS at 3.96.1; 13 drift findings, 2 HIGH)
+  drove every change in this release. The two HIGH findings were spec §6's
+  stale plugin contract and roadmap's unticked Phase 21 boxes; both closed
+  below. No code changes; the suite is green unchanged.
+- **The docs role split (Brandon's ruling, 2026-11-24):** README is
+  user-facing; AGENTS.md is the programmer/AI contract plus decisions;
+  spec.md is the never-stale foundation; roadmap.md collapses into its
+  ledger every pass (the global prune-every-pass rule); patchnotes.md is
+  the versioned, tag-tied record. Executed: the README's "Full help output"
+  and "Companion scripts" blocks moved verbatim to docs/cli-reference.md and
+  docs/companion-scripts.md (README keeps a compact 17-script table and
+  links; the help-paste regen duty is unchanged and now documented in the
+  reference file); AGENTS.md's 74 per-release contract-note sections
+  (3.93.x back to 3.24.0, about 2,200 lines) moved verbatim to
+  docs/contract-notes.md, and AGENTS.md (2,509 -> 273 lines) now carries a
+  standing-contracts digest, the 3.94+ plugin-era notes, and the Decisions
+  section; roadmap's "Records kept" moved into that Decisions section
+  verbatim, with a pointer left behind; roadmap's Phase 20/21 blocks
+  collapsed into three ledger rows (Triage waves, Phase 20, Phase 21; full
+  text preserved at the tree of b8c89bb) and the genuinely open residue
+  (quality_check v0.6.0, bindery-as-plugin, the upstream sync cadence)
+  moved under Open work; project.done deleted (fully historical per the
+  census: every reopen item shipped, closed by recorded decision, or
+  tracked live elsewhere).
+- **Drift fixes, every audit finding:** spec §6 names the real host
+  contract (3, not 1) and the multi-file package entry (3.96.0); the
+  integration-verb enumeration gained cover-source; the §2.2 engine pointer
+  reads cquarry/search.py; the recipe enumeration is version-qualified
+  (1,149 builtins on Calibre 9.19) in spec and README; the README test
+  count is current (1,420 across 40 as of 3.96.1) and the tested-environment
+  note reads Fedora 45 / Calibre 9.19; AGENTS.md's "host contract (1)"
+  contradiction and the --list-recipes flag name are fixed (the latter in
+  the archive); patchnotes.md's title line appears once (it had been
+  re-prepended 9x between the newest entries), the 3.84.1 subtitle
+  capitalizes like its siblings, and the 3.52.0 entry carries an erratum
+  recording its never-tagged status.
+- **The logo:** the April 2026 terminal-window banner is retired; the new
+  mark is the quarry wall (book spines as a cut stone mass, one sand block
+  extracted with chips below), square, Kanagawa Dragon palette, no font
+  dependencies; the README header shows it at 120px. Three concepts were
+  drafted and rendered; Brandon picked the wall.
 
 # 3.96.1 (2026-11-24)
 
@@ -14,8 +59,6 @@ correct; the lint miss and a missing AGENTS paragraph landed on main
 immediately after (6893277, CI green). This release re-tags that state
 per the house erratum rule; the v3.96.0 tag stays as history with no
 Release minted (the publish workflow refused it at red, correctly).
-
-# CalibreQuarry Patch Notes
 
 # 3.96.0 (2026-11-24)
 
@@ -34,8 +77,6 @@ grows the WriteGate a `plan_refresh_format_size` seam (cquarry's
 quality_check fix battery rides) as a writeops action factory wrapped by
 the gate like every other seam.
 
-# CalibreQuarry Patch Notes
-
 # 3.95.3 (2026-11-24)
 
 ### The WriteGate carries the merge-field seams the actions half needs
@@ -48,8 +89,6 @@ written for the find_duplicates actions but left UNCOMMITTED while the
 plugins v0.4.0 tagged and shipped, whose CI then failed against the
 released host (`plan_set_authors` missing); the erratum is recorded in
 that repo's v0.4.1, whose manifest floor names this release.
-
-# CalibreQuarry Patch Notes
 
 # 3.95.2 (2026-11-24)
 
@@ -66,8 +105,6 @@ plugins stay welcome; 4 refuses); the floor system carries the rest, so
 an actions-class plugin declares `calibrequarry >= 3.95.2`. Pinned by the
 seam test: dry planning works, dry EXECUTION still raises, and the
 apply-context faces are the same object.
-
-# CalibreQuarry Patch Notes
 
 # 3.95.1 (2026-11-24)
 
@@ -89,8 +126,6 @@ Calibre's `books_delete_trg` cascade trigger, without which the removed
 book's data rows strand (found live by this very test -- on a real library
 the trigger is upstream's own).
 
-# CalibreQuarry Patch Notes
-
 # 3.95.0 (2026-11-24)
 
 ### The plugin API contract grows to 2: the per-plugin config seam
@@ -104,8 +139,6 @@ plugin-API contract increments to 2; plugins declaring api_version 1 stay
 welcome (the check is an upper bound), plugins declaring above 2 refuse
 naming the fix. Pinned by the seam round-trip (isolated dirs per plugin)
 and the contract-refusal test.
-
-# CalibreQuarry Patch Notes
 
 # 3.94.2 (2026-11-23)
 
@@ -124,8 +157,6 @@ clobbering the parent namespace's value on Python 3.14, which sent an
 explicitly-named scratch to find_db; `args.library or args.db` is
 version-proof. Pinned by the parser test driving the pass-through tail
 and the bare tail.
-
-# CalibreQuarry Patch Notes
 
 # 3.94.1 (2026-11-23)
 
@@ -746,7 +777,7 @@ bullet in the same pass.
 
 # 3.84.1 (2026-11-05)
 
-### the real-instrument screen test runs again (tests only; no behavior changes)
+### The real-instrument screen test runs again (tests only; no behavior changes)
 
 `test_screen_duplicates_against_the_real_script` (tests/test_run.py)
 had skipped itself on EVERY machine since the 2026-09-08 sweep: its
@@ -3087,6 +3118,12 @@ No behavior changes: this release is help text and the claim map only.
 - **stamp_pdf refuses an `--isbn` failing its check digit at the tool boundary** (roadmap 2026-09-19 box): `_check_isbn` runs cquarry's `isbn_check_digit_is_valid` (10- or 13-form, separators tolerated) and exits 2 before anything stamps, in dry-run and apply alike, so the guard lives where the write happens instead of in every caller's batch script. Correction found while pinning the test: the Hewitt "valid form" 1-59863-503-5 named in the roadmap box ALSO fails its checksum and is refused like every other bad number; that ISBN needs re-sourcing, not re-typing.
 - **The phase-2 metadata download writes pubdate at date-only precision** (roadmap 2026-09-16 box, recurred 2026-09-21): `_apply_opf` truncates every OPF date to `YYYY-MM-DD` before `set_pubdate`, because downloaded metadata carries no trustworthy time-of-day and the downloader was landing `2010-05-25 01:49:00.233821+00:00`-shaped values (42 of 47 books in one batch shared the same minute-band, all normalized by hand in phase 3). Bare years and exotic forms ride through unchanged, failing `set_pubdate` exactly as before; reconcile is untouched.
 - **Docs and tests**: the four roadmap boxes are ticked with fix notes; spec § 5's screen_duplicate and stamp_pdf rows name the new behavior; CLAUDE.md gains the 3.52.0 contract-notes section. New tests: the classifier case table (all three 2026-09-21 cases plus the Moral Letters, Arcana, and roman-volume shapes), the masked-duplicate and Monster Vault library fixtures, within-batch cross-reference classes, the seam's advisory notes, phase-1's advisory recording without refusal, the ISBN guard's refusals and passes, and the pubdate truncation end to end through `_apply_opf` (643 tests, one skip on ebook-meta-less machines). NOTE FOR THE LIBRARY SKILLS: the phase-1 skill's duplicate-screen prose describes the old normalizer behavior and needs one line updated (related candidates and volume sets now surface in the report and manifest instead of nothing) — left for Brandon, outside this repo.
+
+> Erratum (2026-11-24, the docs audit): this release shipped without its
+> tag; no v3.52.0 exists locally or on the remote (the lone untagged release
+> since 3.26.0). The entry is history-only. No retro-tag was cut (a late tag
+> push would fire publish.yml at a months-old commit); the gap is recorded
+> here instead.
 
 # 3.51.0 (2026-09-21)
 

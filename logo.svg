@@ -1,68 +1,45 @@
-<svg width="100%" viewBox="0 0 680 320" xmlns="http://www.w3.org/2000/svg">
-<style>
-  :root {
-    --bg-opacity: 0.08;
-    --stroke: #8490a0;
-    --text-primary: #5a6270;
-    --text-secondary: #8490a0;
-    --rect-fill: #5a6270;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg-opacity: 0.15;
-      --stroke: #a0acbc;
-      --text-primary: #d0d7e0;
-      --text-secondary: #a0acbc;
-      --rect-fill: #d0d7e0;
-    }
-  }
-  .stroke-color { stroke: var(--stroke); }
-  .fill-color { fill: var(--stroke); fill-opacity: var(--bg-opacity); }
-  .text-p { fill: var(--text-primary); }
-  .text-s { fill: var(--text-secondary); }
-  .rect-f { fill: var(--rect-fill); }
-</style>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- CalibreQuarry: the quarry wall. Book spines as a cut stone mass; one block extracted, chisel-notched, held above the wall. Kanagawa Dragon palette; no font dependencies. -->
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#181616"/>
 
-<rect x="40" y="40" width="600" height="240" fill="none" class="stroke-color" stroke-width="0.5"/>
+  <!-- the cut plane: one horizontal quarry cut through the whole wall -->
+  <line x1="96" y1="300" x2="440" y2="300" stroke="#181616" stroke-width="6"/>
 
-<rect x="40" y="40" width="600" height="32" class="fill-color"/>
-<line x1="40" y1="72" x2="640" y2="72" class="stroke-color" stroke-width="0.5"/>
+  <!-- ground -->
+  <rect x="56" y="396" width="400" height="5" rx="2.5" fill="#625e5a" opacity="0.55"/>
 
-<circle cx="60" cy="56" r="5" fill="none" class="stroke-color" stroke-width="0.5"/>
-<circle cx="78" cy="56" r="5" fill="none" class="stroke-color" stroke-width="0.5"/>
-<circle cx="96" cy="56" r="5" fill="none" class="stroke-color" stroke-width="0.5"/>
+  <!-- slab 1 -->
+  <rect x="100" y="252" width="44" height="146" rx="4" fill="#282727"/>
+  <line x1="110" y1="282" x2="134" y2="282" stroke="#181616" stroke-width="4" opacity="0.7"/>
+  <line x1="110" y1="330" x2="134" y2="330" stroke="#181616" stroke-width="4" opacity="0.7"/>
 
-<text x="340" y="59" text-anchor="middle" font-family="'SF Mono','Cascadia Code','JetBrains Mono','Fira Code',Consolas,'Liberation Mono',Menlo,monospace" font-size="11" class="text-s" font-weight="400">~/Calibre $ cquarry</text>
+  <!-- slab 2 (dim, with its own cut notch) -->
+  <rect x="152" y="222" width="50" height="176" rx="4" fill="#625e5a" opacity="0.5"/>
+  <line x1="163" y1="252" x2="191" y2="252" stroke="#181616" stroke-width="4" opacity="0.6"/>
+  <line x1="163" y1="330" x2="191" y2="330" stroke="#181616" stroke-width="4" opacity="0.6"/>
 
-<g opacity="0.06">
-  <rect x="80" y="100" width="18" height="24" class="rect-f" rx="1"/>
-  <rect x="102" y="96" width="18" height="28" class="rect-f" rx="1"/>
-  <rect x="124" y="102" width="18" height="22" class="rect-f" rx="1"/>
-  <rect x="146" y="94" width="18" height="30" class="rect-f" rx="1"/>
-  <rect x="168" y="98" width="18" height="26" class="rect-f" rx="1"/>
-  <rect x="190" y="104" width="18" height="20" class="rect-f" rx="1"/>
-  <rect x="212" y="92" width="18" height="32" class="rect-f" rx="1"/>
-  <rect x="234" y="100" width="18" height="24" class="rect-f" rx="1"/>
+  <!-- slab 4 -->
+  <rect x="286" y="234" width="50" height="164" rx="4" fill="#282727"/>
+  <line x1="297" y1="264" x2="325" y2="264" stroke="#181616" stroke-width="4" opacity="0.7"/>
+  <line x1="297" y1="338" x2="325" y2="338" stroke="#181616" stroke-width="4" opacity="0.7"/>
 
-  <rect x="444" y="98" width="18" height="26" class="rect-f" rx="1"/>
-  <rect x="466" y="92" width="18" height="32" class="rect-f" rx="1"/>
-  <rect x="488" y="102" width="18" height="22" class="rect-f" rx="1"/>
-  <rect x="510" y="96" width="18" height="28" class="rect-f" rx="1"/>
-  <rect x="532" y="104" width="18" height="20" class="rect-f" rx="1"/>
-  <rect x="554" y="94" width="18" height="30" class="rect-f" rx="1"/>
-  <rect x="576" y="100" width="18" height="24" class="rect-f" rx="1"/>
-  <rect x="598" y="96" width="18" height="28" class="rect-f" rx="1"/>
-</g>
+  <!-- slab 5 (dim) -->
+  <rect x="344" y="196" width="44" height="202" rx="4" fill="#625e5a" opacity="0.5"/>
+  <line x1="354" y1="226" x2="378" y2="226" stroke="#181616" stroke-width="4" opacity="0.6"/>
+  <line x1="354" y1="330" x2="378" y2="330" stroke="#181616" stroke-width="4" opacity="0.6"/>
 
-<text x="340" y="155" text-anchor="middle" font-family="'SF Mono','Cascadia Code','JetBrains Mono','Fira Code',Consolas,'Liberation Mono',Menlo,monospace" font-size="48" class="text-p" font-weight="500" letter-spacing="-2">CalibreQuarry</text>
+  <!-- slab 6 -->
+  <rect x="396" y="268" width="40" height="130" rx="4" fill="#282727"/>
+  <line x1="405" y1="330" x2="427" y2="330" stroke="#181616" stroke-width="4" opacity="0.7"/>
 
-<line x1="140" y1="190" x2="540" y2="190" class="stroke-color" stroke-width="0.5"/>
+  <!-- chips fallen into the gap under the lifted block -->
+  <rect x="226" y="378" width="13" height="13" rx="2" fill="#c4b28a" opacity="0.5" transform="rotate(24 232.5 384.5)"/>
+  <rect x="270" y="382" width="10" height="10" rx="2" fill="#c4b28a" opacity="0.35" transform="rotate(-18 275 387)"/>
 
-<text x="340" y="212" text-anchor="middle" font-family="'SF Mono','Cascadia Code','JetBrains Mono','Fira Code',Consolas,'Liberation Mono',Menlo,monospace" font-size="11" class="text-s" font-weight="400" letter-spacing="3">CATALOG · AUDIT · SERIES · EXPORT</text>
-
-<rect x="40" y="252" width="600" height="28" class="fill-color"/>
-<line x1="40" y1="252" x2="640" y2="252" class="stroke-color" stroke-width="0.5"/>
-
-<text x="56" y="270" font-family="'SF Mono','Cascadia Code','JetBrains Mono','Fira Code',Consolas,'Liberation Mono',Menlo,monospace" font-size="10" class="text-s" font-weight="400">--catalog  --all-wings  --stats  --audit  --recent  --series  --export  --wings</text>
-
+  <!-- the extracted block: well clear of the wall, notch at the head -->
+  <rect x="214" y="120" width="60" height="220" rx="5" fill="#c4b28a"/>
+  <rect x="228" y="152" width="32" height="7" rx="3.5" fill="#181616"/>
+  <line x1="228" y1="208" x2="260" y2="208" stroke="#181616" stroke-width="5" opacity="0.55"/>
+  <line x1="228" y1="234" x2="260" y2="234" stroke="#181616" stroke-width="5" opacity="0.55"/>
+  <line x1="228" y1="260" x2="260" y2="260" stroke="#181616" stroke-width="5" opacity="0.55"/>
 </svg>
