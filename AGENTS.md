@@ -39,6 +39,12 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   sys.modules and would bind one plugin's load to another's file (the
   cross-test ENOENT class). Entry modules are single files resolved under
   the plugin dir.
+- **The WriteGate carries the merge-field seams (3.95.3).**
+  plan_set_authors/plan_add_tags/plan_set_languages/plan_set_rating/
+  plan_set_pubdate/plan_set_publisher/plan_set_comments -- the
+  fill/union half of a plugin merge. LANE RULE RE-PROVEN: the gates
+  were written but left uncommitted when the dependent plugin tagged;
+  commit the host BEFORE the dependent's tag.
 - **The gate has two faces: plan and write (contract 3, 3.95.2).**
   `context.plan.X(...)` builds label/action pairs and is legal in dry
   runs (planning is label construction); `context.write.apply(...)`

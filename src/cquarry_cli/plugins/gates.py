@@ -173,6 +173,34 @@ class WriteGate:
         action = writeops.action_rename_entity(kind, old, new)
         return f"rename {kind} {old!r} -> {new!r}", action
 
+    def plan_set_authors(self, book_id: int, names: list[str]) -> tuple[str, object]:
+        action = writeops.action_set_authors(book_id, names)
+        return f"set authors on book {book_id} to {names}", action
+
+    def plan_add_tags(self, book_id: int, tags: list[str]) -> tuple[str, object]:
+        action = writeops.action_add_tag(book_id, tags)
+        return f"add tags {tags} to book {book_id}", action
+
+    def plan_set_languages(self, book_id: int, codes: list[str]) -> tuple[str, object]:
+        action = writeops.action_set_languages(book_id, codes)
+        return f"set languages on book {book_id} to {codes}", action
+
+    def plan_set_rating(self, book_id: int, stars: int) -> tuple[str, object]:
+        action = writeops.action_set_rating(book_id, stars)
+        return f"set rating on book {book_id} to {stars}", action
+
+    def plan_set_pubdate(self, book_id: int, value: str) -> tuple[str, object]:
+        action = writeops.action_set_pubdate(book_id, value)
+        return f"set pubdate on book {book_id} to {value!r}", action
+
+    def plan_set_publisher(self, book_id: int, name: str) -> tuple[str, object]:
+        action = writeops.action_set_publisher(book_id, name)
+        return f"set publisher on book {book_id} to {name!r}", action
+
+    def plan_set_comments(self, book_id: str, value: str) -> tuple[str, object]:
+        action = writeops.action_set_comments(book_id, value)
+        return f"set comments on book {book_id}", action
+
     def plan_remove_book(self, book_id: int) -> tuple[str, object]:
         """Remove a book row. The gate forces the confirm flag: the layers
         above it (the plugin approval, the dry-run default, the apply

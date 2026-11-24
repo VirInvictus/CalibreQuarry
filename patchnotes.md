@@ -2,6 +2,21 @@
 
 # CalibreQuarry Patch Notes
 
+# 3.95.3 (2026-11-24)
+
+### The WriteGate carries the merge-field seams the actions half needs
+
+Seven more plan methods on the gate, each the same (label, action) pair
+shape: plan_set_authors, plan_add_tags, plan_set_languages,
+plan_set_rating, plan_set_pubdate, plan_set_publisher, and
+plan_set_comments -- the fill/union half of a plugin merge. These were
+written for the find_duplicates actions but left UNCOMMITTED while the
+plugins v0.4.0 tagged and shipped, whose CI then failed against the
+released host (`plan_set_authors` missing); the erratum is recorded in
+that repo's v0.4.1, whose manifest floor names this release.
+
+# CalibreQuarry Patch Notes
+
 # 3.95.2 (2026-11-24)
 
 ### Contract 3: the plan seam -- dry runs may build label/action pairs
