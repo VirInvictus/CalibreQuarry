@@ -94,6 +94,17 @@ class PluginContext:
 
         save_json(self.config_path(), data)
 
+    # -- the plan seam ---------------------------------------------------
+
+    @property
+    def plan(self) -> "WriteGate":
+        """The gate's PLANNING face: building (label, action) pairs is
+        read-only label construction, allowed in dry runs too -- the probe
+        and dry-run reports need the full plan. EXECUTION still goes
+        through .write.apply(), which requires the write capability and a
+        non-dry context."""
+        return _WRITE_GATE
+
     # -- the write gate -------------------------------------------------
 
     @property

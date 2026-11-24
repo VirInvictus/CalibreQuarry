@@ -135,7 +135,7 @@ def check_floors(manifest: Manifest) -> None:
 #: entry surface changes shape; plugins declaring a higher api_version refuse
 #: above. Contract 2 adds the per-plugin config seam
 #: (PluginContext.load_config/save_config).
-_HOST_API_VERSION = 2
+_HOST_API_VERSION = 3
 
 
 def load_manifest(path: Path) -> Manifest:

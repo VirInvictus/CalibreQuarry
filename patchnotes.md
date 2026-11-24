@@ -2,6 +2,24 @@
 
 # CalibreQuarry Patch Notes
 
+# 3.95.2 (2026-11-24)
+
+### Contract 3: the plan seam -- dry runs may build label/action pairs
+
+The find_duplicates actions verb's dry run needs the FULL plan (every
+label it would execute), but building the pairs through `.write` raised
+under dry runs -- planning is label construction, not a mutation, so the
+honest fix is a second face on the gate: `PluginContext.plan` returns the
+same gate without the write-capability check; execution still goes
+through `.write.apply()`, which demands the capability and a non-dry
+context. The plugin-API contract increments to 3 (api_version 1 and 2
+plugins stay welcome; 4 refuses); the floor system carries the rest, so
+an actions-class plugin declares `calibrequarry >= 3.95.2`. Pinned by the
+seam test: dry planning works, dry EXECUTION still raises, and the
+apply-context faces are the same object.
+
+# CalibreQuarry Patch Notes
+
 # 3.95.1 (2026-11-24)
 
 ### The WriteGate grows the action seams: formats, entity renames, book removal

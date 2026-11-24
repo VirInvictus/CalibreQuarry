@@ -726,7 +726,40 @@ class TestConfigSeam(unittest.TestCase):
                 os.environ["CQUARRY_PLUGIN_HOME"] = old
             shutil.rmtree(home, ignore_errors=True)
 
-    def test_contract_2_accepted_contract_3_refused(self) -> None:
+    def test_plan_seam_allows_dry_planning(self) -> None:
+        """Contract 3: planning (label building) is allowed in dry runs;
+        execution still demands the write capability."""
+        from cquarry_cli.plugins.gates import PluginContext
+
+        home = Path(tempfile.mkdtemp(prefix="cq-plan-"))
+        old = os.environ.get("CQUARRY_PLUGIN_HOME")
+        os.environ["CQUARRY_PLUGIN_HOME"] = str(home)
+        try:
+            dry = PluginContext(
+                plugin_name="p",
+                capabilities=("read", "write"),
+                db_path="/tmp/nowhere.db",
+                dry_run=True,
+            )
+            pair = dry.plan.plan_identifier(1, "isbn", "9780140445688")
+            self.assertIsInstance(pair, tuple)
+            with self.assertRaises(PermissionError):
+                _ = dry.write  # execution stays gated under dry runs
+            apply_ctx = PluginContext(
+                plugin_name="p",
+                capabilities=("read", "write"),
+                db_path="/tmp/nowhere.db",
+                dry_run=False,
+            )
+            self.assertIs(apply_ctx.write, apply_ctx.plan)
+        finally:
+            if old is None:
+                os.environ.pop("CQUARRY_PLUGIN_HOME", None)
+            else:
+                os.environ["CQUARRY_PLUGIN_HOME"] = old
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_contract_2_and_3_accepted_contract_4_refused(self) -> None:
         from cquarry_cli.plugins.manifest import FloorError, check_floors, load_manifest
 
         manifest = load_manifest(EXAMPLE / "cquarry-plugin.toml")
@@ -737,7 +770,13 @@ class TestConfigSeam(unittest.TestCase):
             path = plugin / "cquarry-plugin.toml"
             path.write_text(
                 _manifest_text("future_api").replace(
-                    "api_version = 1", "api_version = 3"
+                    "api_version = 1", "api_version = 2"
+                )
+            )
+            check_floors(load_manifest(path))  # contracts 2 and 3 stay welcome
+            path.write_text(
+                _manifest_text("future_api").replace(
+                    "api_version = 1", "api_version = 4"
                 )
             )
             with self.assertRaises(FloorError):

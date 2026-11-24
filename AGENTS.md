@@ -39,6 +39,11 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   sys.modules and would bind one plugin's load to another's file (the
   cross-test ENOENT class). Entry modules are single files resolved under
   the plugin dir.
+- **The gate has two faces: plan and write (contract 3, 3.95.2).**
+  `context.plan.X(...)` builds label/action pairs and is legal in dry
+  runs (planning is label construction); `context.write.apply(...)`
+  executes and demands the capability + a non-dry context. Plugins
+  using `plan` declare api_version 3 / floor >=3.95.2.
 - **The WriteGate plans action pairs too (3.95.1).** plan_add_format
   (the FILE copy stays the plugin's), plan_remove_format,
   plan_rename_entity, and plan_remove_book (confirm forced -- the
