@@ -577,5 +577,38 @@ class TestSurfaceWiring(unittest.TestCase):
                     os.environ["CQUARRY_PLUGIN_HOME"] = old
 
 
+class TestWriteGateApply(unittest.TestCase):
+    """The WriteGate's plan output must be consumable by run_write_batch:
+    the (label, action) pair shape (the extract_isbn port's live find)."""
+
+    def test_plan_identifier_yields_label_action_pairs(self) -> None:
+        from cquarry_cli.plugins.gates import PluginContext, _WRITE_GATE
+        from cquarry_cli.plugins.scratch import build_scratch
+
+        tmp = tempfile.mkdtemp(prefix="cq-gate-")
+        try:
+            scratch = build_scratch(Path(tmp) / "lib")
+            context = PluginContext(
+                plugin_name="p", capabilities=("read", "write"),
+                db_path=str(scratch), dry_run=False,
+            )
+            pair = context.write.plan_identifier(2, "isbn", "9780140445688")
+            self.assertIsInstance(pair, tuple)
+            label, action = pair
+            self.assertIn("isbn", label)
+            code = _WRITE_GATE.apply(str(scratch), [pair])
+            self.assertEqual(code, 0)
+            import sqlite3
+
+            conn = sqlite3.connect(scratch)
+            stored = conn.execute(
+                "SELECT val FROM identifiers WHERE book = 2 AND type = 'isbn'"
+            ).fetchone()
+            conn.close()
+            self.assertEqual(stored[0], "9780140445688")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

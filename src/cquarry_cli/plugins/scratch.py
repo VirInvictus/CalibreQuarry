@@ -43,6 +43,9 @@ CREATE TABLE preferences (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE,
 CREATE TABLE custom_columns (id INTEGER PRIMARY KEY, label TEXT UNIQUE, name TEXT,
     datatype TEXT, mark_for_delete BOOL DEFAULT 0, is_multiple BOOL NOT NULL
     DEFAULT 0);
+CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT);
+CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INT, lang_code
+    INT, UNIQUE (book, lang_code));
 """
 
 

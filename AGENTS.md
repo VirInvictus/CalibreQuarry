@@ -39,6 +39,10 @@ A CLI and TUI toolkit for Calibre users who treat their libraries as curated col
   sys.modules and would bind one plugin's load to another's file (the
   cross-test ENOENT class). Entry modules are single files resolved under
   the plugin dir.
+- **The WriteGate plans label pairs.** plan_identifier returns the
+  `(label, action)` tuple run_write_batch iterates (3.94.1: the gate
+  owns the label because the batch results print it; the bare-closure
+  shape was never consumable and the port's suite caught it).
 - **The scratch library is the verify fixture.** plugins/scratch.py builds
   the canonical schema (the tests/_fixtures shape, kept in step with it and
   documented as such; two seeded books) with no calibre binaries; verify

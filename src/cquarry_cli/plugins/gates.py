@@ -118,8 +118,11 @@ class WriteGate:
     pass, and the NON-NEGOTIABLES refusal are all inherited.
     """
 
-    def plan_identifier(self, book_id: int, id_type: str, value: str) -> object:
-        return writeops.action_set_identifier(book_id, id_type, value)
+    def plan_identifier(self, book_id: int, id_type: str, value: str) -> tuple[str, object]:
+        """The (label, action) pair run_write_batch consumes; the WriteGate
+        owns the label because the gate prints the batch results."""
+        action = writeops.action_set_identifier(book_id, id_type, value)
+        return f"set identifier {id_type}={value} on book {book_id}", action
 
     def apply(self, db_path: str, actions: list, *, quiet: bool = False) -> int:
         return writeops.run_write_batch(db_path, actions, quiet=quiet)

@@ -1,5 +1,23 @@
 # CalibreQuarry Patch Notes
 
+# CalibreQuarry Patch Notes
+
+# 3.94.1 (2026-11-23)
+
+### The WriteGate's plan output carries the label pairs run_write_batch consumes
+
+The extract_isbn plugin port's suite (the cquarry-plugins Phase 1 lane)
+caught it live: `gates.WriteGate.plan_identifier` returned the bare
+`writeops.action_set_identifier` closure, but `run_write_batch` iterates
+`(label, action)` pairs -- the WriteGate's own apply path was never
+consumable end to end until a write-capable plugin actually ran it (the
+host suite's read-only fixture could not reach it). The plan now returns
+the pair with the gate owning the label (the batch results print it), and
+`TestWriteGateApply` pins the shape at the gate: the plan is a tuple whose
+action writes through the scratch library and reads back. Plugin manifests
+that need the fix declare `calibrequarry >= 3.94.1` and refuse against
+this host's predecessor, fail-closed, the version-gate way.
+
 # 3.94.0 (2026-11-23)
 
 ### The plugin system host (Phase 21): git-sourced plugins over a registry

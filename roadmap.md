@@ -1,6 +1,6 @@
 # CalibreQuarry Roadmap
 
-What's done, what's next. Updated as of v3.94.0.
+What's done, what's next. Updated as of v3.94.1.
 
 **Minimized 2026-09-29 (the cquarry precedent).** Phases 1-19, the maintenance
 sweeps, and every audit wave are shipped; their full findings-ledger text is
@@ -473,7 +473,10 @@ rather than merely convenient.
       ?mode=ro CalibreDB, format_paths the engine's format index; the
       WriteGate wraps writeops' action factories and run_write_batch (the
       same seams the CLI's own verbs ride); the network log is declared-only;
-      PermissionError is the host-raised refusal shape.)*
+      PermissionError is the host-raised refusal shape. The correction
+      ride-along (3.94.1): plan_identifier returns the (label, action)
+      pair run_write_batch consumes, the port's live find, the WriteGate
+      owning the label, pinned by TestWriteGateApply.)*
 - [x] **The verify-and-approve harness** (Brandon's ruling verbatim: the engine
       runs a test run, custom-written so the operator tests what they want, and
       asks approval before a writing plugin is added): `cquarry plugin verify
