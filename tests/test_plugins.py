@@ -328,12 +328,19 @@ class TestVerbs(PluginHomeCase):
         main(["plugin", "add", str(EXAMPLE)])
         scratch = build_scratch(self.home / "run-scratch")
         buffer = io.StringIO()
-        with redirect_stdout(buffer):
+        with contextlib.redirect_stdout(buffer):
             code = main(
-                ["plugin", "run", "example_echo", "hello", "--db", str(scratch)]
+                [
+                    "plugin",
+                    "run",
+                    "--library",
+                    str(scratch),
+                    "example_echo",
+                    "hello",
+                ]
             )
         self.assertEqual(code, 0)
-        self.assertIn("2 book(s)", buffer.getvalue())
+        self.assertIn("hello from example_echo: 2 book(s)", buffer.getvalue())
 
     def test_run_bare_lists_the_verbs(self) -> None:
         main(["plugin", "add", str(EXAMPLE)])
